@@ -5,7 +5,8 @@
 module Pokemon.Data.Move.Internal
   ( Move(..),
     loadMoves,
-    showLoadMovesError
+    showLoadMovesError,
+    Target
   ) where
 
 import           Control.Applicative       ((<|>))

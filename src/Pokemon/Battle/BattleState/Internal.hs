@@ -22,3 +22,8 @@ data Player = Player
   { team   :: Vector Pokemon
   , active :: Pokemon
   } deriving (Show)
+
+data PlayerSlot 
+  = Player1Active 
+  | Player2Active
+  deriving (Show, Eq)
