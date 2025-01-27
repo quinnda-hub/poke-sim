@@ -1,12 +1,11 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedStrings     #-}
-{-# LANGUAGE StrictData            #-}
 
 module Pokemon.Data.Move.Internal
   ( Move(..),
     loadMoves,
     showLoadMovesError,
-    Target
+    Target(..)
   ) where
 
 import           Control.Applicative       ((<|>))
@@ -58,7 +57,7 @@ data Move = Move
   , drain                 :: Maybe Drain             -- ^ Drains HP.
   , heal                  :: Maybe Heal              -- ^ Heals user.
   , pseudoWeather         :: Maybe PseudoWeather     -- ^ Sets pseudo-weather.
-  , weather               :: Maybe Weather           -- ^ Sets weather.
+  , weatherEffect         :: Maybe Weather           -- ^ Sets weather.
   , terrain               :: Maybe Terrain           -- ^ Sets terrain.
   , sideCondition         :: Maybe SideCondition     -- ^ Sets side condition.
   , slotCondition         :: Maybe SlotCondition     -- ^ Sets slot condition.

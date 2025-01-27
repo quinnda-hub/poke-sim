@@ -11,11 +11,17 @@ import           System.Random             (StdGen)
 type BattleM a = StateT BattleState (WriterT [Text] IO) a 
 
 data BattleState = BattleState
-  { player1    :: Player
-  , player2    :: Player
-  , turnNumber :: Int
-  , weather    :: Weather
-  , rng        :: StdGen
+  { turnContext :: TurnContext
+  , player1     :: Player
+  , player2     :: Player
+  , turnNumber  :: Int
+  , weather     :: Weather
+  , rng         :: StdGen
+  } deriving (Show)
+
+data TurnContext = TurnContext
+  { attackerIndex :: Int 
+  , defenderIndex :: Int
   } deriving (Show)
 
 data Player = Player
