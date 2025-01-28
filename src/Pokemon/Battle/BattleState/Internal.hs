@@ -20,8 +20,8 @@ data BattleState = BattleState
   } deriving (Show)
 
 data TurnContext = TurnContext
-  { attackerIndex :: Int 
-  , defenderIndex :: Int
+  { attacker :: PlayerSlot
+  , defender :: PlayerSlot
   } deriving (Show)
 
 data Player = Player
@@ -30,6 +30,6 @@ data Player = Player
   } deriving (Show)
 
 data PlayerSlot 
-  = Player1Active 
-  | Player2Active
+  = Player1
+  | Player2
   deriving (Show, Eq)

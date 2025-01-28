@@ -9,10 +9,10 @@ import           Control.Monad.Trans.State (modify, get)
 import           Pokemon.Battle.BattleState.Internal
   ( BattleM
   , BattleState(..)
-  , PlayerSlot (Player1Active, Player2Active)
-  , TurnContext
-  , attackerIndex
-  , defenderIndex
+  , PlayerSlot (..)
+  , TurnContext(..)
+  , attacker
+  , defender, Player, active
   )
 import           Pokemon.Data.Move.Internal
   ( Move()
@@ -22,7 +22,7 @@ import           Pokemon.Data.Move.Internal
   , weatherEffect
   )
 import           Pokemon.Mechanics.Weather (Weather)
-
+import Pokemon.Battle.Pokemon (Pokemon(hp))
 
 --------------------------------------------------------------------------------
 -- Effect Steps
@@ -95,17 +95,9 @@ resolveTargets :: Target -> TurnContext -> [PlayerSlot]
 resolveTargets t tc =
   case t of
     -- For single battles, 'Self' typically refers to the attacker.
-    Self ->
-      case tc.attackerIndex of
-        1 -> [Player1Active]
-        2 -> [Player2Active]
-        _ -> []
+    Self -> [tc.attacker]
     -- For single battles, 'Normal' typically refers to the defender.
-    Normal ->
-      case tc.defenderIndex of
-        1 -> [Player1Active]
-        2 -> [Player2Active]
-        _ -> []
+    Normal -> [tc.defender]
     -- TODO: Handle multi-target, allies, etc.
     _ -> []
 
@@ -117,16 +109,12 @@ resolveTargets t tc =
 -- | Applies damage to the specified 'PlayerSlot'.
 --   For now, it's just a placeholder. Extend this to subtract HP, etc.
 applyDamage :: PlayerSlot -> Int -> BattleState -> BattleState
-applyDamage = undefined
-  -- Example:
-  -- applyDamage Player1Active dmg bs = bs{ player1 = applyDamageToActive dmg bs.player1 }
-  -- applyDamage Player2Active dmg bs = bs{ player2 = applyDamageToActive dmg bs.player2 }
+applyDamage Player1 dmg bs = bs { player1 = applyDamageToActive dmg bs.player1 }
+applyDamage Player2 dmg bs = bs{ player2 = applyDamageToActive dmg bs.player2 }
 
-{-
--- Hypothetical "applyDamageToActive" if you had HP in your Player record:
 applyDamageToActive :: Int -> Player -> Player
 applyDamageToActive dmg p =
   let oldHP = p.active.hp
       newHP = max 0 (oldHP - dmg)
   in p{ active = p.active{ hp = newHP } }
--}
+
