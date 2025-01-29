@@ -10,6 +10,7 @@ module Pokemon.Battle.Pokemon.Internal
   , Stat(..)
   , IVs
   , EVs
+  , isFainted
   , mkPokemon
   , mkIVs
   , mkEVs
@@ -259,3 +260,9 @@ mkIVs hp atk def spA spD spe = validateIVs (IVs hp atk def spA spD spe)
 -- | Smart constructor for EVs.
 mkEVs :: Int -> Int -> Int -> Int -> Int -> Int -> Maybe EVs
 mkEVs hp atk def spA spD spe = validateEVs (EVs hp atk def spA spD spe)
+
+-- | Check if Pokemon has fainted. 
+isFainted :: Pokemon -> Bool 
+isFainted poke 
+    | poke.hp <= 0 = True 
+    | otherwise    = False   
