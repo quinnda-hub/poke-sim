@@ -4,25 +4,17 @@
 -- | Internal module for Move Effect handling and application.
 module Pokemon.Battle.MoveEffect.Internal where
 
-import           Control.Monad            (forM_)
-import           Control.Monad.Trans.State (modify, get)
-import           Pokemon.Battle.BattleState.Internal
-  ( BattleM
-  , BattleState(..)
-  , PlayerSlot (..)
-  , TurnContext(..)
-  , attacker
-  , defender, Player, active
-  )
-import           Pokemon.Data.Move.Internal
-  ( Move()
-  , basePower
-  , Target(..)
-  , target
-  , weatherEffect
-  )
-import           Pokemon.Mechanics.Weather (Weather)
-import Pokemon.Battle.Pokemon (Pokemon(hp))
+import           Control.Monad                       (forM_)
+import           Control.Monad.Trans.State           (get, modify)
+import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
+                                                      Player, PlayerSlot (..),
+                                                      TurnContext (..), active,
+                                                      attacker, defender)
+import           Pokemon.Battle.Pokemon              (Pokemon (hp))
+import           Pokemon.Data.Move.Internal          (Move, Target (..),
+                                                      basePower, target,
+                                                      weatherEffect)
+import           Pokemon.Mechanics.Weather           (Weather)
 
 --------------------------------------------------------------------------------
 -- Effect Steps
@@ -95,11 +87,11 @@ resolveTargets :: Target -> TurnContext -> [PlayerSlot]
 resolveTargets t tc =
   case t of
     -- For single battles, 'Self' typically refers to the attacker.
-    Self -> [tc.attacker]
+    Self   -> [tc.attacker]
     -- For single battles, 'Normal' typically refers to the defender.
     Normal -> [tc.defender]
     -- TODO: Handle multi-target, allies, etc.
-    _ -> []
+    _      -> []
 
 
 --------------------------------------------------------------------------------
