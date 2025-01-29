@@ -65,6 +65,7 @@ library
                       Pokemon.Battle.Pokemon.Internal,
                       Pokemon.Battle.Pokemon,
                       Pokemon.Battle.BattleState.Internal,
+                      Pokemon.Battle.Simulation.Internal,
                       Pokemon.Data.Move.Internal,
                       Pokemon.Battle.MoveEffect.Internal,
                       Pokemon.Data.Move,

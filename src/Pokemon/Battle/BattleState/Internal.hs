@@ -4,7 +4,7 @@ import           Control.Monad.Trans.State (StateT)
 import           Control.Monad.Trans.Writer (WriterT)
 import           Data.Vector               (Vector)
 import           Data.Text (Text)
-import           Pokemon.Battle.Pokemon    (Pokemon)
+import           Pokemon.Battle.Pokemon.Internal ( Pokemon )
 import           Pokemon.Mechanics.Weather (Weather)
 import           System.Random             (StdGen)
 

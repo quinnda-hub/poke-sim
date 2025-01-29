@@ -117,4 +117,3 @@ applyDamageToActive dmg p =
   let oldHP = p.active.hp
       newHP = max 0 (oldHP - dmg)
   in p{ active = p.active{ hp = newHP } }
-
