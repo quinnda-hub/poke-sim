@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE StrictData        #-}
 
-module Pokemon.Mechanics.Weather (Weather,
+module Pokemon.Mechanics.Weather (Weather(..),
                                   PseudoWeather) where
 
 import           Data.Aeson (FromJSON (parseJSON), withText)

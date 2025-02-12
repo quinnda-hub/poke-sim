@@ -1,7 +1,7 @@
 module Main where
 
-import qualified MyLib (someDemo)
+import qualified MyLib (someDemoBattle)
 
 main :: IO ()
 main = do
-  MyLib.someDemo
+  MyLib.someDemoBattle

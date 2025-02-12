@@ -1,17 +1,39 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# OPTIONS_GHC -Wno-name-shadowing #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE OverloadedStrings     #-}
 
-module MyLib (someFunc, someFoo, someDemo) where
+module MyLib (someFunc, someFoo, someDemoBattle) where
 
-import qualified Data.Map.Strict                 as Map
-import qualified Data.Text                       as T
-import           System.IO                       (hPutStrLn, stderr)
+import           Control.Monad.Trans.State           (evalStateT)
+import           Control.Monad.Trans.Writer          (runWriterT)
+import qualified Data.Map.Strict                     as Map
+import qualified Data.Text                           as T
+import           System.IO                           (hPutStrLn, stderr)
+import           System.Random                       (newStdGen)
 
-import           Pokemon.Battle.Pokemon.Internal (MoveSet (..), Nature (..),
-                                                  mkEVs, mkIVs, mkPokemon)
-import           Pokemon.Data.Move.Internal      (loadMoves, showLoadMovesError)
-import           Pokemon.Data.Pokedex.Internal   (loadPokedex,
-                                                  showLoadPokedexError)
+-- Import our Pokémon construction functions.
+import           Pokemon.Battle.Pokemon.Internal     (MoveSet (..), Nature (..),
+                                                      mkEVs, mkIVs, mkPokemon)
+
+import           Pokemon.Data.Move.Internal          (loadMoves,
+                                                      showLoadMovesError)
+
+import           Pokemon.Data.Pokedex.Internal       (loadPokedex,
+                                                      showLoadPokedexError)
+
+-- Battle state types and simulation
+import           Pokemon.Battle.BattleState.Internal (BattleState (..),
+                                                      Player (..),
+                                                      PlayerSlot (..),
+                                                      TurnContext (..))
+
+import           Pokemon.Battle.Simulation.Internal  (simulateBattle)
+
+import           Pokemon.Mechanics.Weather           (Weather (..))
+  -- Assume simulateBattle :: BattleM () is defined to run a simple battle loop.
+
+--------------------------------------------------------------------------------
+-- someFunc and someFoo (existing demos)
+--------------------------------------------------------------------------------
 
 someFunc :: IO ()
 someFunc = do
@@ -23,7 +45,7 @@ someFunc = do
       let movesMapLower = Map.mapKeys T.toLower movesMap
       case Map.lookup "lowkick" movesMapLower of
         Just move -> print move
-        Nothing   -> putStrLn "Move 'closecombat' not found."
+        Nothing   -> putStrLn "Move 'lowkick' not found."
 
 someFoo :: IO ()
 someFoo = do
@@ -31,68 +53,113 @@ someFoo = do
   result <- loadPokedex "data/pokedex.json"
   case result of
     Left err -> hPutStrLn stderr $ showLoadPokedexError err
-    Right movesMap -> do
-      let movesMapLower = Map.mapKeys T.toLower movesMap
-      case Map.lookup "ogerpon" movesMapLower of
-        Just move -> print move
-        Nothing   -> putStrLn "Move 'closecombat' not found."
+    Right pokedexMap -> do
+      let pokedexMapLower = Map.mapKeys T.toLower pokedexMap
+      case Map.lookup "ogerpon" pokedexMapLower of
+        Just pmon -> print pmon
+        Nothing   -> putStrLn "Pokemon 'ogerpon' not found."
 
-someDemo :: IO ()
-someDemo = do
-  putStrLn "Reading moves.json..."
+--------------------------------------------------------------------------------
+-- someDemoBattle: A Demo 1v1 Battle Between Fuecoco and Sprigatito
+--------------------------------------------------------------------------------
+
+-- | Simulates a battle between a level 5 Fuecoco and a level 5 Sprigatito.
+--   Both Pokémon have perfect IVs (31 in all stats) and no EVs.
+someDemoBattle :: IO ()
+someDemoBattle = do
+  putStrLn "Loading moves.json..."
   movesResult <- loadMoves "data/moves.json"
   case movesResult of
     Left err -> hPutStrLn stderr $ "Error loading moves: " <> showLoadMovesError err
     Right movesMapRaw -> do
-      let movesMapLower = Map.mapKeys T.toLower movesMapRaw
+      let movesMap = Map.mapKeys T.toLower movesMapRaw
 
-      putStrLn "Reading pokedex.json..."
+      putStrLn "Loading pokedex.json..."
       pokedexResult <- loadPokedex "data/pokedex.json"
       case pokedexResult of
         Left err -> hPutStrLn stderr $ "Error loading pokedex: " <> showLoadPokedexError err
         Right pokedexMapRaw -> do
-          let pokedexMapLower = Map.mapKeys T.toLower pokedexMapRaw
+          let pokedexMap = Map.mapKeys T.toLower pokedexMapRaw
 
-          -- We'll try to construct a level 100 Ogerpon with four arbitrary moves.
-          let pokemonName = "garchomp"
-              desiredMoves = ["earthquake", "stoneedge", "scaleshot", "swordsdance"]
+          -- Lookup Fuecoco and Sprigatito in the pokedex.
+          case (Map.lookup "fuecoco" pokedexMap, Map.lookup "sprigatito" pokedexMap) of
+            (Nothing, _) ->
+              putStrLn "Fuecoco not found in pokedex."
+            (_, Nothing) ->
+              putStrLn "Sprigatito not found in pokedex."
+            (Just fuecocoData, Just sprigatitoData) -> do
 
-          case Map.lookup pokemonName pokedexMapLower of
-            Nothing -> putStrLn $ "Pokemon '" <> T.unpack pokemonName <> "' not found."
-            Just pmon -> do
-              -- Attempt to find the four moves we want:
-              maybeMoves <- mapM (\mname -> pure (mname, Map.lookup mname movesMapLower)) desiredMoves
+              -- Define desired moves for each Pokémon.
+              let fuecocoMovesDesired = ["ember", "tackle", "smokescreen", "bite"]
+                  sprigatitoMovesDesired = ["tackle", "growl", "leafage", "quickattack"]
 
-              let missingMoves = [mn | (mn, Nothing) <- maybeMoves]
-              if not (null missingMoves)
-                then putStrLn $ "Some moves not found: " <> show missingMoves
-                else case [m | (_, Just m) <- maybeMoves] of
-                  [move1, move2, move3, move4] -> do
-                    -- Arbitrary IVs: max IVs
-                    let ivs = case mkIVs 31 31 31 31 31 31 of
-                          Just ivs' -> ivs'
-                          Nothing   -> error "Invalid IVs configuration."
+              -- Lookup moves for Fuecoco.
+              fuecocoMaybeMoves <- mapM (\mname -> pure (mname, Map.lookup mname movesMap))
+                                          fuecocoMovesDesired
+              let missingFuecoco = [ mn | (mn, Nothing) <- fuecocoMaybeMoves ]
+              if not (null missingFuecoco)
+                then putStrLn $ "Missing moves for Fuecoco: " <> show missingFuecoco
+                else do
+                  let [fuecocoMove1, fuecocoMove2, fuecocoMove3, fuecocoMove4] =
+                        [ m | (_, Just m) <- fuecocoMaybeMoves ]
+                      fuecocoMoveSet = MoveSet
+                        { move1 = fuecocoMove1
+                        , move2 = Just fuecocoMove2
+                        , move3 = Just fuecocoMove3
+                        , move4 = Just fuecocoMove4
+                        }
 
-                    -- Arbitrary EVs: a common competitive spread
-                    let evs = case mkEVs 252 0 252 0 4 0 of
-                          Just evs' -> evs'
-                          Nothing   -> error "Invalid EVs configuration."
+                  -- Lookup moves for Sprigatito.
+                  sprigatitoMaybeMoves <- mapM (\mname -> pure (mname, Map.lookup mname movesMap))
+                                                 sprigatitoMovesDesired
+                  let missingSprigatito = [ mn | (mn, Nothing) <- sprigatitoMaybeMoves ]
+                  if not (null missingSprigatito)
+                    then putStrLn $ "Missing moves for Sprigatito: " <> show missingSprigatito
+                    else do
+                      let [sprigatitoMove1, sprigatitoMove2, sprigatitoMove3, sprigatitoMove4] =
+                            [ m | (_, Just m) <- sprigatitoMaybeMoves ]
+                          sprigatitoMoveSet = MoveSet
+                            { move1 = sprigatitoMove1
+                            , move2 = Just sprigatitoMove2
+                            , move3 = Just sprigatitoMove3
+                            , move4 = Just sprigatitoMove4
+                            }
 
-                    -- Arbitrary nature: Jolly
-                    let chosenNature = Bold
-                    -- Level 100
-                    let lvl = 100
+                      -- Perfect IVs (all 31) and no EVs.
+                      let ivs = case mkIVs 31 31 31 31 31 31 of
+                                  Just ivs' -> ivs'
+                                  Nothing   -> error "Invalid IVs configuration."
+                          evs = case mkEVs 0 0 0 0 0 0 of
+                                  Just evs' -> evs'
+                                  Nothing   -> error "Invalid EVs configuration."
 
-                    let moveset = MoveSet
-                          { move1 = move1
-                          , move2 = Just move2
-                          , move3 = Just move3
-                          , move4 = Just move4
-                          }
+                      -- Choose a nature (for demo, we use Bold).
+                      let chosenNature = Bold
 
-                    -- Construct the Pokemon
-                    let pokemon = mkPokemon pmon lvl moveset chosenNature ivs evs
+                      -- Level 5 for both.
+                      let lvl = 5
 
-                    putStrLn "Constructed the following Pokemon:"
-                    print pokemon
-                  _ -> putStrLn "Unexpected error: move lookup resulted in an incomplete set of moves."
+                      -- Construct the Pokémon.
+                      let fuecocoPokemon = mkPokemon fuecocoData lvl fuecocoMoveSet chosenNature ivs evs
+                          sprigatitoPokemon = mkPokemon sprigatitoData lvl sprigatitoMoveSet chosenNature ivs evs
+
+                      putStrLn "Constructed Pokémon:"
+                      putStrLn "Fuecoco:"
+                      print fuecocoPokemon
+                      putStrLn "Sprigatito:"
+                      print sprigatitoPokemon
+
+                      -- Construct an initial BattleState.
+                      rng0 <- newStdGen
+                      let initBattleState = BattleState
+                            { turnContext = TurnContext { attacker = Player1, defender = Player2 }
+                            , player1     = Player { team = mempty, active = fuecocoPokemon }
+                            , player2     = Player { team = mempty, active = sprigatitoPokemon }
+                            , turnNumber  = 1
+                            , weather     = Clear
+                            , rng         = rng0
+                            }
+
+                      putStrLn "Starting battle simulation..."
+                      ((), finalLogs) <- runWriterT (evalStateT (simulateBattle initBattleState) initBattleState)
+                      mapM_ (putStrLn . T.unpack) finalLogs
