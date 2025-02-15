@@ -2,7 +2,8 @@
 {-# LANGUAGE OverloadedRecordDot   #-}
 
 -- | Internal module for Move Effect handling and application.
-module Pokemon.Battle.MoveEffect.Internal where
+module Pokemon.Battle.MoveEffect.Internal (applySingleStep, 
+                                           gatherEffects) where
 
 import           Control.Monad                       (forM_)
 import           Control.Monad.Trans.State           (get, modify)

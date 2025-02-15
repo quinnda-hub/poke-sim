@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedRecordDot   #-}
 {-# LANGUAGE OverloadedStrings     #-}
 
-module Pokemon.Battle.Simulation.Internal where
+module Pokemon.Battle.Simulation.Internal (simulateBattle) where
 
 import           Control.Monad.Trans.State           (get, put)
 import           Control.Monad.Trans.Writer          (tell)

@@ -1,4 +1,8 @@
-module Pokemon.Battle.BattleState.Internal where
+module Pokemon.Battle.BattleState.Internal (BattleM,
+                                           BattleState(..),
+                                           Player(..),
+                                           PlayerSlot(..),
+                                           TurnContext(..)) where
 
 import           Control.Monad.Trans.State       (StateT)
 import           Control.Monad.Trans.Writer      (WriterT)
