@@ -48,7 +48,7 @@ gatherEffects mv =
 gatherDamage :: Move -> Maybe EffectStep
 gatherDamage mv =
   case basePower mv of
-    Just bp -> Just (DoDamage (pure bp)) -- for now, just a constant action
+    Just bp -> Just (DoDamage (pure 5)) -- for now, just a constant action
     Nothing -> Nothing
 
 -- | If the 'Move' sets weather, produce a 'SetWeather' step.

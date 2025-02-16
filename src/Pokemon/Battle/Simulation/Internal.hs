@@ -26,35 +26,33 @@ simulateBattle :: BattleState -> BattleM ()
 simulateBattle bs0 = do
   put bs0
   loop
-
   where
     loop :: BattleM ()
     loop = do
       bs <- get
-
-      lift $ tell [ T.concat [ "=== Turn ", T.pack (show bs.turnNumber), " ==="] ]
-
+      lift $ tell [ T.concat [ "=== Turn ", T.pack (show bs.turnNumber), " ===" ] ]
+      
       if isFainted bs.player1.active
-        then lift $ tell ["Player 1's Pokemon is fainted! Player 2 wins!"]
-        else if isFainted bs.player2.active
-          then lift $ tell ["Player 2's Pokemon is fainted! Player 1 wins!"]
-          else do
-            let actions = resolveActions bs 
-            mapM_ applyAction actions 
+         then lift $ tell ["Player 1's Pokémon is fainted! Player 2 wins!"]
+         else if isFainted bs.player2.active
+           then lift $ tell ["Player 2's Pokémon is fainted! Player 1 wins!"]
+           else do
+             -- Resolve both actions for this turn.
+             let actions = resolveActions bs
+             mapM_ applyAction actions
 
-            bsAfter <- get
-            let defSlot = bsAfter.turnContext.defender
-                fainted = case defSlot of
-                  Player1 -> isFainted bsAfter.player1.active
-                  Player2 -> isFainted bsAfter.player2.active
-            if fainted
-              then do
-                lift $ tell ["The defending Pokemon fainted! Battle over!"]
-                pure ()
-              else do
-                let bsNext = incrementTurn (swapAttackerDefender bsAfter)
-                put bsNext
-                loop
+             bsAfter <- get
+             if isFainted (getDefenderPokemon bsAfter)
+               then lift $ tell ["A defending Pokémon fainted! Battle over!"]
+               else do
+                 put $ incrementTurn bsAfter
+                 loop
+
+getDefenderPokemon :: BattleState -> Pokemon
+getDefenderPokemon bs =
+  case bs.turnContext.defender of
+    Player1 -> bs.player1.active
+    Player2-> bs.player2.active                 
 
 data Action = Action 
   { actor :: PlayerSlot -- ^ The player attached to the attacking Pokemon. 
@@ -116,15 +114,8 @@ applyMove mv = do
     let steps = gatherEffects mv
     mapM_ (applySingleStep mv) steps
 
--- | Swaps the turnContext attacker/defender in a 1v1 scenario.
-swapAttackerDefender :: BattleState -> BattleState
-swapAttackerDefender bs =
-    let oldAtt = bs.turnContext.attacker
-        oldDef = bs.turnContext.defender
-        newTC  = bs.turnContext{ attacker = oldDef, defender = oldAtt }
-    in bs{ turnContext = newTC }
-
 -- | Increments the turn counter by 1.
 incrementTurn :: BattleState -> BattleState
 incrementTurn bs =
   bs{ turnNumber = bs.turnNumber + 1}
+  
