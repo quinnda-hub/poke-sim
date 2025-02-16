@@ -18,7 +18,8 @@ import           Pokemon.Battle.MoveEffect.Internal  (applySingleStep,
                                                       gatherEffects)
 import           Pokemon.Battle.Pokemon.Internal     (MoveSet (..),
                                                       Pokemon (..), isFainted)
-import           Pokemon.Data.Move.Internal          (Move (name))
+import           Pokemon.Data.Move.Internal          (Move (name), priority)
+import Data.List (sortBy)
 
 -- | Simulates a simple 1v1 matchup.
 simulateBattle :: BattleState -> BattleM ()
@@ -38,11 +39,8 @@ simulateBattle bs0 = do
         else if isFainted bs.player2.active
           then lift $ tell ["Player 2's Pokemon is fainted! Player 1 wins!"]
           else do
-            let attSlot = bs.turnContext.attacker
-            let attackerMove = chooseMove attSlot bs
-
-            lift $ tell [ T.concat ["Attacker uses ", attackerMove.name, "!"] ]
-            applyMove attackerMove
+            let actions = resolveActions bs 
+            mapM_ applyAction actions 
 
             bsAfter <- get
             let defSlot = bsAfter.turnContext.defender
@@ -57,6 +55,60 @@ simulateBattle bs0 = do
                 let bsNext = incrementTurn (swapAttackerDefender bsAfter)
                 put bsNext
                 loop
+
+data Action = Action 
+  { actor :: PlayerSlot -- ^ The player attached to the attacking Pokemon. 
+  , move  :: Move }     -- ^ The move chosen by the acting Pokemon. 
+
+-- | Chooses an action for a given Pokemon
+--   (Always choose the first move for now.) 
+chooseAction :: PlayerSlot -> BattleState -> Action 
+chooseAction slot bs = 
+  let mv = case slot of 
+             Player1 -> bs.player1.active.moves.move1 
+             Player2 -> bs.player2.active.moves.move1 
+    in Action { actor = slot, move = mv }
+
+-- | Orders the actions of both Pokemon based on move priority and speed. 
+resolveActions :: BattleState -> [Action] 
+resolveActions bs = 
+  let action1 = chooseAction bs.turnContext.attacker bs 
+      action2 = chooseAction bs.turnContext.defender bs 
+      actions = [action1, action2]
+      in 
+        sortBy compareActions actions 
+        where 
+          compareActions :: Action -> Action -> Ordering
+          compareActions (Action { move = m1, actor = a1 })
+                         (Action { move = m2, actor = a2 }) =
+            let p1 = m1.priority
+                p2 = m2.priority
+                in if p1 /= p2 then compare (negate p1) (negate p2) 
+                else
+                  let spd1 = case a1 of
+                               Player1 -> bs.player1.active.spe
+                               Player2 -> bs.player2.active.spe
+                      spd2 = case a2 of
+                               Player1 -> bs.player1.active.spe
+                               Player2 -> bs.player2.active.spe
+             in compare (negate spd1) (negate spd2)
+
+-- | Applies a single action. 
+applyAction :: Action -> BattleM () 
+applyAction act = do 
+  bs <- get 
+  -- Set the defender based on who is attacking. 
+  let newTC = case act.actor of 
+                Player1 -> bs.turnContext { defender = Player2 }
+                Player2 -> bs.turnContext { defender = Player1 }
+  put bs { turnContext = newTC }
+  lift $ tell [ T.concat ["[Action] ", act.move.name, " used by ", showSlot act.actor ] ]
+  applyMove act.move 
+
+-- | Helper: converts a PlayerSlot to displayable text.
+showSlot :: PlayerSlot -> T.Text
+showSlot Player1 = "Player 1"
+showSlot Player2 = "Player 2"  
 
 -- | Apply the entire move (all effect steps) from the attacker to the defender.
 applyMove :: Move -> BattleM ()
@@ -76,10 +128,3 @@ swapAttackerDefender bs =
 incrementTurn :: BattleState -> BattleState
 incrementTurn bs =
   bs{ turnNumber = bs.turnNumber + 1}
-
--- | Simply choose the first move a Pokemon has.
-chooseMove :: PlayerSlot -> BattleState -> Move
-chooseMove Player1 bs =
-  bs.player1.active.moves.move1
-chooseMove Player2 bs =
-  bs.player2.active.moves.move1
