@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedRecordDot   #-}
 
 -- | Internal module for Move Effect handling and application.
-module Pokemon.Battle.MoveEffect.Internal (applySingleStep, 
+module Pokemon.Battle.MoveEffect.Internal (applySingleStep,
                                            gatherEffects) where
 
 import           Control.Monad                       (forM_)
@@ -11,11 +11,13 @@ import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
                                                       Player, PlayerSlot (..),
                                                       TurnContext (..), active,
                                                       attacker, defender)
-import           Pokemon.Battle.Pokemon              (Pokemon (hp))
+import           Pokemon.Battle.Damage.Internal      (calculateDamage)
+import           Pokemon.Battle.Pokemon.Internal     (Pokemon (hp))
 import           Pokemon.Data.Move.Internal          (Move, Target (..),
                                                       basePower, target,
                                                       weatherEffect)
 import           Pokemon.Mechanics.Weather           (Weather)
+
 
 --------------------------------------------------------------------------------
 -- Effect Steps
@@ -24,8 +26,8 @@ import           Pokemon.Mechanics.Weather           (Weather)
 -- | Represents a single step (or action) to be applied during move usage.
 --   For example, 'DoDamage' or 'SetWeather'.
 data EffectStep
-    = DoDamage (BattleM Int) -- ^ A monadic action that computes damage.
-    | SetWeather Weather     -- ^ Change the battle's weather.
+    = DoDamage            -- ^ A monadic action that computes damage.
+    | SetWeather Weather  -- ^ Change the battle's weather.
 
 
 --------------------------------------------------------------------------------
@@ -48,7 +50,7 @@ gatherEffects mv =
 gatherDamage :: Move -> Maybe EffectStep
 gatherDamage mv =
   case basePower mv of
-    Just bp -> Just (DoDamage (pure bp)) -- for now, just a constant action
+    Just _ -> Just DoDamage
     Nothing -> Nothing
 
 -- | If the 'Move' sets weather, produce a 'SetWeather' step.
@@ -58,7 +60,6 @@ gatherWeather mv =
     Just w  -> Just (SetWeather w)
     Nothing -> Nothing
 
-
 --------------------------------------------------------------------------------
 -- Applying Effects
 --------------------------------------------------------------------------------
@@ -67,9 +68,17 @@ gatherWeather mv =
 --   This function may read from the 'BattleState' (for example, to see
 --   which player is targeted) and then modify the state accordingly.
 applySingleStep :: Move -> EffectStep -> BattleM ()
-applySingleStep mv (DoDamage dmgAction) = do
-  dmg <- dmgAction
-  bs  <- get
+applySingleStep mv DoDamage = do
+  bs <- get
+  -- Retrieve the attacker and defender based on the current turn context.
+  let attackerPokemon = case bs.turnContext.attacker of
+                          Player1 -> bs.player1.active
+                          Player2 -> bs.player2.active
+      defenderPokemon = case bs.turnContext.defender of
+                          Player1 -> bs.player1.active
+                          Player2 -> bs.player2.active
+
+  dmg <- calculateDamage mv attackerPokemon defenderPokemon
   let ts      = mv.target
       targets = resolveTargets ts bs.turnContext
   forM_ targets $ \slot ->
