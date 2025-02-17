@@ -33,17 +33,18 @@ simulateBattle bs0 = do
       lift $ tell [ T.concat [ "=== Turn ", T.pack (show bs.turnNumber), " ===" ] ]
 
       if isFainted bs.player1.active
-         then lift $ tell ["Player 1's Pokémon is fainted! Player 2 wins!"]
+         then lift $ tell [ T.concat [ actorName bs Player1, " is fainted! Player 2 wins!"]]
          else if isFainted bs.player2.active
-           then lift $ tell ["Player 2's Pokémon is fainted! Player 1 wins!"]
+           then lift $ tell [ T.concat [actorName bs Player2, " is fainted! Player 1 wins!"]]
            else do
              -- Resolve both actions for this turn.
              let actions = resolveActions bs
              mapM_ applyAction actions
 
              bsAfter <- get
-             if isFainted (getDefenderPokemon bsAfter)
-               then lift $ tell ["A defending Pokémon fainted! Battle over!"]
+             let defenderPokemon = getDefenderPokemon bsAfter 
+             if isFainted defenderPokemon
+               then lift $ tell [ T.concat [ defenderPokemon.name, " fainted! Battle over!"]]
                else do
                  put $ incrementTurn bsAfter
                  loop
@@ -100,13 +101,13 @@ applyAction act = do
                 Player1 -> bs.turnContext { defender = Player2 }
                 Player2 -> bs.turnContext { defender = Player1 }
   put bs { turnContext = newTC }
-  lift $ tell [ T.concat ["[Action] ", act.move.name, " used by ", showSlot act.actor ] ]
+  lift $ tell [ T.concat ["[Action] ", act.move.name, " used by ", actorName bs act.actor] ]
   applyMove act.move
 
--- | Helper: converts a PlayerSlot to displayable text.
-showSlot :: PlayerSlot -> T.Text
-showSlot Player1 = "Player 1"
-showSlot Player2 = "Player 2"
+-- | Retrieves the active Pokémon's name for a given PlayerSlot.
+actorName :: BattleState -> PlayerSlot -> T.Text
+actorName bs Player1 = bs.player1.active.name
+actorName bs Player2 = bs.player2.active.name
 
 -- | Apply the entire move (all effect steps) from the attacker to the defender.
 applyMove :: Move -> BattleM ()

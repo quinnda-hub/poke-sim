@@ -1,9 +1,11 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedRecordDot   #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 -- | Internal module for Move Effect handling and application.
 module Pokemon.Battle.MoveEffect.Internal (applySingleStep,
                                            gatherEffects) where
+import           Control.Monad.Trans.Class           (MonadTrans (lift))
 
 import           Control.Monad                       (forM_)
 import           Control.Monad.Trans.State           (get, modify)
@@ -12,11 +14,13 @@ import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
                                                       TurnContext (..), active,
                                                       attacker, defender)
 import           Pokemon.Battle.Damage.Internal      (calculateDamage)
-import           Pokemon.Battle.Pokemon.Internal     (Pokemon (hp))
 import           Pokemon.Data.Move.Internal          (Move, Target (..),
                                                       basePower, target,
                                                       weatherEffect)
 import           Pokemon.Mechanics.Weather           (Weather)
+import qualified Data.Text as T
+import Control.Monad.Trans.Writer (tell)
+import Pokemon.Battle.Pokemon (Pokemon(..))
 
 
 --------------------------------------------------------------------------------
@@ -81,9 +85,13 @@ applySingleStep mv DoDamage = do
   dmg <- calculateDamage mv attackerPokemon defenderPokemon
   let ts      = mv.target
       targets = resolveTargets ts bs.turnContext
-  forM_ targets $ \slot ->
+  forM_ targets $ \slot -> do 
     modify (applyDamage slot dmg)
-
+    let targetName = case slot of 
+                       Player1 -> bs.player1.active.name 
+                       Player2 -> bs.player2.active.name 
+    lift $ tell [ T.concat ["[Damage] ", T.pack (show dmg), " damage dealt to ", targetName] ]
+    
 applySingleStep _ (SetWeather w) =
   modify $ \bs -> bs { weather = w }
 
