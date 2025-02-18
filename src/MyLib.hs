@@ -134,7 +134,7 @@ someDemoBattle = do
                                   Nothing   -> error "Invalid EVs configuration."
 
                       -- Choose a nature (for demo, we use Bold).
-                      let chosenNature = Bold
+                      let chosenNature = Hardy
 
                       -- Level 5 for both.
                       let lvl = 5

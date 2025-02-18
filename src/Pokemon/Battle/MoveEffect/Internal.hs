@@ -7,30 +7,29 @@ module Pokemon.Battle.MoveEffect.Internal
   ( EffectStep(..)
   , gatherEffects
   , applySingleStep
-  , applyMoveAction 
+  , applyMoveAction
   , resolveTargets
   , applyDamage
   , applyDamageToActive
   , applyMoveWithContext
   ) where
 
-import           Control.Monad            (forM_)
-import           Control.Monad.Trans.Class (lift)
-import           Control.Monad.Trans.State (get, modify)
-import qualified Data.Text                as T
+import           Control.Monad                       (forM_)
+import           Control.Monad.Trans.Class           (lift)
+import           Control.Monad.Trans.State           (get, modify)
+import qualified Data.Text                           as T
 
-import           Pokemon.Battle.BattleState.Internal
-  ( BattleM, BattleState (..), Player (..)
-  , PlayerSlot (Player1, Player2)
-  , TurnContext (..)
-  )
-import           Pokemon.Battle.Pokemon.Internal
-  ( Pokemon (..) )
-import           Pokemon.Data.Move.Internal
-  ( Move (..), Target (..), basePower, target, weatherEffect )
-import           Pokemon.Battle.Damage.Internal (calculateDamage)
-import           Pokemon.Mechanics.Weather (Weather)
-import           Control.Monad.Trans.Writer (tell)
+import           Control.Monad.Trans.Writer          (tell)
+import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
+                                                      Player (..),
+                                                      PlayerSlot (Player1, Player2),
+                                                      TurnContext (..))
+import           Pokemon.Battle.Damage.Internal      (calculateDamage)
+import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..))
+import           Pokemon.Data.Move.Internal          (Move (..), Target (..),
+                                                      basePower, target,
+                                                      weatherEffect)
+import           Pokemon.Mechanics.Weather           (Weather)
 
 --------------------------------------------------------------------------------
 -- Effect Steps
@@ -80,11 +79,11 @@ applySingleStep mv DoDamage = do
   dmg <- calculateDamage mv attackerPokemon defenderPokemon
   let ts      = mv.target
       targets = resolveTargets ts bs.turnContext
-  forM_ targets $ \slot -> do 
+  forM_ targets $ \slot -> do
     modify (applyDamage slot dmg)
-    let targetName = case slot of 
-                       Player1 -> bs.player1.active.name 
-                       Player2 -> bs.player2.active.name 
+    let targetName = case slot of
+                       Player1 -> bs.player1.active.name
+                       Player2 -> bs.player2.active.name
     lift $ tell [ T.concat ["[Damage] ", T.pack (show dmg),
                              " damage dealt to ", targetName] ]
 applySingleStep _ (SetWeather w) =

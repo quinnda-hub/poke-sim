@@ -2,7 +2,7 @@
 {-# LANGUAGE DeriveGeneric  #-}
 {-# LANGUAGE StrictData     #-}
 
-module Pokemon.Mechanics.PType (PType) where
+module Pokemon.Mechanics.PType (PType(..)) where
 
 import           Data.Aeson   (FromJSON)
 import           GHC.Generics (Generic)
