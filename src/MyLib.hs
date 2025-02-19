@@ -29,6 +29,7 @@ import           Pokemon.Battle.BattleState.Internal (BattleState (..),
 import           Pokemon.Battle.Simulation.Internal  (simulateBattle)
 
 import           Pokemon.Mechanics.Weather           (Weather (..))
+import Pokemon.Pretty (printPokemon)
   -- Assume simulateBattle :: BattleM () is defined to run a simple battle loop.
 
 --------------------------------------------------------------------------------
@@ -145,9 +146,9 @@ someDemoBattle = do
 
                       putStrLn "Constructed Pokémon:"
                       putStrLn "Fuecoco:"
-                      print fuecocoPokemon
+                      printPokemon fuecocoPokemon
                       putStrLn "Sprigatito:"
-                      print sprigatitoPokemon
+                      printPokemon sprigatitoPokemon
 
                       -- Construct an initial BattleState.
                       rng0 <- newStdGen
