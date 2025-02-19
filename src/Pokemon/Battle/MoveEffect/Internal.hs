@@ -2,7 +2,6 @@
 {-# LANGUAGE OverloadedRecordDot   #-}
 {-# LANGUAGE OverloadedStrings     #-}
 
--- | Internal module for move effect handling and application.
 module Pokemon.Battle.MoveEffect.Internal
   ( EffectStep(..)
   , gatherEffects
@@ -18,7 +17,6 @@ import           Control.Monad                       (forM_)
 import           Control.Monad.Trans.Class           (lift)
 import           Control.Monad.Trans.State           (get, modify)
 import qualified Data.Text                           as T
-
 import           Control.Monad.Trans.Writer          (tell)
 import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
                                                       Player (..),
@@ -63,6 +61,23 @@ gatherWeather mv =
     Nothing -> Nothing
 
 --------------------------------------------------------------------------------
+-- Damage Application Helper
+--------------------------------------------------------------------------------
+
+-- | Shared helper to calculate and apply damage for a move.
+applyDamageForMove :: Move -> Pokemon -> Pokemon -> [PlayerSlot] -> BattleM ()
+applyDamageForMove mv attackerPokemon defenderPokemon targetSlots = do
+  dmg <- calculateDamage mv attackerPokemon defenderPokemon
+  forM_ targetSlots $ \slot -> do
+    modify (applyDamage slot dmg)
+    bs <- get  -- Retrieve the updated battle state for logging.
+    let targetName = case slot of
+                       Player1 -> bs.player1.active.name
+                       Player2 -> bs.player2.active.name
+    lift $ tell [ T.concat ["[Damage] ", T.pack (show dmg),
+                             " damage dealt to ", targetName] ]
+
+--------------------------------------------------------------------------------
 -- Applying Effects
 --------------------------------------------------------------------------------
 
@@ -76,18 +91,28 @@ applySingleStep mv DoDamage = do
       defenderPokemon = case bs.turnContext.defender of
                           Player1 -> bs.player1.active
                           Player2 -> bs.player2.active
-  dmg <- calculateDamage mv attackerPokemon defenderPokemon
-  let ts      = mv.target
+      ts      = mv.target
       targets = resolveTargets ts bs.turnContext
-  forM_ targets $ \slot -> do
-    modify (applyDamage slot dmg)
-    let targetName = case slot of
-                       Player1 -> bs.player1.active.name
-                       Player2 -> bs.player2.active.name
-    lift $ tell [ T.concat ["[Damage] ", T.pack (show dmg),
-                             " damage dealt to ", targetName] ]
+  applyDamageForMove mv attackerPokemon defenderPokemon targets
 applySingleStep _ (SetWeather w) =
   modify $ \bs -> bs { weather = w }
+
+-- | Applies all effect steps associated with a move.
+applyMoveAction :: Move -> BattleM ()
+applyMoveAction mv = mapM_ (applySingleStep mv) (gatherEffects mv)
+
+-- | Applies a move given an explicit attacker and defender.
+applyMoveWithContext :: Move -> PlayerSlot -> PlayerSlot -> BattleM ()
+applyMoveWithContext mv attackerSlot defenderSlot = do
+  bs <- get
+  let attackerPokemon = case attackerSlot of
+                          Player1 -> bs.player1.active
+                          Player2 -> bs.player2.active
+      defenderPokemon = case defenderSlot of
+                          Player1 -> bs.player1.active
+                          Player2 -> bs.player2.active
+  -- Reuse the same damage application logic here with a singleton target list.
+  applyDamageForMove mv attackerPokemon defenderPokemon [defenderSlot]
 
 --------------------------------------------------------------------------------
 -- Target Resolution and Damage Helpers
@@ -113,26 +138,3 @@ applyDamageToActive dmg p =
   let oldHP = p.active.hp
       newHP = max 0 (oldHP - dmg)
   in p { active = p.active { hp = newHP } }
-
--- | Applies a move given an explicit attacker and defender.
-applyMoveWithContext :: Move -> PlayerSlot -> PlayerSlot -> BattleM ()
-applyMoveWithContext mv attackerSlot defenderSlot = do
-  bs <- get
-  let attackerPokemon = case attackerSlot of
-                          Player1 -> bs.player1.active
-                          Player2 -> bs.player2.active
-      defenderPokemon = case defenderSlot of
-                          Player1 -> bs.player1.active
-                          Player2 -> bs.player2.active
-  dmg <- calculateDamage mv attackerPokemon defenderPokemon
-  modify (applyDamage defenderSlot dmg)
-  lift $ tell [ T.concat ["[Damage] ", T.pack (show dmg),
-                           " damage dealt to ", defenderPokemon.name] ]
-
---------------------------------------------------------------------------------
--- Move Action Helper
---------------------------------------------------------------------------------
-
--- | Applies a move's effects (gathering all its effect steps and applying them).
-applyMoveAction :: Move -> BattleM ()
-applyMoveAction mv = mapM_ (applySingleStep mv) (gatherEffects mv)
