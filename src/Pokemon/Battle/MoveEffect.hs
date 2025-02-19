@@ -1,6 +1,6 @@
-module Pokemon.Battle.MoveEffect (applySingleStep,
+module Pokemon.Battle.MoveEffect (applyMoveWithContext,
                                   gatherEffects) where
 
 
-import           Pokemon.Battle.MoveEffect.Internal (applySingleStep,
+import           Pokemon.Battle.MoveEffect.Internal (applyMoveWithContext,
                                                      gatherEffects)

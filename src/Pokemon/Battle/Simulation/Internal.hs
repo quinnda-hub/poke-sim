@@ -18,6 +18,7 @@ import           Pokemon.Battle.MoveEffect.Internal  (applyMoveWithContext)
 import           Pokemon.Battle.Pokemon.Internal     (MoveSet (..),
                                                       Pokemon (..), isFainted)
 import           Pokemon.Data.Move.Internal          (Move (name), priority)
+import Pokemon.Battle.Logging (logTurn)
 
 --------------------------------------------------------------------------------
 -- Helpers
@@ -46,7 +47,7 @@ simulateBattle bs0 = do
     loop :: BattleM ()
     loop = do
       bs <- get
-      lift $ tell [ T.concat [ "=== Turn ", T.pack (show bs.turnNumber), " ===" ] ]
+      logTurn bs.turnNumber
 
       if isFainted bs.player1.active
          then lift $ tell [ T.concat [ actorName bs Player1, " is fainted! ", actorName bs Player2, " wins!"] ]

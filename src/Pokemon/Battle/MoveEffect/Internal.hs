@@ -5,19 +5,14 @@
 module Pokemon.Battle.MoveEffect.Internal
   ( EffectStep(..)
   , gatherEffects
-  , applySingleStep
   , applyMoveAction
   , resolveTargets
-  , applyDamage
-  , applyDamageToActive
   , applyMoveWithContext
   ) where
 
 import           Control.Monad                       (forM_)
-import           Control.Monad.Trans.Class           (lift)
 import           Control.Monad.Trans.State           (get, modify)
-import qualified Data.Text                           as T
-import           Control.Monad.Trans.Writer          (tell)
+import Pokemon.Battle.Logging ( logDamage )
 import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
                                                       Player (..),
                                                       PlayerSlot (Player1, Player2),
@@ -35,7 +30,7 @@ import           Pokemon.Mechanics.Weather           (Weather)
 
 -- | Represents a single effect step during move usage.
 data EffectStep
-    = DoDamage           -- ^ Indicates that damage should be calculated and applied.
+    = DoDamage            -- ^ Indicates that damage should be calculated and applied.
     | SetWeather Weather  -- ^ Change the battle's weather.
 
 -- | Collects all effect steps from a move.
@@ -74,8 +69,7 @@ applyDamageForMove mv attackerPokemon defenderPokemon targetSlots = do
     let targetName = case slot of
                        Player1 -> bs.player1.active.name
                        Player2 -> bs.player2.active.name
-    lift $ tell [ T.concat ["[Damage] ", T.pack (show dmg),
-                             " damage dealt to ", targetName] ]
+    logDamage dmg targetName
 
 --------------------------------------------------------------------------------
 -- Applying Effects
@@ -94,6 +88,7 @@ applySingleStep mv DoDamage = do
       ts      = mv.target
       targets = resolveTargets ts bs.turnContext
   applyDamageForMove mv attackerPokemon defenderPokemon targets
+
 applySingleStep _ (SetWeather w) =
   modify $ \bs -> bs { weather = w }
 
@@ -111,7 +106,6 @@ applyMoveWithContext mv attackerSlot defenderSlot = do
       defenderPokemon = case defenderSlot of
                           Player1 -> bs.player1.active
                           Player2 -> bs.player2.active
-  -- Reuse the same damage application logic here with a singleton target list.
   applyDamageForMove mv attackerPokemon defenderPokemon [defenderSlot]
 
 --------------------------------------------------------------------------------
@@ -125,7 +119,7 @@ resolveTargets t tc =
   case t of
     Self   -> [tc.attacker]
     Normal -> [tc.defender]
-    _      -> []
+    _      -> [] -- Placeholder. 
 
 -- | Applies damage to the specified player slot.
 applyDamage :: PlayerSlot -> Int -> BattleState -> BattleState
