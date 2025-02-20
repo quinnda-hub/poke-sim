@@ -8,14 +8,14 @@ import           Control.Monad.Trans.State           (get, put)
 import           Control.Monad.Trans.Writer          (tell)
 import qualified Data.Text                           as T
 
-import           Pokemon.Battle.Action.Internal      (actorName, applyActions,
+import           Pokemon.Battle.Action.Internal      (applyActions,
                                                       resolveActions)
 import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
-                                                      Player (..),
-                                                      PlayerSlot (..))
+                                                      Player (..))
 
+import           Control.Monad.IO.Class              (liftIO)
 import           Control.Monad.Trans.Class           (MonadTrans (lift))
-import           Pokemon.Battle.Logging              (logTurn)
+import           Pokemon.Battle.Logging              (logTurn, logVictory)
 import           Pokemon.Battle.Pokemon.Internal     (isFainted)
 
 --------------------------------------------------------------------------------
@@ -40,12 +40,12 @@ simulateBattle bs0 = do
     loop :: BattleM ()
     loop = do
       bs <- get
-      logTurn bs.turnNumber
+      liftIO $ logTurn bs.logger bs.turnNumber
 
       if isFainted bs.player1.active
-         then lift $ tell [ T.concat [ actorName bs Player1, " is fainted! ", actorName bs Player2, " wins!"] ]
+         then liftIO $ logVictory bs.logger "Player 2"
          else if isFainted bs.player2.active
-           then lift $ tell [ T.concat [ actorName bs Player2, " is fainted! ", actorName bs Player1, " wins!"] ]
+           then  liftIO $ logVictory bs.logger "Player 1"
            else do
              let actions = resolveActions bs
              applyActions actions  -- Process actions one by one.

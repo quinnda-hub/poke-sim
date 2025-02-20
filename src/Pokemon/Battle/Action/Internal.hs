@@ -6,15 +6,15 @@
 module Pokemon.Battle.Action.Internal (actorName, applyActions, resolveActions) where
 
 import           Control.Monad.Trans.State           (get)
-import           Control.Monad.Trans.Writer          (tell)
 import qualified Data.Text                           as T
 
 import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
                                                       Player (..),
                                                       PlayerSlot (..))
 
-import           Control.Monad.Trans.Class           (MonadTrans (lift))
+import           Control.Monad.IO.Class              (liftIO)
 import           Data.List                           (sortBy)
+import           Pokemon.Battle.Logging              (logAction)
 import           Pokemon.Battle.MoveEffect.Internal  (applyMoveWithContext)
 import           Pokemon.Battle.Pokemon.Internal     (MoveSet (..),
                                                       Pokemon (..), isFainted)
@@ -83,7 +83,7 @@ applyMoveActionWithActor actorSlot mv = do
   let (attackerSlot, defenderSlot) = case actorSlot of
         Player1 -> (Player1, Player2)
         Player2 -> (Player2, Player1)
-  lift $ tell [ T.concat ["[Action] ", mv.name, " used by ", actorName bs actorSlot] ]
+  liftIO $ logAction bs.logger mv.name (actorName bs attackerSlot)
   applyMoveWithContext mv attackerSlot defenderSlot
 
 --------------------------------------------------------------------------------

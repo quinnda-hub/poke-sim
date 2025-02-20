@@ -11,13 +11,14 @@ module Pokemon.Battle.MoveEffect.Internal
   ) where
 
 import           Control.Monad                       (forM_)
+import           Control.Monad.IO.Class              (liftIO)
 import           Control.Monad.Trans.State           (get, modify)
-import Pokemon.Battle.Logging ( logDamage )
 import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
                                                       Player (..),
                                                       PlayerSlot (Player1, Player2),
                                                       TurnContext (..))
 import           Pokemon.Battle.Damage.Internal      (calculateDamage)
+import           Pokemon.Battle.Logging              (logDamage)
 import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..))
 import           Pokemon.Data.Move.Internal          (Move (..), Target (..),
                                                       basePower, target,
@@ -69,7 +70,7 @@ applyDamageForMove mv attackerPokemon defenderPokemon targetSlots = do
     let targetName = case slot of
                        Player1 -> bs.player1.active.name
                        Player2 -> bs.player2.active.name
-    logDamage dmg targetName
+    liftIO $ logDamage bs.logger dmg targetName
 
 --------------------------------------------------------------------------------
 -- Applying Effects
@@ -119,7 +120,7 @@ resolveTargets t tc =
   case t of
     Self   -> [tc.attacker]
     Normal -> [tc.defender]
-    _      -> [] -- Placeholder. 
+    _      -> [] -- Placeholder.
 
 -- | Applies damage to the specified player slot.
 applyDamage :: PlayerSlot -> Int -> BattleState -> BattleState

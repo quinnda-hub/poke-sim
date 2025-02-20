@@ -8,6 +8,7 @@ import           Control.Monad.Trans.State       (StateT)
 import           Control.Monad.Trans.Writer      (WriterT)
 import           Data.Text                       (Text)
 import           Data.Vector                     (Vector)
+import           Pokemon.Battle.Logging          (Logger)
 import           Pokemon.Battle.Pokemon.Internal (Pokemon)
 import           Pokemon.Mechanics.Weather       (Weather)
 import           System.Random                   (StdGen)
@@ -21,6 +22,7 @@ data BattleState = BattleState
   , turnNumber  :: Int
   , weather     :: Weather
   , rng         :: StdGen
+  , logger      :: Logger
   } deriving (Show)
 
 data TurnContext = TurnContext
