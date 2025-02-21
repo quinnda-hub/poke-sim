@@ -24,12 +24,13 @@ import           Pokemon.Data.Pokedex.Internal       (loadPokedex,
 import           Pokemon.Battle.BattleState.Internal (BattleState (..),
                                                       Player (..),
                                                       PlayerSlot (..),
+                                                      Team (..),
                                                       TurnContext (..))
 
 import           Pokemon.Battle.Simulation.Internal  (simulateBattle)
 
 import           Pokemon.Mechanics.Weather           (Weather (..))
-import Pokemon.Pretty (printPokemon)
+import           Pokemon.Pretty                      (printPokemon)
   -- Assume simulateBattle :: BattleM () is defined to run a simple battle loop.
 
 --------------------------------------------------------------------------------
@@ -154,8 +155,8 @@ someDemoBattle = do
                       rng0 <- newStdGen
                       let initBattleState = BattleState
                             { turnContext = TurnContext { attacker = Player1, defender = Player2 }
-                            , player1     = Player { team = mempty, active = fuecocoPokemon }
-                            , player2     = Player { team = mempty, active = sprigatitoPokemon }
+                            , player1     = Player { team = Team {pokemon1 = Nothing, pokemon2 = Nothing, pokemon3 = Nothing, pokemon4 = Nothing, pokemon5 = Nothing}, active = fuecocoPokemon }
+                            , player2     = Player { team = Team {pokemon1 = Nothing, pokemon2 = Nothing, pokemon3 = Nothing, pokemon4 = Nothing, pokemon5 = Nothing}, active = sprigatitoPokemon }
                             , turnNumber  = 1
                             , weather     = Clear
                             , rng         = rng0
