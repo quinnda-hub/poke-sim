@@ -1,7 +1,5 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedRecordDot   #-}
-{-# LANGUAGE OverloadedStrings     #-}
-
 
 module Pokemon.Battle.Action.Internal (actorName, applyActions, resolveActions) where
 
@@ -12,7 +10,6 @@ import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
                                                       Player (..),
                                                       PlayerSlot (..))
 
-import           Control.Monad.IO.Class              (liftIO)
 import           Data.List                           (sortBy)
 import           Pokemon.Battle.Logging              (logAction)
 import           Pokemon.Battle.MoveEffect.Internal  (applyMoveWithContext)
@@ -83,7 +80,7 @@ applyMoveActionWithActor actorSlot mv = do
   let (attackerSlot, defenderSlot) = case actorSlot of
         Player1 -> (Player1, Player2)
         Player2 -> (Player2, Player1)
-  liftIO $ logAction bs.logger mv.name (actorName bs attackerSlot)
+  logAction mv.name (actorName bs attackerSlot)
   applyMoveWithContext mv attackerSlot defenderSlot
 
 --------------------------------------------------------------------------------

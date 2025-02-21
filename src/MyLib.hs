@@ -30,7 +30,6 @@ import           Pokemon.Battle.Simulation.Internal  (simulateBattle)
 
 import           Pokemon.Mechanics.Weather           (Weather (..))
 import Pokemon.Pretty (printPokemon)
-import Pokemon.Battle.Logging (createLogger, LoggerMode (Console))
   -- Assume simulateBattle :: BattleM () is defined to run a simple battle loop.
 
 --------------------------------------------------------------------------------
@@ -152,7 +151,6 @@ someDemoBattle = do
                       printPokemon sprigatitoPokemon
 
                       -- Construct an initial BattleState.
-                      battlelog <- createLogger Console
                       rng0 <- newStdGen
                       let initBattleState = BattleState
                             { turnContext = TurnContext { attacker = Player1, defender = Player2 }
@@ -161,9 +159,8 @@ someDemoBattle = do
                             , turnNumber  = 1
                             , weather     = Clear
                             , rng         = rng0
-                            , logger      = battlelog
                             }
 
                       putStrLn "Starting battle simulation..."
                       ((), finalLogs) <- runWriterT (evalStateT (simulateBattle initBattleState) initBattleState)
-                      mapM_ (putStrLn . T.unpack) finalLogs
+                      mapM_ print finalLogs

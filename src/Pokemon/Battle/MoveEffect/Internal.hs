@@ -1,6 +1,5 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedRecordDot   #-}
-{-# LANGUAGE OverloadedStrings     #-}
 
 module Pokemon.Battle.MoveEffect.Internal
   ( EffectStep(..)
@@ -11,7 +10,6 @@ module Pokemon.Battle.MoveEffect.Internal
   ) where
 
 import           Control.Monad                       (forM_)
-import           Control.Monad.IO.Class              (liftIO)
 import           Control.Monad.Trans.State           (get, modify)
 import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
                                                       Player (..),
@@ -70,7 +68,7 @@ applyDamageForMove mv attackerPokemon defenderPokemon targetSlots = do
     let targetName = case slot of
                        Player1 -> bs.player1.active.name
                        Player2 -> bs.player2.active.name
-    liftIO $ logDamage bs.logger dmg targetName
+    logDamage dmg targetName
 
 --------------------------------------------------------------------------------
 -- Applying Effects

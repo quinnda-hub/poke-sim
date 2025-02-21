@@ -8,11 +8,11 @@ import           Data.Aeson (FromJSON (parseJSON), withText)
 import qualified Data.Text  as T
 
 data Weather = Clear | Hail | Sun | Rain | Sandstorm | Snow
-  deriving (Show)
+  deriving (Show, Eq)
 
 data PseudoWeather = FairyLock | Gravity   | IonDeluge  | MagicRoom
                    | MudSport  | TrickRoom | WaterSport | WonderRoom
-                   deriving (Show)
+                   deriving (Show, Eq)
 
 instance FromJSON Weather where
   parseJSON = withText "Weather" $ \t -> case t of

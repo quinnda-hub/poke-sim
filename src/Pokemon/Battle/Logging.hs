@@ -1,11 +1,7 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE InstanceSigs #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module Pokemon.Battle.Logging
-  ( LoggerMode(..)
-  , Logger(..)
-  , createLogger
-  , logDamage
+  ( logDamage
   , logAction
   , logTurn
   , logWeather
@@ -13,13 +9,9 @@ module Pokemon.Battle.Logging
   , LogMessage(..)
   ) where
 
+import           Control.Monad.Writer      (MonadWriter, tell)
 import           Data.Text                 (Text)
-import qualified Data.Text                 as T
 import           Pokemon.Mechanics.Weather (Weather)
-
--- | The different logging modes we might use.
-data LoggerMode = Console | File FilePath
-  deriving (Show, Eq)
 
 -- | Our structured log message.
 data LogMessage
@@ -27,58 +19,24 @@ data LogMessage
   | ActionLog  { moveName :: Text, actor :: Text }
   | TurnLog    { turnNumber :: Int }
   | WeatherLog { weather :: Weather }
-  | VictoryLog {victor :: Text}
-
-instance Show LogMessage where
-  show (DamageLog dmg tgt) =
-    "[Damage] " ++ show dmg ++ " damage dealt to " ++ T.unpack tgt
-  show (ActionLog mv act) =
-    "[Action] " ++ T.unpack mv ++ " used by " ++ T.unpack act
-  show (TurnLog n) =
-    "=== Turn " ++ show n ++ " ==="
-  show (WeatherLog w) =
-    "[Weather] Weather changed to " ++ show w
-  show (VictoryLog v) =
-    "[Victory] Battle over! " ++ T.unpack v ++ " wins!"
-
--- | Logger holds the logging mode and a function to write logs.
-data Logger = Logger
-  { loggerMode :: LoggerMode
-  , logFunc    :: LogMessage -> IO ()
-  }
-
-instance Show Logger where
-  show :: Logger -> String
-  show (Logger mode _) = "Logger { loggerMode = " ++ show mode ++ ", logFunc = <function> }"
-
--- | Create a logger for a given mode.
-createLogger :: LoggerMode -> IO Logger
-createLogger mode =
-  case mode of
-    Console   -> return $ Logger mode print
-    File path -> return $ Logger mode (\msg -> appendFile path (show msg ++ "\n"))
+  | VictoryLog {victor :: Text} deriving (Show, Eq)
 
 -- | Log a damage event.
-logDamage :: Logger -> Int -> Text -> IO ()
-logDamage logger dmg tgt = do
-  logFunc logger (DamageLog dmg tgt)
+logDamage :: MonadWriter [LogMessage] m => Int -> Text -> m ()
+logDamage dmg tgt = tell [DamageLog dmg tgt]
 
 -- | Log an action event.
-logAction :: Logger -> Text -> Text -> IO ()
-logAction logger mvName act = do
-  logFunc logger (ActionLog mvName act)
+logAction :: MonadWriter [LogMessage] m => Text -> Text -> m ()
+logAction mvName act = tell [ActionLog mvName act]
 
 -- | Log a turn event.
-logTurn :: Logger -> Int -> IO ()
-logTurn logger n = do
-  logFunc logger (TurnLog n)
+logTurn :: MonadWriter [LogMessage] m => Int -> m ()
+logTurn n = tell [TurnLog n]
 
 -- | Log a weather change event.
-logWeather :: Logger -> Weather -> IO ()
-logWeather logger w = do
-  logFunc logger (WeatherLog w)
+logWeather :: MonadWriter [LogMessage] m => Weather -> m ()
+logWeather w = tell [WeatherLog w]
 
--- | Log winner of a battle. 
-logVictory :: Logger -> Text -> IO ()
-logVictory logger v = do 
-  logFunc logger (VictoryLog v)
+-- | Log the winner of a battle.
+logVictory :: MonadWriter [LogMessage] m => Text -> m ()
+logVictory v = tell [VictoryLog v]
