@@ -97,13 +97,13 @@ data Move = Move
   , onDamagePriority      :: Maybe Int               -- ^ On damage priority.
   , thawsTarget           :: Bool                    -- ^ Thaws the target.
   , target                :: Target                  -- ^ Targeting information.
-  } deriving (Show)
+  } deriving (Show, Eq)
 
 -- | Represents the accuracy of a move.
 data Accuracy
   = AlwaysHits             -- ^ The move always hits.
   | Percent Int            -- ^ The move has a percentage chance to hit.
-  deriving (Show)
+  deriving (Show, Eq)
 
 -- | Represents stat boosts.
 data Boosts = Boosts
@@ -114,7 +114,7 @@ data Boosts = Boosts
   , spa :: Maybe Int       -- ^ Special Attack boost.
   , spd :: Maybe Int       -- ^ Special Defense boost.
   , spe :: Maybe Int       -- ^ Speed boost.
-  } deriving (Show)
+  } deriving (Show, Eq)
 
 -- | Additional conditions for moves.
 data Condition = Condition
@@ -146,7 +146,7 @@ data Condition = Condition
   , onTryMovePriority               :: Maybe Int
   , onTryPrimaryHitPriority         :: Maybe Int
   , onTypePriority                  :: Maybe Int
-  } deriving (Show)
+  } deriving (Show, Eq)
 
 -- | Contest types for moves.
 data ContestType
@@ -155,20 +155,20 @@ data ContestType
   | Cool
   | Cute
   | Tough
-  deriving (Show)
+  deriving (Show, Eq)
 
 -- | Represents fixed damage moves.
 data FixedDamage
   = FixedDamage Int        -- ^ Deals a fixed amount of damage.
   | Level                  -- ^ Deals damage equal to the user's level.
-  deriving (Show)
+  deriving (Show, Eq)
 
 -- | Categories of moves.
 data MoveCategory
   = Physical
   | Special
   | Status
-  deriving (Show)
+  deriving (Show, Eq)
 
 -- | Flags that provide additional information about move properties.
 data Flags = Flags
@@ -210,13 +210,13 @@ data Flags = Flags
   , sound          :: Bool
   , wind           :: Bool
   } | SpecialFlag
-  deriving (Show)
+  deriving (Show, Eq)
 
 -- | Includes information for max moves.
 data IsMax
   = IsMaxText Text
   | IsMaxBool Bool
-  deriving (Show)
+  deriving (Show, Eq)
 
 -- | Represents secondary effects of moves.
 data SecondaryEffect = SecondaryEffect
@@ -226,7 +226,7 @@ data SecondaryEffect = SecondaryEffect
   , volatileStatus :: Maybe VolatileStatus
   , self           :: Maybe SelfEffect
   , dustproof      :: Bool
-  } deriving (Show)
+  } deriving (Show, Eq)
 
 -- | Effects that apply to the user of the move.
 data SelfEffect = SelfEffect
@@ -235,13 +235,13 @@ data SelfEffect = SelfEffect
   , pseudoWeather  :: Maybe PseudoWeather
   , sideCondition  :: Maybe SideCondition
   , placeHolder    :: Bool
-  } deriving (Show)
+  } deriving (Show, Eq)
 
 -- | Represents self-destruct conditions.
 data SelfDestruct
   = Always
   | IfHit
-  deriving (Show, Enum, Bounded)
+  deriving (Show, Enum, Bounded, Eq)
 
 -- | Side conditions that can be set by moves.
 data SideCondition
@@ -260,7 +260,7 @@ data SideCondition
   | Tailwind
   | ToxicSpikes
   | Wideguard
-  deriving (Show, Enum, Bounded)
+  deriving (Show, Enum, Bounded, Eq)
 
 -- | Slot conditions that can be set by moves.
 data SlotCondition
@@ -268,7 +268,7 @@ data SlotCondition
   | LunarDance
   | RevivalBlessing
   | Wish
-  deriving (Show, Enum, Bounded)
+  deriving (Show, Enum, Bounded, Eq)
 
 -- | Status conditions that moves can inflict.
 data Status
@@ -278,7 +278,7 @@ data Status
   | Poison
   | Sleep
   | Toxic
-  deriving (Show)
+  deriving (Show, Eq)
 
 -- | Targeting information for moves.
 data Target
@@ -297,7 +297,7 @@ data Target
   | RandomNormal
   | Scripted
   | Self
-  deriving (Show, Enum, Bounded)
+  deriving (Show, Enum, Bounded, Eq)
 
 -- | Terrains that can be set by moves.
 data Terrain
@@ -305,7 +305,7 @@ data Terrain
   | Grassy
   | Misty
   | Psychic
-  deriving (Show)
+  deriving (Show, Eq)
 
 -- | Volatile statuses that moves can inflict.
 data VolatileStatus
@@ -368,44 +368,44 @@ data VolatileStatus
   | Telekinesis
   | Torment
   | Yawn
-  deriving (Show, Enum, Bounded)
+  deriving (Show, Enum, Bounded, Eq)
 
 -- | Information about multi-hit moves.
 data Multihit
   = Single                   -- ^ Hits once.
   | Range Int Int            -- ^ Hits between a range.
   | Fixed Int                -- ^ Hits a fixed number of times.
-  deriving (Show)
+  deriving (Show, Eq)
 
 -- | Represents one-hit KO moves.
 data OHKO
   = Standard Bool            -- ^ Standard OHKO move.
   | Ice Text                 -- ^ Ice-type OHKO move.
-  deriving (Show)
+  deriving (Show, Eq)
 
 -- | Represents recoil damage.
 data Recoil = Recoil Int Int -- ^ Recoil numerator and denominator.
-  deriving (Show)
+  deriving (Show, Eq)
 
 -- | Represents moves thats drain HP.
 data Drain = Drain Int Int
-  deriving (Show)
+  deriving (Show, Eq)
 
 -- | Moves that heal.
 data Heal = Heal Int Int
-  deriving (Show)
+  deriving (Show, Eq)
 
 -- | Represents Z-Move information.
 data ZMove = ZMove
   { basePower :: Maybe Int
   , effect    :: Maybe Text
   , boost     :: Maybe Boosts
-  } deriving (Show)
+  } deriving (Show, Eq)
 
 -- | Represents Max Move information.
 newtype MaxMove = MaxMove
   { basePower :: Maybe Int
-  } deriving (Show)
+  } deriving (Show, Eq)
 
 -- Parsing JSON instances
 
@@ -746,7 +746,7 @@ instance FromJSON MaxMove where
 data LoadMovesError
   = FileReadError IOException
   | JSONParseError String
-  deriving (Show)
+  deriving (Show, Eq)
 
 loadMoves :: FilePath -> IO (Either LoadMovesError (Map Text Move))
 loadMoves filePath = do
