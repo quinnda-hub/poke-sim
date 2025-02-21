@@ -47,7 +47,7 @@ data Pokemon = Pokemon
   , spa    :: Int         -- ^ Special Attack
   , spd    :: Int         -- ^ Special Defense
   , spe    :: Int         -- ^ Speed
-  } deriving (Show)
+  } deriving (Show, Eq)
 
 -- | Represents a set of moves a Pokémon can have (up to four).
 data MoveSet = MoveSet
@@ -55,7 +55,7 @@ data MoveSet = MoveSet
   , move2 :: Maybe Move
   , move3 :: Maybe Move
   , move4 :: Maybe Move
-  } deriving (Show)
+  } deriving (Show, Eq)
 
 type Level          = Int
 type NatureModifier = Double
