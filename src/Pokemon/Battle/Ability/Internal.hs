@@ -1,6 +1,8 @@
-module Pokemon.Battle.Ability.Types where 
+module Pokemon.Battle.Ability.Internal where 
 
 import Data.Text (Text)
+import Pokemon.Data.Move.Internal (Move)
+import Pokemon.Battle.BattleState.Internal (PlayerSlot)
 
 data AbilityTrigger 
     = OnMoveUse   -- ^ When a Pokemon uses a move. 
@@ -10,12 +12,9 @@ data AbilityTrigger
     | Passive     -- ^ Ability that is always active. 
     deriving (Show, Eq)
 
--- | The context passed to an ability effect.
---   Parameterized over both the move type (a) and the ability user type (u)
---   so that we don’t have to depend on battle state.
-data AbilityContext a u = AbilityContext
-  { triggeringMove :: Maybe a  -- ^ The move that triggered the ability, if any.
-  , abilityUser    :: u        -- ^ User of the ability. 
+data AbilityContext = AbilityContext
+  { triggeringMove :: Maybe Move  -- ^ The move that triggered the ability, if any.
+  , abilityUser    :: PlayerSlot  -- ^ User of the ability. 
   } deriving (Show)
 
 type AbilityEffectFunc m a u = AbilityContext a u -> m ()
@@ -27,6 +26,7 @@ data Ability m a u = Ability
   } 
 
 instance Show (Ability m a u) where
+  show :: Ability m a u -> String
   show (Ability name triggers _) =
     "Ability { abilityName = " ++ show name
     ++ ", triggers = " ++ show triggers

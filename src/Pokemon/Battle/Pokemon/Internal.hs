@@ -31,22 +31,23 @@ import           Pokemon.Mechanics.PType       (PType)
 
 -- | Represents an in-battle Pokemon instance with fully determined stats.
 data Pokemon = Pokemon
-  { name    :: Text        -- ^ Name of the Pokemon
-  , type1   :: PType       -- ^ Primary type of the Pokemon
-  , type2   :: Maybe PType -- ^ Secondary type of the Pokemon (if any)
-  , level   :: Int         -- ^ Level of the Pokemon
-  , moves   :: MoveSet     -- ^ Moves the Pokemon knows
-  , nature  :: Nature      -- ^ Nature of the Pokemon
-  , ivs     :: IVs         -- ^ Individual Values
-  , evs     :: EVs         -- ^ Effort Values
+  { name    :: Text        -- ^ Name of the Pokemon. 
+  , type1   :: PType       -- ^ Primary type of the Pokemon. 
+  , type2   :: Maybe PType -- ^ Secondary type of the Pokemon (if any). 
+  , level   :: Int         -- ^ Level of the Pokemon. 
+  , ability :: Text        -- ^ Ability name of the Pokemon.
+  , moves   :: MoveSet     -- ^ Moves the Pokemon knows. 
+  , nature  :: Nature      -- ^ Nature of the Pokemon. 
+  , ivs     :: IVs         -- ^ Individual Values. 
+  , evs     :: EVs         -- ^ Effort Values. 
 
     -- Calculated stats
-  , hp      :: Int         -- ^ Hit Points
-  , atk     :: Int         -- ^ Attack
-  , def     :: Int         -- ^ Defense
-  , spa     :: Int         -- ^ Special Attack
-  , spd     :: Int         -- ^ Special Defense
-  , spe     :: Int         -- ^ Speed
+  , hp      :: Int         -- ^ Hit Points. 
+  , atk     :: Int         -- ^ Attack. 
+  , def     :: Int         -- ^ Defense. 
+  , spa     :: Int         -- ^ Special Attack. 
+  , spd     :: Int         -- ^ Special Defense. 
+  , spe     :: Int         -- ^ Speed. 
   } deriving (Show, Eq)
 
 -- | Represents a set of moves a Pokémon can have (up to four).
@@ -59,6 +60,7 @@ data MoveSet = MoveSet
 
 type Level          = Int
 type NatureModifier = Double
+type AbilityName    = Text
 
 -- | Natures that affect a Pokémon's stats.
 data Nature
@@ -146,12 +148,13 @@ natureEffects = Map.fromList
 mkPokemon
   :: PokedexMon
   -> Level
+  -> AbilityName 
   -> MoveSet
   -> Nature
   -> IVs
   -> EVs
   -> Pokemon
-mkPokemon pmon lvl moveset nature ivs evs =
+mkPokemon pmon lvl aname moveset nature ivs evs =
   let (t1 :| rest) = pmon.types
       t2 = case rest of
              []    -> Nothing
@@ -177,20 +180,21 @@ mkPokemon pmon lvl moveset nature ivs evs =
       speVal = calculateStat Speed          bs lvl ivs evs (natureBoost Speed)
   in
     Pokemon
-      { name   = pmon.name
-      , type1  = t1
-      , type2  = t2
-      , level  = lvl
-      , moves  = moveset
-      , nature = nature
-      , ivs    = ivs
-      , evs    = evs
-      , hp     = hpVal
-      , atk    = atkVal
-      , def    = defVal
-      , spa    = spaVal
-      , spd    = spdVal
-      , spe    = speVal
+      { name    = pmon.name
+      , type1   = t1
+      , type2   = t2
+      , level   = lvl
+      , ability = aname
+      , moves   = moveset
+      , nature  = nature
+      , ivs     = ivs
+      , evs     = evs
+      , hp      = hpVal
+      , atk     = atkVal
+      , def     = defVal
+      , spa     = spaVal
+      , spd     = spdVal
+      , spe     = speVal
       }
 
 ----------------------------------------------------------------
