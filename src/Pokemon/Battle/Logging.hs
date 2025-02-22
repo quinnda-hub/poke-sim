@@ -13,7 +13,6 @@ import           Control.Monad.Writer      (MonadWriter, tell)
 import           Data.Text                 (Text)
 import           Pokemon.Mechanics.Weather (Weather)
 
--- | Our structured log message.
 data LogMessage
   = DamageLog  { damage :: Int, target :: Text }
   | ActionLog  { moveName :: Text, actor :: Text }

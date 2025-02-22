@@ -1,6 +1,6 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedRecordDot   #-}
-{-# LANGUAGE Strict           #-}
+{-# LANGUAGE Strict                #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 
 module Pokemon.Battle.Pokemon.Internal
@@ -16,13 +16,13 @@ module Pokemon.Battle.Pokemon.Internal
   , mkEVs
   ) where
 
-import           Data.List.NonEmpty            (NonEmpty((:|)))
+import           Data.List.NonEmpty            (NonEmpty ((:|)))
 import           Data.Map.Strict               (Map)
 import qualified Data.Map.Strict               as Map
 import           Data.Text                     (Text)
 
 import           Pokemon.Data.Move.Internal    (Move)
-import           Pokemon.Data.Pokedex.Internal (BaseStats(..), PokedexMon(..))
+import           Pokemon.Data.Pokedex.Internal (BaseStats (..), PokedexMon (..))
 import           Pokemon.Mechanics.PType       (PType)
 
 ----------------------------------------------------------------
@@ -31,22 +31,22 @@ import           Pokemon.Mechanics.PType       (PType)
 
 -- | Represents an in-battle Pokemon instance with fully determined stats.
 data Pokemon = Pokemon
-  { name   :: Text        -- ^ Name of the Pokemon
-  , type1  :: PType       -- ^ Primary type of the Pokemon
-  , type2  :: Maybe PType -- ^ Secondary type of the Pokemon (if any)
-  , level  :: Int         -- ^ Level of the Pokemon
-  , moves  :: MoveSet     -- ^ Moves the Pokemon knows
-  , nature :: Nature      -- ^ Nature of the Pokemon
-  , ivs    :: IVs         -- ^ Individual Values
-  , evs    :: EVs         -- ^ Effort Values
+  { name    :: Text        -- ^ Name of the Pokemon
+  , type1   :: PType       -- ^ Primary type of the Pokemon
+  , type2   :: Maybe PType -- ^ Secondary type of the Pokemon (if any)
+  , level   :: Int         -- ^ Level of the Pokemon
+  , moves   :: MoveSet     -- ^ Moves the Pokemon knows
+  , nature  :: Nature      -- ^ Nature of the Pokemon
+  , ivs     :: IVs         -- ^ Individual Values
+  , evs     :: EVs         -- ^ Effort Values
 
     -- Calculated stats
-  , hp     :: Int         -- ^ Hit Points
-  , atk    :: Int         -- ^ Attack
-  , def    :: Int         -- ^ Defense
-  , spa    :: Int         -- ^ Special Attack
-  , spd    :: Int         -- ^ Special Defense
-  , spe    :: Int         -- ^ Speed
+  , hp      :: Int         -- ^ Hit Points
+  , atk     :: Int         -- ^ Attack
+  , def     :: Int         -- ^ Defense
+  , spa     :: Int         -- ^ Special Attack
+  , spd     :: Int         -- ^ Special Defense
+  , spe     :: Int         -- ^ Speed
   } deriving (Show, Eq)
 
 -- | Represents a set of moves a Pokémon can have (up to four).
@@ -261,8 +261,8 @@ mkIVs hp atk def spA spD spe = validateIVs (IVs hp atk def spA spD spe)
 mkEVs :: Int -> Int -> Int -> Int -> Int -> Int -> Maybe EVs
 mkEVs hp atk def spA spD spe = validateEVs (EVs hp atk def spA spD spe)
 
--- | Check if Pokemon has fainted. 
-isFainted :: Pokemon -> Bool 
-isFainted poke 
-    | poke.hp <= 0 = True 
-    | otherwise    = False   
+-- | Check if Pokemon has fainted.
+isFainted :: Pokemon -> Bool
+isFainted poke
+    | poke.hp <= 0 = True
+    | otherwise    = False

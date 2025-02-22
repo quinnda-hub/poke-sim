@@ -1,9 +1,13 @@
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE OverloadedRecordDot   #-}
+
 module Pokemon.Battle.BattleState.Internal (BattleM,
                                            BattleState(..),
                                            Player(..),
                                            PlayerSlot(..),
                                            TurnContext(..),
-                                           Team(..)) where
+                                           Team(..),
+                                           getPokemonForSlot) where
 
 import           Control.Monad.Trans.State       (StateT)
 import           Control.Monad.Trans.Writer      (WriterT)
@@ -50,3 +54,10 @@ data Team = Team
   , pokemon4 :: Maybe Pokemon 
   , pokemon5 :: Maybe Pokemon
   } deriving (Show, Eq)
+
+-- Helper that looks up the Pokemon for a given player slot
+-- from the BattleState.
+getPokemonForSlot :: PlayerSlot -> BattleState -> Pokemon 
+getPokemonForSlot playerslot bs
+  | playerslot == Player1 = bs.player1.active 
+  | otherwise             = bs.player2.active 
