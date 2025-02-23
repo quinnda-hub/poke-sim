@@ -9,8 +9,7 @@ module Pokemon.Battle.BattleState.Internal (BattleM,
                                            TurnContext(..),
                                            Team(..),
                                            applyModifiers,
-                                           getPokemonForSlot,
-                                           applyModifiers) where
+                                           getPokemonForSlot) where
 
 import           Control.Monad.Trans.State       (StateT)
 import           Control.Monad.Trans.Writer      (WriterT)

@@ -1,12 +1,17 @@
-{-# LANGUAGE InstanceSigs #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE InstanceSigs          #-}
+{-# LANGUAGE OverloadedRecordDot   #-}
 
 module Pokemon.Battle.Ability.Internal where
 
-import Data.Text (Text)
-import Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map 
-import Pokemon.Data.Move.Internal (Move)
-import Pokemon.Battle.BattleState.Internal ( PlayerSlot, BattleM )
+import           Control.Monad.State                 (MonadState (get), when)
+import           Data.Map.Strict                     (Map)
+import qualified Data.Map.Strict                     as Map
+import           Data.Text                           (Text)
+import           Pokemon.Battle.BattleState.Internal (BattleM, PlayerSlot,
+                                                      getPokemonForSlot)
+import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..))
+import           Pokemon.Data.Move.Internal          (Move)
 
 --------------------------------------------------------------------------------
 -- Ability Triggers and Context
@@ -27,6 +32,18 @@ data AbilityContext = AbilityContext
   , abilityUser    :: PlayerSlot  -- ^ The Pokémon (or slot) using the ability.
   } deriving (Show)
 
+triggerAbilityOnMoveUse :: PlayerSlot -> Move -> BattleM ()
+triggerAbilityOnMoveUse slot mv = do
+  bs <- get
+  let p  = getPokemonForSlot slot bs
+      an = p.ability
+  case lookupAbility an of
+    Nothing -> do pure ()
+    Just a  ->
+      when (OnMoveUse `elem` abilityTriggers a) 
+      $ let ctx = AbilityContext { triggeringMove = Just mv, abilityUser = slot }
+        in effect a ctx
+
 --------------------------------------------------------------------------------
 -- Ability Data Type
 --------------------------------------------------------------------------------
@@ -44,11 +61,11 @@ data Ability = Ability
 
 instance Show Ability where
   show :: Ability -> String
-  show (Ability name triggers _) =
-    "Ability { abilityName = " ++ show name ++ ", triggers = " ++ show triggers ++ " }"
+  show (Ability n triggers _) =
+    "Ability { abilityName = " ++ show n ++ ", triggers = " ++ show triggers ++ " }"
 
 --------------------------------------------------------------------------------
--- Empty Registry
+-- Ability Registry
 --------------------------------------------------------------------------------
 
 -- | An empty registry for abilities.
@@ -57,4 +74,4 @@ abilityRegistry = Map.empty
 
 -- | Lookup helper for abilities.
 lookupAbility :: Text -> Maybe Ability
-lookupAbility name = Map.lookup name abilityRegistry
+lookupAbility n = Map.lookup n abilityRegistry
