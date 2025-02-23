@@ -4,19 +4,35 @@
 
 module Pokemon.Battle.Ability where
 
+import           Control.Monad                       (when)
 import           Control.Monad.Trans.State           (get, modify)
 import           Data.Maybe                          (fromMaybe)
-import           Pokemon.Battle.Ability.Internal     (Ability (..),
-                                                      AbilityContext (abilityUser, triggeringMove),
+import           Pokemon.Battle.Ability.Types        (Ability (..),
+                                                      AbilityContext (..),
                                                       AbilityEffectFunc,
                                                       AbilityTrigger (..))
-import           Pokemon.Battle.BattleState.Internal (BattleState (..),
+import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
+                                                      PlayerSlot,
                                                       getPokemonForSlot,
                                                       moveModifiers)
-import           Pokemon.Battle.Pokemon.Internal     (Pokemon (hp, maxHP))
+import           Pokemon.Battle.Pokemon.Internal     (Pokemon(..))
 import           Pokemon.Data.Move.Internal          (Move (basePower, category, moveType),
                                                       MoveCategory (Status))
 import           Pokemon.Mechanics.PType             (PType (..))
+import qualified Data.Map.Strict as Map
+import Data.Text (Text)
+
+triggerAbilityOnMoveUse :: PlayerSlot -> Move -> BattleM ()
+triggerAbilityOnMoveUse slot mv = do
+  bs <- get
+  let p  = getPokemonForSlot slot bs
+      an = p.ability
+  case lookupAbility an of
+    Nothing -> do pure ()
+    Just a  ->
+      when (OnMoveUse `elem` abilityTriggers a)
+      $ let ctx = AbilityContext { triggeringMove = Just mv, abilityUser = slot }
+        in effect a ctx
 
 blazeEffect :: AbilityEffectFunc
 blazeEffect ctx = do
@@ -40,6 +56,16 @@ blazeEffect ctx = do
 blazeAbility :: Ability
 blazeAbility = Ability
   { abilityName     = "Blaze"
-  , abilityTriggers = [OnMoveUse] 
+  , abilityTriggers = [OnMoveUse]
   , effect          = blazeEffect
   }
+
+  -- | A registry mapping ability names to their definitions.
+abilityRegistry :: Map.Map Text Ability
+abilityRegistry = Map.fromList
+  [ (abilityName blazeAbility, blazeAbility)
+  ]
+
+-- | Helper function to look up an ability by its name.
+lookupAbility :: Text -> Maybe Ability
+lookupAbility n = Map.lookup n abilityRegistry

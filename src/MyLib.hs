@@ -142,8 +142,8 @@ someDemoBattle = do
                       let lvl = 5
 
                       -- Construct the Pokémon.
-                      let fuecocoPokemon = mkPokemon fuecocoData lvl "blaze" fuecocoMoveSet chosenNature ivs evs
-                          sprigatitoPokemon = mkPokemon sprigatitoData lvl "overgrow" sprigatitoMoveSet chosenNature ivs evs
+                      let fuecocoPokemon = mkPokemon fuecocoData lvl "Blaze" fuecocoMoveSet chosenNature ivs evs
+                          sprigatitoPokemon = mkPokemon sprigatitoData lvl "Overgrow" sprigatitoMoveSet chosenNature ivs evs
 
                       putStrLn "Constructed Pokémon:"
                       putStrLn "Fuecoco:"
