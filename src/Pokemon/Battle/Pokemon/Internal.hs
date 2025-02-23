@@ -42,6 +42,7 @@ data Pokemon = Pokemon
   , evs     :: EVs         -- ^ Effort Values. 
 
     -- Calculated stats
+  , maxHP   :: Int         -- ^ The max HP value. 
   , hp      :: Int         -- ^ Hit Points. 
   , atk     :: Int         -- ^ Attack. 
   , def     :: Int         -- ^ Defense. 
@@ -189,6 +190,7 @@ mkPokemon pmon lvl aname moveset nature ivs evs =
       , nature  = nature
       , ivs     = ivs
       , evs     = evs
+      , maxHP   = hpVal
       , hp      = hpVal
       , atk     = atkVal
       , def     = defVal

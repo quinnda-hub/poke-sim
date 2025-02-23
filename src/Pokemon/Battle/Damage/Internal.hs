@@ -37,7 +37,6 @@ import Pokemon.Mechanics.PType (PType(..))
 --
 --   The function uses the BattleM monad to retrieve and update the random number
 --   generator stored in BattleState.
-
 calculateDamage :: Move -> Pokemon -> Pokemon -> BattleM Int
 calculateDamage move attacker defender = do
     let lvl   = attacker.level

@@ -1,4 +1,5 @@
 {-# LANGUAGE InstanceSigs #-}
+
 module Pokemon.Battle.Ability.Internal where
 
 import Data.Text (Text)
