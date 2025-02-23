@@ -1,6 +1,9 @@
+{-# LANGUAGE InstanceSigs #-}
 module Pokemon.Battle.Ability.Internal where
 
 import Data.Text (Text)
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map 
 import Pokemon.Data.Move.Internal (Move)
 import Pokemon.Battle.BattleState.Internal ( PlayerSlot, BattleM )
 
@@ -39,5 +42,18 @@ data Ability = Ability
   }
 
 instance Show Ability where
+  show :: Ability -> String
   show (Ability name triggers _) =
     "Ability { abilityName = " ++ show name ++ ", triggers = " ++ show triggers ++ " }"
+
+--------------------------------------------------------------------------------
+-- Empty Registry
+--------------------------------------------------------------------------------
+
+-- | An empty registry for abilities.
+abilityRegistry :: Map Text Ability
+abilityRegistry = Map.empty
+
+-- | Lookup helper for abilities.
+lookupAbility :: Text -> Maybe Ability
+lookupAbility name = Map.lookup name abilityRegistry
