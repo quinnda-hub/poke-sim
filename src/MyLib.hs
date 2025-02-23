@@ -93,7 +93,7 @@ someDemoBattle = do
 
               -- Define desired moves for each Pokémon.
               let fuecocoMovesDesired = ["bite", "ember", "smokescreen", "tackle"]
-                  sprigatitoMovesDesired = ["scratch", "growl", "leafage", "quickattack"]
+                  sprigatitoMovesDesired = ["leafage", "growl", "scratch", "quickattack"]
 
               -- Lookup moves for Fuecoco.
               fuecocoMaybeMoves <- mapM (\mname -> pure (mname, Map.lookup mname movesMap))

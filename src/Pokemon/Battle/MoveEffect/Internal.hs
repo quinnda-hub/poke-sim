@@ -110,6 +110,9 @@ applyMoveWithContext mv attackerSlot defenderSlot = do
                           Player1 -> bs.player1.active
                           Player2 -> bs.player2.active
   applyDamageForMove mv attackerPokemon defenderPokemon [defenderSlot]
+    -- Clear move modifiers immediately after processing this move.
+  modify $ \bs' ->
+    bs' { turnContext = (turnContext bs') { moveModifiers = [] } }
 
 --------------------------------------------------------------------------------
 -- Target Resolution and Damage Helpers
