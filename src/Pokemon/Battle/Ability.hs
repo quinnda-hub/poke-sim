@@ -6,7 +6,9 @@ module Pokemon.Battle.Ability where
 
 import           Control.Monad                       (when)
 import           Control.Monad.Trans.State           (get, modify)
+import qualified Data.Map.Strict                     as Map
 import           Data.Maybe                          (fromMaybe)
+import           Data.Text                           (Text)
 import           Pokemon.Battle.Ability.Types        (Ability (..),
                                                       AbilityContext (..),
                                                       AbilityEffectFunc,
@@ -15,12 +17,10 @@ import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
                                                       PlayerSlot,
                                                       getPokemonForSlot,
                                                       moveModifiers)
-import           Pokemon.Battle.Pokemon.Internal     (Pokemon(..))
+import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..))
 import           Pokemon.Data.Move.Internal          (Move (basePower, category, moveType),
                                                       MoveCategory (Status))
 import           Pokemon.Mechanics.PType             (PType (..))
-import qualified Data.Map.Strict as Map
-import Data.Text (Text)
 
 triggerAbilityOnMoveUse :: PlayerSlot -> Move -> BattleM ()
 triggerAbilityOnMoveUse slot mv = do
