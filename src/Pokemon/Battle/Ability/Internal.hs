@@ -1,33 +1,43 @@
-module Pokemon.Battle.Ability.Internal where 
+module Pokemon.Battle.Ability.Internal where
 
 import Data.Text (Text)
 import Pokemon.Data.Move.Internal (Move)
-import Pokemon.Battle.BattleState.Internal (PlayerSlot)
+import Pokemon.Battle.BattleState.Internal ( PlayerSlot, BattleM )
 
-data AbilityTrigger 
-    = OnMoveUse   -- ^ When a Pokemon uses a move. 
-    | OnHit       -- ^ When a Pokemon is hit with a move. 
-    | OnLowHP     -- ^ When a Pokemon reaches a certain HP threshold. 
-    | OnSwitchOut -- ^ When a Pokemon is switched out.
-    | Passive     -- ^ Ability that is always active. 
+--------------------------------------------------------------------------------
+-- Ability Triggers and Context
+--------------------------------------------------------------------------------
+
+-- | Defines when an ability should be triggered.
+data AbilityTrigger
+    = OnMoveUse   -- ^ When a move is used.
+    | OnHit       -- ^ When the Pokémon is hit.
+    | OnLowHP     -- ^ When the Pokémon reaches a low HP threshold.
+    | OnSwitchOut -- ^ When the Pokémon is switched out.
+    | Passive     -- ^ Always active.
     deriving (Show, Eq)
 
+-- | Context provided to an ability when it triggers.
 data AbilityContext = AbilityContext
-  { triggeringMove :: Maybe Move  -- ^ The move that triggered the ability, if any.
-  , abilityUser    :: PlayerSlot  -- ^ User of the ability. 
+  { triggeringMove :: Maybe Move  -- ^ The move that triggered the ability (if any).
+  , abilityUser    :: PlayerSlot  -- ^ The Pokémon (or slot) using the ability.
   } deriving (Show)
 
-type AbilityEffectFunc m a u = AbilityContext a u -> m ()
+--------------------------------------------------------------------------------
+-- Ability Data Type
+--------------------------------------------------------------------------------
 
-data Ability m a u = Ability 
-  { abilityName     :: Text 
-  , abilityTriggers :: [AbilityTrigger] 
-  , effect          :: AbilityEffectFunc m a u 
-  } 
+-- | Type alias for an ability’s effect function.
+--   The effect runs in a monadic context (BattleM) that handles battle state.
+type AbilityEffectFunc = AbilityContext -> BattleM ()
 
-instance Show (Ability m a u) where
-  show :: Ability m a u -> String
+-- | Represents an ability with a name, trigger conditions, and its effect.
+data Ability = Ability
+  { abilityName     :: Text              -- ^ The ability's name.
+  , abilityTriggers :: [AbilityTrigger]  -- ^ When the ability should trigger.
+  , effect          :: AbilityEffectFunc -- ^ The effect to execute when triggered.
+  }
+
+instance Show Ability where
   show (Ability name triggers _) =
-    "Ability { abilityName = " ++ show name
-    ++ ", triggers = " ++ show triggers
-    ++ ", effect = <function> }"
+    "Ability { abilityName = " ++ show name ++ ", triggers = " ++ show triggers ++ " }"
