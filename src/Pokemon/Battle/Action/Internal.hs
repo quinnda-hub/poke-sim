@@ -16,6 +16,7 @@ import           Pokemon.Battle.MoveEffect.Internal  (applyMoveWithContext)
 import           Pokemon.Battle.Pokemon.Internal     (MoveSet (..),
                                                       Pokemon (..), isFainted)
 import           Pokemon.Data.Move.Internal          (Move (name), priority)
+import Pokemon.Battle.Ability (triggerAbilityOnMoveUse)
 
 --------------------------------------------------------------------------------
 -- Actions
@@ -81,6 +82,7 @@ applyMoveActionWithActor actorSlot mv = do
         Player1 -> (Player1, Player2)
         Player2 -> (Player2, Player1)
   logAction mv.name (actorName bs attackerSlot)
+  triggerAbilityOnMoveUse attackerSlot mv
   applyMoveWithContext mv attackerSlot defenderSlot
 
 --------------------------------------------------------------------------------
