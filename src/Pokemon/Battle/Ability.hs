@@ -15,7 +15,7 @@ import           Pokemon.Battle.BattleState.Internal (BattleState (..),
                                                       moveModifiers)
 import           Pokemon.Battle.Pokemon.Internal     (Pokemon (hp, maxHP))
 import           Pokemon.Data.Move.Internal          (Move (basePower, category, moveType),
-                                                      MoveCategory (Special))
+                                                      MoveCategory (Status))
 import           Pokemon.Mechanics.PType             (PType (..))
 
 blazeEffect :: AbilityEffectFunc
@@ -25,7 +25,7 @@ blazeEffect ctx = do
     case ctx.triggeringMove of
         Nothing -> pure ()
         Just move
-          | move.category == Special     -> pure () -- Move is not a damaging move.
+          | move.category == Status      -> pure () -- Move is not a damaging move.
           | p.hp  * 3 > p.maxHP          -> pure () -- HP is not low enough to activate.
           | move.moveType /= Fire        -> pure () -- Move is not a fire move.
           | otherwise -> do

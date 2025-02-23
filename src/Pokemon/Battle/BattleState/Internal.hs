@@ -8,6 +8,7 @@ module Pokemon.Battle.BattleState.Internal (BattleM,
                                            PlayerSlot(..),
                                            TurnContext(..),
                                            Team(..),
+                                           applyModifiers,
                                            getPokemonForSlot,
                                            applyModifiers) where
 
