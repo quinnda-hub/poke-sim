@@ -4,14 +4,16 @@
 
 module Pokemon.Pretty
   ( printPokemon
+  , printLogMessages
   ) where
 
 import           Data.Text                       (Text)
 import qualified Data.Text                       as T
-import           Pokemon.Battle.Pokemon.Internal (MoveSet(..), Pokemon (..))
-import Pokemon.Data.Move.Internal (Move(..))
+import qualified Data.Text.IO                    as TIO
+import           Pokemon.Battle.Pokemon.Internal (MoveSet (..), Pokemon (..))
+import           Pokemon.Data.Move.Internal      (Move (..))
 import           Pokemon.Mechanics.PType         (PType)
-import qualified Data.Text.IO as TIO
+import Pokemon.Battle.Logging (LogMessage(..))
 
 -- | Pretty print a Pokemon.
 prettyPokemon :: Pokemon -> Text
@@ -50,9 +52,30 @@ prettyMoveSet ms =
     ++ prettyMaybeMove "Move 4" ms.move4
   where
     prettyMaybeMove :: Text -> Maybe Move -> [Text]
-    prettyMaybeMove label Nothing   = [T.concat ["  ", label, ": None"]]
-    prettyMaybeMove label (Just m)  = [T.concat ["  ", label, ": ", m.name]]
+    prettyMaybeMove label Nothing  = [T.concat ["  ", label, ": None"]]
+    prettyMaybeMove label (Just m) = [T.concat ["  ", label, ": ", m.name]]
 
 -- Print a Pokemon to the console.
 printPokemon :: Pokemon -> IO ()
 printPokemon p = TIO.putStrLn (prettyPokemon p)
+
+--------------------------------------------------------------------------------
+-- Pretty Logging
+--------------------------------------------------------------------------------
+
+-- | Pretty print a single log message.
+prettyLogMessage :: LogMessage -> Text
+prettyLogMessage (DamageLog dmg tgt) =
+  T.concat ["[Damage] ", T.pack (show dmg), " damage dealt to ", tgt]
+prettyLogMessage (ActionLog mvName act) =
+  T.concat ["[Action] ", act, " used ", mvName]
+prettyLogMessage (TurnLog n) =
+  T.concat ["==== Turn ", T.pack (show n), " ===="]
+prettyLogMessage (WeatherLog w) =
+  T.concat ["[Weather] ", T.pack (show w)]
+prettyLogMessage (VictoryLog v) =
+  T.concat ["[Victory] ", v, " wins!"]
+
+-- | Print a list of log messages to the console.
+printLogMessages :: [LogMessage] -> IO ()
+printLogMessages logs = TIO.putStrLn (T.unlines (map prettyLogMessage logs))

@@ -49,8 +49,8 @@ boostAbilityEffect requiredType factor ctx = do
     case triggeringMove ctx of
         Nothing -> pure ()
         Just move
-          | move.category == Status      -> pure () -- Non-damaging move.
-          | p.hp * 3 > p.maxHP          -> pure () -- HP is not low enough.
+          | move.category == Status       -> pure () -- Non-damaging move.
+          | p.hp * 3 > p.maxHP            -> pure () -- HP is not low enough.
           | move.moveType /= requiredType -> pure () -- Move doesn't match required type.
           | otherwise -> do
               let originalPower = fromMaybe 0 move.basePower
@@ -73,7 +73,7 @@ blazeAbility = Ability
   }
 
 overgrowEffect :: AbilityEffectFunc
-overgrowEffect = boostAbilityEffect Grass 5
+overgrowEffect = boostAbilityEffect Grass 1.5
 
 -- | Overgrow ability instance.
 overgrowAbility :: Ability

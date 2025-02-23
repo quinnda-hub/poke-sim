@@ -30,7 +30,7 @@ import           Pokemon.Battle.BattleState.Internal (BattleState (..),
 import           Pokemon.Battle.Simulation.Internal  (simulateBattle)
 
 import           Pokemon.Mechanics.Weather           (Weather (..))
-import           Pokemon.Pretty                      (printPokemon)
+import           Pokemon.Pretty                      (printPokemon, printLogMessages)
   -- Assume simulateBattle :: BattleM () is defined to run a simple battle loop.
 
 --------------------------------------------------------------------------------
@@ -164,4 +164,4 @@ someDemoBattle = do
 
                       putStrLn "Starting battle simulation..."
                       ((), finalLogs) <- runWriterT (evalStateT (simulateBattle initBattleState) initBattleState)
-                      mapM_ print finalLogs
+                      printLogMessages finalLogs
