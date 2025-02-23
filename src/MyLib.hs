@@ -154,7 +154,7 @@ someDemoBattle = do
                       -- Construct an initial BattleState.
                       rng0 <- newStdGen
                       let initBattleState = BattleState
-                            { turnContext = TurnContext { attacker = Player1, defender = Player2 }
+                            { turnContext = TurnContext { attacker = Player1, defender = Player2, moveModifiers = []}
                             , player1     = Player { team = Team {pokemon1 = Nothing, pokemon2 = Nothing, pokemon3 = Nothing, pokemon4 = Nothing, pokemon5 = Nothing}, active = fuecocoPokemon }
                             , player2     = Player { team = Team {pokemon1 = Nothing, pokemon2 = Nothing, pokemon3 = Nothing, pokemon4 = Nothing, pokemon5 = Nothing}, active = sprigatitoPokemon }
                             , turnNumber  = 1
