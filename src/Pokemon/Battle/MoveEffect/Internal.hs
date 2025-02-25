@@ -107,15 +107,15 @@ applyMoveAction mv = mapM_ (applySingleStep mv) (gatherEffects mv)
 -- | Applies a move given an explicit attacker and defender.
 applyMoveWithContext :: Move -> PlayerSlot -> PlayerSlot -> BattleM ()
 applyMoveWithContext mv attackerSlot defenderSlot = do
-  bs <- get
-  let attackerPokemon = case attackerSlot of
-                          Player1 -> bs.player1.active
-                          Player2 -> bs.player2.active
-      defenderPokemon = case defenderSlot of
-                          Player1 -> bs.player1.active
-                          Player2 -> bs.player2.active
-  applyDamageForMove mv attackerPokemon defenderPokemon [defenderSlot]
-    -- Clear move modifiers immediately after processing this move.
+  -- Update the turn context with the explicit attacker and defender.
+  modify $ \bs ->
+    bs { turnContext = (turnContext bs)
+                     { attacker = attackerSlot
+                     , defender = defenderSlot
+                     }
+       }
+  applyMoveAction mv
+  -- Clear move modifiers immediately after processing this move.
   modify $ \bs' ->
     bs' { turnContext = (turnContext bs') { moveModifiers = [] } }
 
