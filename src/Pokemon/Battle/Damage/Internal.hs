@@ -40,37 +40,35 @@ import           System.Random                       (Random (randomR), StdGen)
 --   generator stored in BattleState.
 calculateDamage :: Move -> Pokemon -> Pokemon -> BattleM Int
 calculateDamage move attacker defender = do
-    let lvl   = attacker.level
-        power = fromMaybe 0 move.basePower
-        (aStat, dStat) = case move.category of
-                           Physical -> (attacker.atk, defender.def)
-                           Special  -> (attacker.spa, defender.spd)
-                           Status   -> (0, 0)
+  rng0 <- getRNG
+  let (randInt, newRng) = randomR (85, 100) rng0 :: (Int, StdGen)
+  updateRNG newRng
+  return (calcDamage randInt)
+  where
+    -- Basic parameters.
+    lvl   = attacker.level
+    power = fromMaybe 0 move.basePower
+    (aStat, dStat)
+      = case move.category of
+          Physical -> (attacker.atk, defender.def)
+          Special  -> (attacker.spa, defender.spd)
+          Status   -> (0, 0)
+    
+    -- Base damage computed using integer arithmetic.
+    baseDamage = (((2 * lvl) `div` 5 + 2) * power * aStat)
+                 `div` dStat `div` 50 + 2
+    
+    -- | Given a random integer, compute the final damage.
+    calcDamage randInt =
+      let randFactor = fromIntegral randInt / 100.0
+          stab | move.moveType == attacker.type1 = 1.5
+               | Just move.moveType == attacker.type2 = 1.5
+               | otherwise = 1.0
+          typeEffect = effectiveness move.moveType defender.type1 defender.type2
+          crit       = 1.0
+          modifier   = randFactor * stab * typeEffect * crit
+      in floor (fromIntegral baseDamage * modifier)
 
-        -- Compute base damage.
-        baseDamage = (((2 * lvl) `div` 5 + 2) * power * aStat) `div` dStat `div` 50 + 2
-
-    -- Add randomness for random damage rolls.
-    rng0 <- getRNG
-    let (randInt, newRng) = randomR (85, 100) rng0 :: (Int, StdGen)
-    updateRNG newRng
-    let randFactor :: Double
-        randFactor  = fromIntegral randInt / 100.0
-
-    -- Same Type Attack Bonus (STAB)
-    let stab = if move.moveType == attacker.type1 ||
-                  Just move.moveType == attacker.type2
-                  then 1.5
-                  else 1.0
-
-    -- For now assume type effectiveness and critical multiplier are normal.
-    let typeEffect = effectiveness move.moveType defender.type1 defender.type2
-        crit       = 1.0
-
-    let modifier = randFactor * stab * typeEffect * crit
-        damage   = floor (fromIntegral baseDamage * modifier)
-
-    return damage
 
 --------------------------------------------------------------------------------
 -- Type Effectiveness Calculation
