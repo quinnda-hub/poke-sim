@@ -8,7 +8,8 @@ import           Data.Maybe                          (fromMaybe)
 import           Pokemon.Battle.BattleState.Internal (BattleM, getRNG,
                                                       updateRNG)
 import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..))
-import           Pokemon.Data.Move.Internal          (Move, MoveCategory (..),
+import           Pokemon.Data.Move.Internal          (Move,
+                                                      MoveCategory (..),
                                                       basePower, category,
                                                       moveType)
 import           Pokemon.Mechanics.PType             (PType (..))

@@ -6,6 +6,7 @@ module Pokemon.Battle.Logging
   , logTurn
   , logWeather
   , logVictory
+  , logMiss
   , LogMessage(..)
   ) where
 
@@ -18,7 +19,9 @@ data LogMessage
   | ActionLog  { moveName :: Text, actor :: Text }
   | TurnLog    { turnNumber :: Int }
   | WeatherLog { weather :: Weather }
-  | VictoryLog {victor :: Text} deriving (Show, Eq)
+  | VictoryLog { victor :: Text} 
+  | MissLog    { whiffer :: Text}
+  deriving (Show, Eq)
 
 -- | Log a damage event.
 logDamage :: MonadWriter [LogMessage] m => Int -> Text -> m ()
@@ -39,3 +42,7 @@ logWeather w = tell [WeatherLog w]
 -- | Log the winner of a battle.
 logVictory :: MonadWriter [LogMessage] m => Text -> m ()
 logVictory v = tell [VictoryLog v]
+
+-- | Log a Pokemon missing an attack.
+logMiss :: MonadWriter [LogMessage] m => Text -> m ()
+logMiss w = tell [MissLog w]

@@ -75,6 +75,8 @@ prettyLogMessage (WeatherLog w) =
   T.concat ["[Weather] ", T.pack (show w)]
 prettyLogMessage (VictoryLog v) =
   T.concat ["[Victory] ", v, " wins!"]
+prettyLogMessage (MissLog w) = 
+  T.concat ["[Miss ] ", w, " missed their attack!"]
 
 -- | Print a list of log messages to the console.
 printLogMessages :: [LogMessage] -> IO ()

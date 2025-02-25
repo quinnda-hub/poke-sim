@@ -15,14 +15,16 @@ import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
                                                       Player (..),
                                                       PlayerSlot (Player1, Player2),
                                                       TurnContext (..),
-                                                      applyModifiers)
+                                                      applyModifiers, getRNG,
+                                                      updateRNG)
 import           Pokemon.Battle.Damage.Internal      (calculateDamage)
-import           Pokemon.Battle.Logging              (logDamage)
+import           Pokemon.Battle.Logging              (logDamage, logMiss)
 import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..))
-import           Pokemon.Data.Move.Internal          (Move (..), Target (..),
-                                                      basePower, target,
-                                                      weatherEffect)
+import           Pokemon.Data.Move.Internal          (Accuracy (..), Move (..),
+                                                      Target (..), basePower,
+                                                      target, weatherEffect)
 import           Pokemon.Mechanics.Weather           (Weather)
+import           System.Random                       (Random (randomR))
 
 --------------------------------------------------------------------------------
 -- Effect Steps
@@ -81,7 +83,8 @@ applyDamageForMove mv attackerPokemon defenderPokemon targetSlots = do
 -- | Applies a single effect step using the current move context.
 applySingleStep :: Move -> EffectStep -> BattleM ()
 applySingleStep mv DoDamage = do
-  bs <- get
+  bs  <- get
+  hit <- maybe (pure True) checkAccuracy mv.accuracy    -- Assuming Accuracy being Nothing means it also always hits. Will check later.
   let attackerPokemon = case bs.turnContext.attacker of
                           Player1 -> bs.player1.active
                           Player2 -> bs.player2.active
@@ -90,7 +93,9 @@ applySingleStep mv DoDamage = do
                           Player2 -> bs.player2.active
       ts      = mv.target
       targets = resolveTargets ts bs.turnContext
-  applyDamageForMove mv attackerPokemon defenderPokemon targets
+  if hit
+    then applyDamageForMove mv attackerPokemon defenderPokemon targets
+    else logMiss attackerPokemon.name
 
 applySingleStep _ (SetWeather w) =
   modify $ \bs -> bs { weather = w }
@@ -138,3 +143,15 @@ applyDamageToActive dmg p =
   let oldHP = p.active.hp
       newHP = max 0 (oldHP - dmg)
   in p { active = p.active { hp = newHP } }
+
+--------------------------------------------------------------------------------
+-- RNG checks
+--------------------------------------------------------------------------------
+
+checkAccuracy :: Accuracy -> BattleM Bool
+checkAccuracy AlwaysHits = return True
+checkAccuracy (Percent acc) = do
+    rng0 <- getRNG
+    let (roll, newRng) = randomR (1, 100) rng0
+    updateRNG newRng
+    return (roll <= acc)

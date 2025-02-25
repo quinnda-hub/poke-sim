@@ -3,6 +3,7 @@
 
 module Pokemon.Data.Move.Internal
   ( Move(..),
+    Accuracy(..),
     loadMoves,
     showLoadMovesError,
     Target(..),
@@ -10,20 +11,20 @@ module Pokemon.Data.Move.Internal
   ) where
 
 import           Control.Applicative       ((<|>))
+import           Control.Exception         (IOException, try)
 import           Data.Aeson                (FromJSON, Object,
                                             Value (Bool, Number, Object, String),
                                             eitherDecode, withBool, withObject,
                                             withScientific, withText, (.!=),
                                             (.:), (.:?))
+import qualified Data.Aeson.Key            as Key
 import qualified Data.Aeson.KeyMap         as KM
 import           Data.Aeson.Types          (FromJSON (parseJSON), Parser)
+import qualified Data.ByteString.Lazy      as BL
 import           Data.Char                 (toLower)
+import           Data.Map.Strict           (Map)
 import           Data.Text                 (Text)
 import qualified Data.Text                 as T
-import           Control.Exception         (IOException, try)
-import qualified Data.Aeson.Key            as Key
-import qualified Data.ByteString.Lazy      as BL
-import           Data.Map.Strict           (Map)
 
 import           Pokemon.Mechanics.PType   (PType)
 import           Pokemon.Mechanics.Weather (PseudoWeather, Weather)
