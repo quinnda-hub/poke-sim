@@ -9,8 +9,11 @@ module Pokemon.Battle.BattleState.Internal (BattleM,
                                            TurnContext(..),
                                            Team(..),
                                            applyModifiers,
-                                           getPokemonForSlot) where
+                                           getPokemonForSlot,
+                                           getRNG,
+                                           updateRNG) where
 
+import           Control.Monad.State             (get, put)
 import           Control.Monad.Trans.State       (StateT)
 import           Control.Monad.Trans.Writer      (WriterT)
 import           Pokemon.Battle.Logging          (LogMessage)
@@ -79,3 +82,20 @@ type MoveModifer = Move -> Move
 
 applyModifiers :: [MoveModifer] -> Move -> Move
 applyModifiers mods move = foldr ($) move mods
+
+--------------------------------------------------------------------------------
+-- RNG Helpers
+--------------------------------------------------------------------------------
+
+-- | Retrieves the current random number generator from the BattleState.
+getRNG :: BattleM StdGen
+getRNG = do
+    bs <- get
+    return bs.rng
+
+-- | Updates the random number generator stored in the BattleState.
+updateRNG :: StdGen -> BattleM ()
+updateRNG newGen = do
+    bs <- get
+    put bs { rng = newGen }
+

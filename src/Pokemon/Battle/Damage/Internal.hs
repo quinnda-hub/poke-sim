@@ -4,15 +4,15 @@
 
 module Pokemon.Battle.Damage.Internal (calculateDamage) where
 
-import           Control.Monad.Trans.State           (get, put)
 import           Data.Maybe                          (fromMaybe)
-import           Pokemon.Battle.BattleState.Internal (BattleM, rng)
+import           Pokemon.Battle.BattleState.Internal (BattleM, getRNG,
+                                                      updateRNG)
 import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..))
 import           Pokemon.Data.Move.Internal          (Move, MoveCategory (..),
                                                       basePower, category,
                                                       moveType)
+import           Pokemon.Mechanics.PType             (PType (..))
 import           System.Random                       (Random (randomR), StdGen)
-import Pokemon.Mechanics.PType (PType(..))
 
 --------------------------------------------------------------------------------
 -- Damage Calculation
@@ -258,14 +258,14 @@ singleEffectiveness Dark defender =
 -- Steel
 singleEffectiveness Steel defender =
   case defender of
-    Ice    -> 2.0
-    Rock   -> 2.0
-    Fairy  -> 2.0
-    Fire   -> 0.5
-    Water  -> 0.5
+    Ice      -> 2.0
+    Rock     -> 2.0
+    Fairy    -> 2.0
+    Fire     -> 0.5
+    Water    -> 0.5
     Electric -> 0.5
-    Steel  -> 0.5
-    _      -> 1.0
+    Steel    -> 0.5
+    _        -> 1.0
 -- Fairy
 singleEffectiveness Fairy defender =
   case defender of
@@ -276,21 +276,3 @@ singleEffectiveness Fairy defender =
     Poison   -> 0.5
     Steel    -> 0.5
     _        -> 1.0
-
-
---------------------------------------------------------------------------------
--- RNG Helpers
---------------------------------------------------------------------------------
-
--- | Retrieves the current random number generator from the BattleState.
-getRNG :: BattleM StdGen
-getRNG = do
-    bs <- get
-    return bs.rng
-
--- | Updates the random number generator stored in the BattleState.
-updateRNG :: StdGen -> BattleM ()
-updateRNG newGen = do
-    bs <- get
-    put bs { rng = newGen }
-
