@@ -7,6 +7,7 @@ module Pokemon.Battle.Logging
   , logWeather
   , logVictory
   , logMiss
+  , logCrit
   , LogMessage(..)
   ) where
 
@@ -21,6 +22,7 @@ data LogMessage
   | WeatherLog { weather :: Weather }
   | VictoryLog { victor :: Text} 
   | MissLog    { whiffer :: Text}
+  | CritLog    { critter :: Text }
   deriving (Show, Eq)
 
 -- | Log a damage event.
@@ -46,3 +48,7 @@ logVictory v = tell [VictoryLog v]
 -- | Log a Pokemon missing an attack.
 logMiss :: MonadWriter [LogMessage] m => Text -> m ()
 logMiss w = tell [MissLog w]
+
+-- | Log a critical hit. 
+logCrit :: MonadWriter [LogMessage] m => Text -> m ()
+logCrit w = tell [CritLog w]

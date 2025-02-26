@@ -4,14 +4,15 @@
 
 module Pokemon.Battle.Damage.Internal (calculateDamage) where
 
+import           Control.Monad                       (when)
 import           Data.Maybe                          (fromMaybe)
 import           Pokemon.Battle.BattleState.Internal (BattleM, getRNG,
                                                       updateRNG)
+import           Pokemon.Battle.Logging              (logCrit)
 import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..))
-import           Pokemon.Data.Move.Internal          (Move,
-                                                      MoveCategory (..),
+import           Pokemon.Data.Move.Internal          (Move, MoveCategory (..),
                                                       basePower, category,
-                                                      moveType)
+                                                      critRatio, moveType)
 import           Pokemon.Mechanics.PType             (PType (..))
 import           System.Random                       (Random (randomR), StdGen)
 
@@ -41,9 +42,11 @@ import           System.Random                       (Random (randomR), StdGen)
 calculateDamage :: Move -> Pokemon -> Pokemon -> BattleM Int
 calculateDamage move attacker defender = do
   rng0 <- getRNG
-  let (randInt, newRng) = randomR (85, 100) rng0 :: (Int, StdGen)
-  updateRNG newRng
-  return (calcDamage randInt)
+  let (randInt, rng1) = randomR (85, 100) rng0 :: (Int, StdGen)
+      (isCrit,  rng2) = rollCritical move rng1
+  updateRNG rng2
+  when isCrit $ logCrit attacker.name
+  return (calcDamage randInt isCrit)
   where
     -- Basic parameters.
     lvl   = attacker.level
@@ -53,21 +56,34 @@ calculateDamage move attacker defender = do
           Physical -> (attacker.atk, defender.def)
           Special  -> (attacker.spa, defender.spd)
           Status   -> (0, 0)
-    
+
     -- Base damage computed using integer arithmetic.
     baseDamage = (((2 * lvl) `div` 5 + 2) * power * aStat)
                  `div` dStat `div` 50 + 2
-    
+
+    -- | Determines whether the move results in a critical hit based on its crit ratio.
+    rollCritical :: Move -> StdGen -> (Bool, StdGen)
+    rollCritical m rng =
+      case m.critRatio of
+        Nothing ->
+          let (roll, rng') = randomR (1, 24) rng :: (Int, StdGen)
+          in (roll == 1, rng')
+        Just _ ->
+          let (roll, rng') = randomR (1, 12) rng :: (Int, StdGen)
+          in (roll == 1, rng')
+
     -- | Given a random integer, compute the final damage.
-    calcDamage randInt =
+    calcDamage randInt isCrit =
       let randFactor = fromIntegral randInt / 100.0
           stab | move.moveType == attacker.type1 = 1.5
                | Just move.moveType == attacker.type2 = 1.5
                | otherwise = 1.0
           typeEffect = effectiveness move.moveType defender.type1 defender.type2
-          crit       = 1.0
+          crit       = if isCrit then 1.5 else 1.0
           modifier   = randFactor * stab * typeEffect * crit
       in floor (fromIntegral baseDamage * modifier)
+
+
 
 
 --------------------------------------------------------------------------------
