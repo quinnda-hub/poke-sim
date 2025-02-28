@@ -11,6 +11,7 @@ module Pokemon.Battle.MoveEffect.Internal
 
 import           Control.Monad                       (forM_)
 import           Control.Monad.Trans.State           (get, modify)
+import           Data.Maybe                          (catMaybes)
 import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
                                                       Player (..),
                                                       PlayerSlot (Player1, Player2),
@@ -38,10 +39,8 @@ data EffectStep
 -- | Collects all effect steps from a move.
 gatherEffects :: Move -> [EffectStep]
 gatherEffects mv =
-  maybeToList (gatherDamage mv) ++ maybeToList (gatherWeather mv)
-  where
-    maybeToList :: Maybe a -> [a]
-    maybeToList = maybe [] pure
+  catMaybes [ gatherDamage mv
+            , gatherWeather mv ]
 
 -- | If the move has a base power, produce a damage step.
 gatherDamage :: Move -> Maybe EffectStep
