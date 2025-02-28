@@ -34,6 +34,7 @@ import           System.Random                       (Random (randomR))
 -- | Represents a single effect step during move usage.
 data EffectStep
     = DoDamage            -- ^ Indicates that damage should be calculated and applied.
+    | InflictStatus 
     | SetWeather Weather  -- ^ Change the battle's weather.
 
 -- | Collects all effect steps from a move.
@@ -84,12 +85,7 @@ applySingleStep :: Move -> EffectStep -> BattleM ()
 applySingleStep mv DoDamage = do
   bs  <- get
   hit <- maybe (pure True) checkAccuracy mv.accuracy    -- Assuming Accuracy being Nothing means it also always hits. Will check later.
-  let attackerPokemon = case bs.turnContext.attacker of
-                          Player1 -> bs.player1.active
-                          Player2 -> bs.player2.active
-      defenderPokemon = case bs.turnContext.defender of
-                          Player1 -> bs.player1.active
-                          Player2 -> bs.player2.active
+  let (attackerPokemon, defenderPokemon) = getAttackerAndDefender bs 
       ts      = mv.target
       targets = resolveTargets ts bs.turnContext
   if hit
@@ -121,7 +117,6 @@ applyMoveWithContext mv attackerSlot defenderSlot = do
 --------------------------------------------------------------------------------
 -- Target Resolution and Damage Helpers
 --------------------------------------------------------------------------------
-
 -- | Determines which player(s) are affected based on the move's target
 --   and the current turn context.
 resolveTargets :: Target -> TurnContext -> [PlayerSlot]
@@ -130,6 +125,16 @@ resolveTargets t tc =
     Self   -> [tc.attacker]
     Normal -> [tc.defender]
     _      -> [] -- Placeholder.
+
+getAttackerAndDefender :: BattleState -> (Pokemon, Pokemon)
+getAttackerAndDefender bs  = 
+  let attackerPokemon = case bs.turnContext.attacker of
+                          Player1 -> bs.player1.active
+                          Player2 -> bs.player2.active
+      defenderPokemon = case bs.turnContext.defender of
+                          Player1 -> bs.player1.active
+                          Player2 -> bs.player2.active 
+  in (attackerPokemon, defenderPokemon)
 
 -- | Applies damage to the specified player slot.
 applyDamage :: PlayerSlot -> Int -> BattleState -> BattleState
