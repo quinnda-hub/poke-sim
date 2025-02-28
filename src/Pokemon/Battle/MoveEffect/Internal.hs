@@ -23,7 +23,7 @@ import           Pokemon.Battle.Logging              (logDamage, logMiss)
 import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..))
 import           Pokemon.Data.Move.Internal          (Accuracy (..), Move (..),
                                                       Target (..), basePower,
-                                                      target, weatherEffect)
+                                                      target, weatherEffect, Status(..))
 import           Pokemon.Mechanics.Weather           (Weather)
 import           System.Random                       (Random (randomR))
 
@@ -77,6 +77,17 @@ applyDamageForMove mv attackerPokemon defenderPokemon targetSlots = do
     logDamage dmg targetName
 
 --------------------------------------------------------------------------------
+-- Status
+--------------------------------------------------------------------------------
+
+-- | Shared helper to calculate and apply damage for a move.
+applyStatusForMove :: Status  -> [PlayerSlot] -> BattleM ()
+applyStatusForMove mv targetSlots = do
+  forM_ targetSlots $ \slot -> do
+    modify (applyStatus slot mv)
+
+
+--------------------------------------------------------------------------------
 -- Applying Effects
 --------------------------------------------------------------------------------
 
@@ -91,6 +102,18 @@ applySingleStep mv DoDamage = do
   if hit
     then applyDamageForMove mv attackerPokemon defenderPokemon targets
     else logMiss attackerPokemon.name
+
+applySingleStep mv InflictStatus = do 
+  bs  <- get 
+  hit <- maybe (pure True) checkAccuracy mv.accuracy
+  let (attackerPokemon, _) = getAttackerAndDefender bs 
+      ts = mv.target 
+      targets = resolveTargets ts bs.turnContext 
+  if hit 
+    then case mv.status of
+      Just s -> applyStatusForMove s targets
+      Nothing     -> pure ()
+      else logMiss attackerPokemon.name     
 
 applySingleStep _ (SetWeather w) =
   modify $ \bs -> bs { weather = w }
@@ -140,6 +163,15 @@ getAttackerAndDefender bs  =
 applyDamage :: PlayerSlot -> Int -> BattleState -> BattleState
 applyDamage Player1 dmg bs = bs { player1 = applyDamageToActive dmg bs.player1 }
 applyDamage Player2 dmg bs = bs { player2 = applyDamageToActive dmg bs.player2 }
+
+-- | Applies status to the specified player slot.
+applyStatus :: PlayerSlot -> Status -> BattleState -> BattleState
+applyStatus Player1 sts bs = bs { player1 = applyStatusToActive sts bs.player1 }
+applyStatus Player2 sts bs = bs { player2 = applyStatusToActive sts bs.player2 }
+
+-- | Updates a player's active Pokémon with new HP after damage.
+applyStatusToActive :: Status -> Player -> Player
+applyStatusToActive sts p = p { active = p.active { pstatus = Just sts } }
 
 -- | Updates a player's active Pokémon with new HP after damage.
 applyDamageToActive :: Int -> Player -> Player

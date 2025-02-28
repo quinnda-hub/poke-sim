@@ -4,6 +4,7 @@
 module Pokemon.Data.Move.Internal
   ( Move(..),
     Accuracy(..),
+    Status(..),
     loadMoves,
     showLoadMovesError,
     Target(..),

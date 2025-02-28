@@ -21,7 +21,7 @@ import           Data.Map.Strict               (Map)
 import qualified Data.Map.Strict               as Map
 import           Data.Text                     (Text)
 
-import           Pokemon.Data.Move.Internal    (Move)
+import           Pokemon.Data.Move.Internal    (Move, Status)
 import           Pokemon.Data.Pokedex.Internal (BaseStats (..), PokedexMon (..))
 import           Pokemon.Mechanics.PType       (PType)
 
@@ -40,6 +40,9 @@ data Pokemon = Pokemon
   , nature  :: Nature      -- ^ Nature of the Pokemon. 
   , ivs     :: IVs         -- ^ Individual Values. 
   , evs     :: EVs         -- ^ Effort Values. 
+
+  -- Status effects
+  , pstatus  :: Maybe Status -- ^ Primary status effect.
 
     -- Calculated stats
   , maxHP   :: Int         -- ^ The max HP value. 
@@ -190,6 +193,7 @@ mkPokemon pmon lvl aname moveset nature ivs evs =
       , nature  = nature
       , ivs     = ivs
       , evs     = evs
+      , pstatus  = Nothing
       , maxHP   = hpVal
       , hp      = hpVal
       , atk     = atkVal
