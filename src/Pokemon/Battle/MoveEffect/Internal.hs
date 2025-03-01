@@ -33,18 +33,21 @@ applyEffectForMove
   -> Pokemon  -- ^ Attacker
   -> Pokemon  -- ^ Defender
   -> [PlayerSlot]
-  -> (Move -> Pokemon -> Pokemon -> PlayerSlot -> BattleState -> BattleState)
-       -- ^ Modifier: takes the modified move, attacker, defender, and target slot to update the battle state.
-  -> (Move -> Pokemon -> Pokemon -> PlayerSlot -> BattleState -> BattleM ())
-       -- ^ Logger: takes the modified move, attacker, defender, and target slot for logging.
+  -> (Move -> Pokemon -> Pokemon -> PlayerSlot -> BattleState -> BattleM a)
+       -- ^ Effect: computes an effect value (like damage) given the freshly modified move and state.
+  -> (a -> PlayerSlot -> BattleState -> BattleState)
+       -- ^ Modifier: updates the battle state using the computed effect value.
+  -> (a -> PlayerSlot -> BattleState -> BattleM ())
+       -- ^ Logger: logs the effect using the computed value.
   -> BattleM ()
-applyEffectForMove mv attackerPokemon defenderPokemon targetSlots modifier logger = do
-  bs <- get
-  let mv' = applyModifiers bs.turnContext.moveModifiers mv
+applyEffectForMove mv attackerPokemon defenderPokemon targetSlots effectFn modifier logger =
   forM_ targetSlots $ \slot -> do
-    modify (modifier mv' attackerPokemon defenderPokemon slot)
+    bs <- get
+    let mv' = applyModifiers bs.turnContext.moveModifiers mv
+    effect <- effectFn mv' attackerPokemon defenderPokemon slot bs
+    modify (\bs' -> modifier effect slot bs')
     bs' <- get
-    logger mv' attackerPokemon defenderPokemon slot bs'
+    logger effect slot bs'
 
 
 --------------------------------------------------------------------------------
