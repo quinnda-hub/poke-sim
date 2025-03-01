@@ -3,7 +3,7 @@
 
 module Pokemon.Battle.MoveEffect.Status where
 
-import           Data.Text                           as T
+import           Data.Text                           as T (pack)
 import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState,
                                                       Player (..),
                                                       PlayerSlot (..), player1,
@@ -12,13 +12,12 @@ import           Pokemon.Battle.Logging              (logStatus)
 import           Pokemon.Battle.MoveEffect.Internal  (EffectStep (InflictStatus),
                                                       applyEffectForMove)
 import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..))
-import           Pokemon.Data.Move.Internal          (Move (basePower), Status,
-                                                      status)
+import           Pokemon.Data.Move.Internal          (Move, Status, status)
 
 -- | If the move applies status, produce an EffectStep.
 gatherStatus :: Move -> Maybe EffectStep
 gatherStatus mv =
-  case basePower mv of
+  case status mv of
     Just _  -> Just InflictStatus
     Nothing -> Nothing
 

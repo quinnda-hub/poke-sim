@@ -34,31 +34,34 @@ gatherEffects mv =
 -- | Applies a single effect step using the current move context.
 applySingleStep :: Move -> EffectStep -> BattleM ()
 applySingleStep mv DoDamage = do
-  bs  <- get
-  hit <- maybe (pure True) checkAccuracy mv.accuracy    -- Assuming Accuracy being Nothing means it also always hits. Will check later.
-  let (attackerPokemon, defenderPokemon) = getAttackerAndDefender bs
+  bs <- get
+  let (attackerPokemon, defenderPokemon) = getAttackerAndDefender bs 
       ts      = mv.target
       targets = resolveTargets ts bs.turnContext
-  if hit
-    then applyDamageForMove mv attackerPokemon defenderPokemon targets
-    else logMiss attackerPokemon.name
+  applyDamageForMove mv attackerPokemon defenderPokemon targets
 
 applySingleStep mv InflictStatus = do
-  bs  <- get
-  hit <- maybe (pure True) checkAccuracy mv.accuracy
-  let (attackerPokemon, defenderPokemon) = getAttackerAndDefender bs
+  bs <- get 
+  let (attackerPokemon, defenderPokemon) = getAttackerAndDefender bs 
       ts = mv.target
       targets = resolveTargets ts bs.turnContext
-  if hit
-    then applyStatusForMove mv attackerPokemon defenderPokemon targets
-    else logMiss attackerPokemon.name
+  applyStatusForMove mv attackerPokemon defenderPokemon targets
 
 applySingleStep _ (SetWeather w) =
   modify $ \bs -> bs { weather = w }
 
+
 -- | Applies all effect steps associated with a move.
 applyMoveAction :: Move -> BattleM ()
-applyMoveAction mv = mapM_ (applySingleStep mv) (gatherEffects mv)
+applyMoveAction mv = do
+  bs <- get
+  hit <- maybe (pure True) checkAccuracy mv.accuracy
+  if hit
+    then mapM_ (applySingleStep mv) (gatherEffects mv)
+    else do
+      let (attackerPokemon, _) = getAttackerAndDefender bs
+      logMiss attackerPokemon.name
+
 
 -- | Applies a move given an explicit attacker and defender.
 applyMoveWithContext :: Move -> PlayerSlot -> PlayerSlot -> BattleM ()
