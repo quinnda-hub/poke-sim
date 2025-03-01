@@ -9,19 +9,27 @@ module Pokemon.Battle.MoveEffect
 
 
 import           Control.Monad.Trans.State           (get, modify)
+import           Data.Maybe                          (catMaybes)
 import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
                                                       PlayerSlot,
                                                       TurnContext (..))
 import           Pokemon.Battle.Logging              (logMiss)
-import           Pokemon.Battle.MoveEffect.Damage    (applyDamageForMove)
+import           Pokemon.Battle.MoveEffect.Damage    (applyDamageForMove,
+                                                      gatherDamage)
 import           Pokemon.Battle.MoveEffect.Internal  (EffectStep (..),
                                                       checkAccuracy,
-                                                      gatherEffects,
                                                       getAttackerAndDefender,
                                                       resolveTargets)
-import           Pokemon.Battle.MoveEffect.Status    (applyStatusForMove)
+import           Pokemon.Battle.MoveEffect.Status    (applyStatusForMove,
+                                                      gatherStatus)
 import           Pokemon.Battle.Pokemon.Internal     (Pokemon (name))
 import           Pokemon.Data.Move.Internal          (Move (..), target)
+
+-- | Collects all effect steps from a move.
+gatherEffects :: Move -> [EffectStep]
+gatherEffects mv =
+  catMaybes [ gatherDamage mv
+            , gatherStatus mv ]
 
 -- | Applies a single effect step using the current move context.
 applySingleStep :: Move -> EffectStep -> BattleM ()

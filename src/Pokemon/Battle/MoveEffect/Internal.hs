@@ -4,7 +4,6 @@
 module Pokemon.Battle.MoveEffect.Internal
   ( EffectStep(..)
   , applyEffectForMove
-  , gatherEffects
   , resolveTargets
   , checkAccuracy
   , getAttackerAndDefender
@@ -12,7 +11,6 @@ module Pokemon.Battle.MoveEffect.Internal
 
 import           Control.Monad                       (forM_)
 import           Control.Monad.Trans.State           (get, modify)
-import           Data.Maybe                          (catMaybes)
 import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
                                                       Player (..),
                                                       PlayerSlot (Player1, Player2),
@@ -20,8 +18,7 @@ import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
                                                       applyModifiers, getRNG,
                                                       updateRNG)
 import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..))
-import           Pokemon.Data.Move.Internal          (Accuracy (..), Move (..), Target (..),
-                                                      basePower, weatherEffect)
+import           Pokemon.Data.Move.Internal          (Accuracy (..), Move (..), Target (..))
 import           Pokemon.Mechanics.Weather           (Weather)
 import           System.Random                       (Random (randomR))
 
@@ -53,28 +50,8 @@ applyEffectForMove mv attackerPokemon defenderPokemon targetSlots effectFn modif
 -- | Represents a single effect step during move usage.
 data EffectStep
     = DoDamage            -- ^ Indicates that damage should be calculated and applied.
-    | InflictStatus
+    | InflictStatus       -- ^ Inflicts a primary status effect.
     | SetWeather Weather  -- ^ Change the battle's weather.
-
--- | Collects all effect steps from a move.
-gatherEffects :: Move -> [EffectStep]
-gatherEffects mv =
-  catMaybes [ gatherDamage mv
-            , gatherWeather mv ]
-
--- | If the move has a base power, produce a damage step.
-gatherDamage :: Move -> Maybe EffectStep
-gatherDamage mv =
-  case basePower mv of
-    Just _  -> Just DoDamage
-    Nothing -> Nothing
-
--- | If the move sets weather, produce that effect.
-gatherWeather :: Move -> Maybe EffectStep
-gatherWeather mv =
-  case mv.weatherEffect of
-    Just w  -> Just (SetWeather w)
-    Nothing -> Nothing
 
 --------------------------------------------------------------------------------
 -- Target Resolution and Damage Helpers
