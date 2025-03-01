@@ -22,8 +22,9 @@ import           Pokemon.Battle.Damage.Internal      (calculateDamage)
 import           Pokemon.Battle.Logging              (logDamage, logMiss)
 import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..))
 import           Pokemon.Data.Move.Internal          (Accuracy (..), Move (..),
-                                                      Target (..), basePower,
-                                                      target, weatherEffect, Status(..))
+                                                      Status (..), Target (..),
+                                                      basePower, target,
+                                                      weatherEffect)
 import           Pokemon.Mechanics.Weather           (Weather)
 import           System.Random                       (Random (randomR))
 
@@ -34,7 +35,7 @@ import           System.Random                       (Random (randomR))
 -- | Represents a single effect step during move usage.
 data EffectStep
     = DoDamage            -- ^ Indicates that damage should be calculated and applied.
-    | InflictStatus 
+    | InflictStatus
     | SetWeather Weather  -- ^ Change the battle's weather.
 
 -- | Collects all effect steps from a move.
@@ -96,24 +97,24 @@ applySingleStep :: Move -> EffectStep -> BattleM ()
 applySingleStep mv DoDamage = do
   bs  <- get
   hit <- maybe (pure True) checkAccuracy mv.accuracy    -- Assuming Accuracy being Nothing means it also always hits. Will check later.
-  let (attackerPokemon, defenderPokemon) = getAttackerAndDefender bs 
+  let (attackerPokemon, defenderPokemon) = getAttackerAndDefender bs
       ts      = mv.target
       targets = resolveTargets ts bs.turnContext
   if hit
     then applyDamageForMove mv attackerPokemon defenderPokemon targets
     else logMiss attackerPokemon.name
 
-applySingleStep mv InflictStatus = do 
-  bs  <- get 
+applySingleStep mv InflictStatus = do
+  bs  <- get
   hit <- maybe (pure True) checkAccuracy mv.accuracy
-  let (attackerPokemon, _) = getAttackerAndDefender bs 
-      ts = mv.target 
-      targets = resolveTargets ts bs.turnContext 
-  if hit 
+  let (attackerPokemon, _) = getAttackerAndDefender bs
+      ts = mv.target
+      targets = resolveTargets ts bs.turnContext
+  if hit
     then case mv.status of
-      Just s -> applyStatusForMove s targets
-      Nothing     -> pure ()
-      else logMiss attackerPokemon.name     
+      Just s  -> applyStatusForMove s targets
+      Nothing -> pure ()
+      else logMiss attackerPokemon.name
 
 applySingleStep _ (SetWeather w) =
   modify $ \bs -> bs { weather = w }
@@ -150,13 +151,13 @@ resolveTargets t tc =
     _      -> [] -- Placeholder.
 
 getAttackerAndDefender :: BattleState -> (Pokemon, Pokemon)
-getAttackerAndDefender bs  = 
+getAttackerAndDefender bs  =
   let attackerPokemon = case bs.turnContext.attacker of
                           Player1 -> bs.player1.active
                           Player2 -> bs.player2.active
       defenderPokemon = case bs.turnContext.defender of
                           Player1 -> bs.player1.active
-                          Player2 -> bs.player2.active 
+                          Player2 -> bs.player2.active
   in (attackerPokemon, defenderPokemon)
 
 -- | Applies damage to the specified player slot.

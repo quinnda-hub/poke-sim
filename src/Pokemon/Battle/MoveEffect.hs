@@ -1,6 +1,9 @@
-module Pokemon.Battle.MoveEffect (applyMoveWithContext,
-                                  gatherEffects) where
+module Pokemon.Battle.MoveEffect (
+  applyMoveWithContext,
+  gatherEffects,
+) where
 
-
-import           Pokemon.Battle.MoveEffect.Internal (applyMoveWithContext,
-                                                     gatherEffects)
+import Pokemon.Battle.MoveEffect.Internal (
+  applyMoveWithContext,
+  gatherEffects,
+ )

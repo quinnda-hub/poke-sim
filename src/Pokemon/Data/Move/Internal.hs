@@ -13,6 +13,7 @@ module Pokemon.Data.Move.Internal
 
 import           Control.Applicative       ((<|>))
 import           Control.Exception         (IOException, try)
+
 import           Data.Aeson                (FromJSON, Object,
                                             Value (Bool, Number, Object, String),
                                             eitherDecode, withBool, withObject,
