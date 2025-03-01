@@ -62,7 +62,7 @@ boostAbilityEffect requiredType factor ctx = do
               pure ()
 
 blazeEffect :: AbilityEffectFunc
-blazeEffect = boostAbilityEffect Fire 1.5 
+blazeEffect = boostAbilityEffect Fire 1.5
 
 -- | Blaze ability instance.
 blazeAbility :: Ability

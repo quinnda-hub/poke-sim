@@ -30,7 +30,8 @@ import           Pokemon.Battle.BattleState.Internal (BattleState (..),
 import           Pokemon.Battle.Simulation.Internal  (simulateBattle)
 
 import           Pokemon.Mechanics.Weather           (Weather (..))
-import           Pokemon.Pretty                      (printPokemon, printLogMessages)
+import           Pokemon.Pretty                      (printLogMessages,
+                                                      printPokemon)
   -- Assume simulateBattle :: BattleM () is defined to run a simple battle loop.
 
 --------------------------------------------------------------------------------

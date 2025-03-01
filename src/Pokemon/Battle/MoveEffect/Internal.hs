@@ -85,19 +85,30 @@ gatherWeather mv =
 --------------------------------------------------------------------------------
 
 -- | Shared helper to calculate and apply damage for a move.
+--applyDamageForMove :: Move -> Pokemon -> Pokemon -> [PlayerSlot] -> BattleM ()
+--applyDamageForMove mv attackerPokemon defenderPokemon targetSlots = do
+  --bs  <- get
+  --let tc  = bs.turnContext
+      --mv' = applyModifiers tc.moveModifiers mv
+  --dmg <- calculateDamage mv' attackerPokemon defenderPokemon
+  --forM_ targetSlots $ \slot -> do
+    --modify (applyDamage slot dmg)
+    --bs' <- get  -- Retrieve the updated battle state for logging.
+    --let targetName = case slot of
+                       --Player1 -> bs'.player1.active.name
+                       --Player2 -> bs'.player2.active.name
+    --logDamage dmg targetName
+
 applyDamageForMove :: Move -> Pokemon -> Pokemon -> [PlayerSlot] -> BattleM ()
-applyDamageForMove mv attackerPokemon defenderPokemon targetSlots = do
-  bs  <- get
-  let tc  = bs.turnContext
-      mv' = applyModifiers tc.moveModifiers mv
-  dmg <- calculateDamage mv' attackerPokemon defenderPokemon
-  forM_ targetSlots $ \slot -> do
-    modify (applyDamage slot dmg)
-    bs' <- get  -- Retrieve the updated battle state for logging.
-    let targetName = case slot of
-                       Player1 -> bs'.player1.active.name
-                       Player2 -> bs'.player2.active.name
-    logDamage dmg targetName
+applyDamageForMove mv attackerPokemon defenderPokemon targetSlots =
+  applyEffectForMove mv attackerPokemon defenderPokemon targetSlots
+    (\mv' attackerPokemon' defenderPokemon' _ _ -> calculateDamage mv' attackerPokemon' defenderPokemon')
+    (flip applyDamage)
+    (\dmg slot bs ->
+        let targetName = case slot of
+                           Player1 -> bs.player1.active.name
+                           Player2 -> bs.player2.active.name
+        in logDamage dmg targetName)
 
 --------------------------------------------------------------------------------
 -- Status
