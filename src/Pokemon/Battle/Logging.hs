@@ -8,6 +8,7 @@ module Pokemon.Battle.Logging (
   logVictory,
   logMiss,
   logCrit,
+  logStatus,
   LogMessage (..),
 ) where
 
@@ -23,6 +24,7 @@ data LogMessage
   | VictoryLog {victor :: Text}
   | MissLog {whiffer :: Text}
   | CritLog {critter :: Text}
+  | StatusLog {actor :: Text, status :: Text}
   deriving (Show, Eq)
 
 -- | Log a damage event.
@@ -52,3 +54,8 @@ logMiss w = tell [MissLog w]
 -- | Log a critical hit.
 logCrit :: (MonadWriter [LogMessage] m) => Text -> m ()
 logCrit w = tell [CritLog w]
+
+-- | Log status being applied.
+logStatus :: (MonadWriter [LogMessage] m) => Text -> Text -> m ()
+logStatus act sts = tell [StatusLog act sts]
+

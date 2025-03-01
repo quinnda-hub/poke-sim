@@ -10,10 +10,10 @@ module Pokemon.Pretty
 import           Data.Text                       (Text)
 import qualified Data.Text                       as T
 import qualified Data.Text.IO                    as TIO
+import           Pokemon.Battle.Logging          (LogMessage (..))
 import           Pokemon.Battle.Pokemon.Internal (MoveSet (..), Pokemon (..))
 import           Pokemon.Data.Move.Internal      (Move (..))
 import           Pokemon.Mechanics.PType         (PType)
-import Pokemon.Battle.Logging (LogMessage(..))
 
 -- | Pretty print a Pokemon.
 prettyPokemon :: Pokemon -> Text
@@ -75,10 +75,12 @@ prettyLogMessage (WeatherLog w) =
   T.concat ["[Weather] ", T.pack (show w)]
 prettyLogMessage (VictoryLog v) =
   T.concat ["[Victory] ", v, " wins!"]
-prettyLogMessage (MissLog w) = 
+prettyLogMessage (MissLog w) =
   T.concat ["[Miss] ", w, " missed their attack!"]
-prettyLogMessage (CritLog _) = 
+prettyLogMessage (CritLog _) =
   T.concat ["[Critical Hit] ", "Critical hit!"]
+prettyLogMessage (StatusLog a s) =
+  T.concat ["[Status] ", a, " is ", s]
 
 -- | Print a list of log messages to the console.
 printLogMessages :: [LogMessage] -> IO ()
