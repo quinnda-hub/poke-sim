@@ -28,6 +28,25 @@ import           Pokemon.Data.Move.Internal          (Accuracy (..), Move (..),
 import           Pokemon.Mechanics.Weather           (Weather)
 import           System.Random                       (Random (randomR))
 
+applyEffectForMove
+  :: Move
+  -> Pokemon  -- ^ Attacker
+  -> Pokemon  -- ^ Defender
+  -> [PlayerSlot]
+  -> (Move -> Pokemon -> Pokemon -> PlayerSlot -> BattleState -> BattleState)
+       -- ^ Modifier: takes the modified move, attacker, defender, and target slot to update the battle state.
+  -> (Move -> Pokemon -> Pokemon -> PlayerSlot -> BattleState -> BattleM ())
+       -- ^ Logger: takes the modified move, attacker, defender, and target slot for logging.
+  -> BattleM ()
+applyEffectForMove mv attackerPokemon defenderPokemon targetSlots modifier logger = do
+  bs <- get
+  let mv' = applyModifiers bs.turnContext.moveModifiers mv
+  forM_ targetSlots $ \slot -> do
+    modify (modifier mv' attackerPokemon defenderPokemon slot)
+    bs' <- get
+    logger mv' attackerPokemon defenderPokemon slot bs'
+
+
 --------------------------------------------------------------------------------
 -- Effect Steps
 --------------------------------------------------------------------------------
