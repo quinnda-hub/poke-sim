@@ -37,29 +37,28 @@ gatherEffects mv =
 -- | Applies a single effect step using the current move context.
 applySingleStep :: Move -> EffectStep -> BattleM ()
 applySingleStep mv DoDamage = do
-  bs <- get
-  let (attackerPokemon, defenderPokemon) = getAttackerAndDefender bs
-      ts      = mv.target
-      targets = resolveTargets ts bs.turnContext
+  (attackerPokemon, defenderPokemon, targets) <- getEffectContext mv
   applyDamageForMove mv attackerPokemon defenderPokemon targets
 
 applySingleStep mv InflictStatus = do
-  bs <- get
-  let (attackerPokemon, defenderPokemon) = getAttackerAndDefender bs
-      ts = mv.target
-      targets = resolveTargets ts bs.turnContext
+  (attackerPokemon, defenderPokemon, targets) <- getEffectContext mv
   applyStatusForMove mv attackerPokemon defenderPokemon targets
 
 applySingleStep mv BoostStats = do
-  bs <- get
-  let (attackerPokemon, defenderPokemon) = getAttackerAndDefender bs
-      ts = mv.target
-      targets = resolveTargets ts bs.turnContext
+  (attackerPokemon, defenderPokemon, targets) <- getEffectContext mv
   applyBoostsForMove mv attackerPokemon defenderPokemon targets
 
 applySingleStep _ (SetWeather w) =
   modify $ \bs -> bs { weather = w }
 
+-- | Helper for applySingleStep.
+getEffectContext :: Move -> BattleM (Pokemon, Pokemon, [PlayerSlot])
+getEffectContext mv = do
+  bs <- get
+  let (a, d) = getAttackerAndDefender bs
+      ts       = mv.target
+      targets  = resolveTargets ts bs.turnContext
+  pure (a, d, targets)
 
 -- | Applies all effect steps associated with a move.
 applyMoveAction :: Move -> BattleM ()
