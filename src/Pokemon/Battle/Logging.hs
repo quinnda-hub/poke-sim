@@ -9,12 +9,15 @@ module Pokemon.Battle.Logging (
   logMiss,
   logCrit,
   logStatus,
+  logBoosts,
   LogMessage (..),
 ) where
 
-import           Control.Monad.Writer      (MonadWriter, tell)
-import           Data.Text                 (Text)
-import           Pokemon.Mechanics.Weather (Weather)
+import           Control.Monad.Writer            (MonadWriter, tell)
+import           Data.Text                       (Text)
+import           Pokemon.Battle.Pokemon.Internal (PokemonBoosts)
+import           Pokemon.Data.Move.Internal      (Boosts)
+import           Pokemon.Mechanics.Weather       (Weather)
 
 data LogMessage
   = DamageLog {damage :: Int, target :: Text}
@@ -25,6 +28,7 @@ data LogMessage
   | MissLog {whiffer :: Text}
   | CritLog {critter :: Text}
   | StatusLog {actor :: Text, status :: Text}
+  | BoostsLog {actor :: Text, boosts :: Boosts, pokeBoosts :: PokemonBoosts}
   deriving (Show, Eq)
 
 -- | Log a damage event.
@@ -58,4 +62,8 @@ logCrit w = tell [CritLog w]
 -- | Log status being applied.
 logStatus :: (MonadWriter [LogMessage] m) => Text -> Text -> m ()
 logStatus act sts = tell [StatusLog act sts]
+
+-- | Log boosts being applied.
+logBoosts :: (MonadWriter [LogMessage] m) => Text -> Boosts -> PokemonBoosts -> m ()
+logBoosts act mBoosts pBoosts = tell [BoostsLog act mBoosts pBoosts]
 
