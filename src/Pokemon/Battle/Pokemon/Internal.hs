@@ -5,6 +5,7 @@
 
 module Pokemon.Battle.Pokemon.Internal
   ( Pokemon(..)
+  , PokemonBoosts(..)
   , MoveSet(..)
   , Nature(..)
   , Stat(..)
@@ -31,27 +32,29 @@ import           Pokemon.Mechanics.PType       (PType)
 
 -- | Represents an in-battle Pokemon instance with fully determined stats.
 data Pokemon = Pokemon
-  { name    :: Text        -- ^ Name of the Pokemon. 
-  , type1   :: PType       -- ^ Primary type of the Pokemon. 
-  , type2   :: Maybe PType -- ^ Secondary type of the Pokemon (if any). 
-  , level   :: Int         -- ^ Level of the Pokemon. 
+  { name    :: Text        -- ^ Name of the Pokemon.
+  , type1   :: PType       -- ^ Primary type of the Pokemon.
+  , type2   :: Maybe PType -- ^ Secondary type of the Pokemon (if any).
+  , level   :: Int         -- ^ Level of the Pokemon.
   , ability :: Text        -- ^ Ability name of the Pokemon.
-  , moves   :: MoveSet     -- ^ Moves the Pokemon knows. 
-  , nature  :: Nature      -- ^ Nature of the Pokemon. 
-  , ivs     :: IVs         -- ^ Individual Values. 
-  , evs     :: EVs         -- ^ Effort Values. 
+  , moves   :: MoveSet     -- ^ Moves the Pokemon knows.
+  , nature  :: Nature      -- ^ Nature of the Pokemon.
+  , ivs     :: IVs         -- ^ Individual Values.
+  , evs     :: EVs         -- ^ Effort Values.
 
   -- Status effects
-  , pstatus  :: Maybe Status -- ^ Primary status effect.
+  , pstatus :: Maybe Status  -- ^ Primary status effect.
+  -- Stat modifiers.
+  , boosts  :: PokemonBoosts -- ^ Stat boosts from moves such as Swords Dance.
 
     -- Calculated stats
-  , maxHP   :: Int         -- ^ The max HP value. 
-  , hp      :: Int         -- ^ Hit Points. 
-  , atk     :: Int         -- ^ Attack. 
-  , def     :: Int         -- ^ Defense. 
-  , spa     :: Int         -- ^ Special Attack. 
-  , spd     :: Int         -- ^ Special Defense. 
-  , spe     :: Int         -- ^ Speed. 
+  , maxHP   :: Int         -- ^ The max HP value.
+  , hp      :: Int         -- ^ Hit Points.
+  , atk     :: Int         -- ^ Attack.
+  , def     :: Int         -- ^ Defense.
+  , spa     :: Int         -- ^ Special Attack.
+  , spd     :: Int         -- ^ Special Defense.
+  , spe     :: Int         -- ^ Speed.
   } deriving (Show, Eq)
 
 -- | Represents a set of moves a Pokémon can have (up to four).
@@ -60,6 +63,16 @@ data MoveSet = MoveSet
   , move2 :: Maybe Move
   , move3 :: Maybe Move
   , move4 :: Maybe Move
+  } deriving (Show, Eq)
+
+data PokemonBoosts = PokemonBoosts
+  { acc :: Int -- ^ Accuracy boost.
+  , atk :: Int -- ^ Attack boost.
+  , def :: Int -- ^ Defense boost.
+  , eva :: Int -- ^ Evasion boost.
+  , spa :: Int -- ^ Special attack boost.
+  , spd :: Int -- ^ Spedical defense boost.
+  , spe :: Int -- ^ Speed boost.
   } deriving (Show, Eq)
 
 type Level          = Int
@@ -152,7 +165,7 @@ natureEffects = Map.fromList
 mkPokemon
   :: PokedexMon
   -> Level
-  -> AbilityName 
+  -> AbilityName
   -> MoveSet
   -> Nature
   -> IVs
