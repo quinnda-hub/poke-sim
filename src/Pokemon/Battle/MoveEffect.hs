@@ -14,6 +14,8 @@ import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
                                                       PlayerSlot,
                                                       TurnContext (..))
 import           Pokemon.Battle.Logging              (logMiss)
+import           Pokemon.Battle.MoveEffect.Boosts    (applyBoostsForMove,
+                                                      gatherBoosts)
 import           Pokemon.Battle.MoveEffect.Damage    (applyDamageForMove,
                                                       gatherDamage)
 import           Pokemon.Battle.MoveEffect.Internal  (EffectStep (..),
@@ -29,23 +31,31 @@ import           Pokemon.Data.Move.Internal          (Move (..), target)
 gatherEffects :: Move -> [EffectStep]
 gatherEffects mv =
   catMaybes [ gatherDamage mv
-            , gatherStatus mv ]
+            , gatherStatus mv
+            , gatherBoosts mv]
 
 -- | Applies a single effect step using the current move context.
 applySingleStep :: Move -> EffectStep -> BattleM ()
 applySingleStep mv DoDamage = do
   bs <- get
-  let (attackerPokemon, defenderPokemon) = getAttackerAndDefender bs 
+  let (attackerPokemon, defenderPokemon) = getAttackerAndDefender bs
       ts      = mv.target
       targets = resolveTargets ts bs.turnContext
   applyDamageForMove mv attackerPokemon defenderPokemon targets
 
 applySingleStep mv InflictStatus = do
-  bs <- get 
-  let (attackerPokemon, defenderPokemon) = getAttackerAndDefender bs 
+  bs <- get
+  let (attackerPokemon, defenderPokemon) = getAttackerAndDefender bs
       ts = mv.target
       targets = resolveTargets ts bs.turnContext
   applyStatusForMove mv attackerPokemon defenderPokemon targets
+
+applySingleStep mv BoostStats = do
+  bs <- get
+  let (attackerPokemon, defenderPokemon) = getAttackerAndDefender bs
+      ts = mv.target
+      targets = resolveTargets ts bs.turnContext
+  applyBoostsForMove mv attackerPokemon defenderPokemon targets
 
 applySingleStep _ (SetWeather w) =
   modify $ \bs -> bs { weather = w }

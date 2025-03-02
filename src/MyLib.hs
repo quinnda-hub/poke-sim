@@ -1,5 +1,6 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedStrings     #-}
+{-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
 
 module MyLib (someFunc, someFoo, someDemoBattle) where
 
