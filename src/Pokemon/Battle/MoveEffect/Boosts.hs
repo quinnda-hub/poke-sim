@@ -4,6 +4,8 @@
 module Pokemon.Battle.MoveEffect.Boosts where
 
 import           Data.Maybe                          (fromMaybe)
+import           Pokemon.Battle.BattleState          (BattleState (..),
+                                                      PlayerSlot (..))
 import           Pokemon.Battle.BattleState.Internal (Player (..))
 import           Pokemon.Battle.MoveEffect.Internal  (EffectStep (..))
 import qualified Pokemon.Battle.Pokemon.Internal     as Poke
@@ -20,6 +22,10 @@ clampBoost n
   | n < (-6)  = -6
   | n > 6     = 6
   | otherwise = 6
+
+applyBoosts :: PlayerSlot -> Boosts -> BattleState -> BattleState
+applyBoosts Player1 b bs = bs { player1 = applyBoostsToActive b bs.player1 }
+applyBoosts Player2 b bs = bs { player2 = applyBoostsToActive b bs.player2 }
 
 applyBoostsToActive :: Boosts -> Player -> Player
 applyBoostsToActive moveBoosts player =
