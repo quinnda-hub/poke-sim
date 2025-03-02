@@ -18,7 +18,8 @@ import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
                                                       applyModifiers, getRNG,
                                                       updateRNG)
 import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..))
-import           Pokemon.Data.Move.Internal          (Accuracy (..), Move (..), Target (..))
+import           Pokemon.Data.Move.Internal          (Accuracy (..), Move (..),
+                                                      Target (..))
 import           Pokemon.Mechanics.Weather           (Weather)
 import           System.Random                       (Random (randomR))
 
@@ -51,6 +52,7 @@ applyEffectForMove mv attackerPokemon defenderPokemon targetSlots effectFn modif
 data EffectStep
     = DoDamage            -- ^ Indicates that damage should be calculated and applied.
     | InflictStatus       -- ^ Inflicts a primary status effect.
+    | BoostStats          -- ^ Raises or lowers the targets stats.
     | SetWeather Weather  -- ^ Change the battle's weather.
 
 --------------------------------------------------------------------------------

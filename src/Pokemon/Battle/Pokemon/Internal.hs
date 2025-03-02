@@ -197,23 +197,24 @@ mkPokemon pmon lvl aname moveset nature ivs evs =
       speVal = calculateStat Speed          bs lvl ivs evs (natureBoost Speed)
   in
     Pokemon
-      { name    = pmon.name
-      , type1   = t1
-      , type2   = t2
-      , level   = lvl
-      , ability = aname
-      , moves   = moveset
-      , nature  = nature
-      , ivs     = ivs
-      , evs     = evs
+      { name     = pmon.name
+      , type1    = t1
+      , type2    = t2
+      , level    = lvl
+      , ability  = aname
+      , moves    = moveset
+      , nature   = nature
+      , ivs      = ivs
+      , evs      = evs
       , pstatus  = Nothing
-      , maxHP   = hpVal
-      , hp      = hpVal
-      , atk     = atkVal
-      , def     = defVal
-      , spa     = spaVal
-      , spd     = spdVal
-      , spe     = speVal
+      , boosts   = defaultBoosts
+      , maxHP    = hpVal
+      , hp       = hpVal
+      , atk      = atkVal
+      , def      = defVal
+      , spa      = spaVal
+      , spd      = spdVal
+      , spe      = speVal
       }
 
 ----------------------------------------------------------------
@@ -252,6 +253,17 @@ calculateStat stat bs level ivs evs modifier =
       floor $
         ((((2 * fromIntegral baseStat + fromIntegral iv + fromIntegral (ev `div` 4))
            * fromIntegral level) / 100) + 5) * modifier
+
+defaultBoosts :: PokemonBoosts
+defaultBoosts = PokemonBoosts 
+                  { acc = 0 
+                  , atk = 0 
+                  , def = 0 
+                  , eva = 0 
+                  , spa = 0
+                  , spd = 0 
+                  , spe = 0
+                  }
 
 ----------------------------------------------------------------
 -- Validation
