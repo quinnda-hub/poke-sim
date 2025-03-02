@@ -80,7 +80,7 @@ prettyLogMessage (MissLog w) =
 prettyLogMessage (CritLog _) =
   T.concat ["[Critical Hit] ", "Critical hit!"]
 prettyLogMessage (StatusLog a s) =
-  T.concat ["[Status] ", a, " is ", s]
+  T.concat ["[Status] ", s, " is ", a <> "ed"]
 
 -- | Print a list of log messages to the console.
 printLogMessages :: [LogMessage] -> IO ()
