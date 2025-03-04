@@ -7,12 +7,16 @@ module Pokemon.Pretty
   , printLogMessages
   ) where
 
+import           Data.Maybe                      (fromMaybe)
 import           Data.Text                       (Text)
 import qualified Data.Text                       as T
 import qualified Data.Text.IO                    as TIO
 import           Pokemon.Battle.Logging          (LogMessage (..))
-import           Pokemon.Battle.Pokemon.Internal (MoveSet (..), Pokemon (..))
-import           Pokemon.Data.Move.Internal      (Move (..))
+import           Pokemon.Battle.Pokemon.Internal (MoveSet (..), Pokemon (..),
+                                                  PokemonBoosts)
+import qualified Pokemon.Battle.Pokemon.Internal as P
+import           Pokemon.Data.Move.Internal      (Boosts, Move (..))
+import qualified Pokemon.Data.Move.Internal      as M
 import           Pokemon.Mechanics.PType         (PType)
 
 -- | Pretty print a Pokemon.
@@ -81,6 +85,38 @@ prettyLogMessage (CritLog _) =
   T.concat ["[Critical Hit] ", "Critical hit!"]
 prettyLogMessage (StatusLog a s) =
   T.concat ["[Status] ", s, " is ", a <> "ed"]
+prettyLogMessage (BoostsLog a mb pb) =
+  prettyBoostsLogMessage a mb pb
+
+-- | Given a stat name, the boost change from the move (delta),
+--   and  the new total value, produce a pretty message for the stat. :w
+prettyBoostChange :: Text -> Int -> Int -> Text
+prettyBoostChange statName delta newVal
+  | delta > 0 =
+    if newVal == 6 then statName <> " won't go any higher!"
+    else if delta == 1 then statName <> " rose!"
+    else if delta >= 2 then statName <> " rose sharply!"
+    else ""
+  | delta < 0 =
+    if newVal == (-6) then statName <> " won't go any lower!"
+    else if delta == (-1) then statName <> " fell!"
+    else if delta <= (-2) then statName <> " fell sharply!"
+    else ""
+  | otherwise = ""
+
+-- | Pretty print a boost log message.
+prettyBoostsLogMessage :: Text -> Boosts -> PokemonBoosts -> Text
+prettyBoostsLogMessage targetName moveBoost newBoost =
+  let accMsg = prettyBoostChange "Accuracy" (fromMaybe 0 moveBoost.acc) newBoost.acc
+      atkMsg = prettyBoostChange "Attack"   (fromMaybe 0 moveBoost.atk) newBoost.atk
+      defMsg = prettyBoostChange "Defense"  (fromMaybe 0 moveBoost.def) newBoost.def
+      evaMsg = prettyBoostChange "Evasion"  (fromMaybe 0 moveBoost.eva) newBoost.eva
+      spaMsg = prettyBoostChange "Special Attack" (fromMaybe  0 moveBoost.spa) newBoost.spa
+      spdMsg = prettyBoostChange "Special Defense" (fromMaybe 0 moveBoost.spd) newBoost.spd
+      speMsg = prettyBoostChange "Speed"    (fromMaybe 0 moveBoost.spe) newBoost.spe
+      messages = filter (not . T.null) [accMsg, atkMsg, defMsg, evaMsg, spaMsg, spdMsg, speMsg]
+      combined = T.intercalate " " messages
+  in T.concat [targetName, "'s ", combined]
 
 -- | Print a list of log messages to the console.
 printLogMessages :: [LogMessage] -> IO ()

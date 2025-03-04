@@ -9,7 +9,7 @@ import           Control.Monad.Trans.State           (get, put)
 import           Pokemon.Battle.Action.Internal      (applyActions,
                                                       resolveActions)
 import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
-                                                      Player (..), Team(..))
+                                                      Player (..), Team (..))
 
 import           Pokemon.Battle.Logging              (logTurn, logVictory)
 import           Pokemon.Battle.Pokemon.Internal     (isFainted)
@@ -24,7 +24,7 @@ teamFainted t =
   maybe True isFainted t.pokemon2 &&
   maybe True isFainted t.pokemon3 &&
   maybe True isFainted t.pokemon4 &&
-  maybe True isFainted t.pokemon5 
+  maybe True isFainted t.pokemon5
 
 -- | A player is defeated if their active Pokémon is fainted
 --   and their entire team (bench) is fainted.
@@ -51,9 +51,9 @@ simulateBattle bs0 = do
       bs <- get
       logTurn bs.turnNumber
 
-      if isPlayerDefeated bs.player1 
+      if isPlayerDefeated bs.player1
          then logVictory "Player 2"
-         else if isPlayerDefeated bs.player2 
+         else if isPlayerDefeated bs.player2
            then  logVictory "Player 1"
            else do
              let actions = resolveActions bs

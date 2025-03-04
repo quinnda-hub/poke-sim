@@ -26,7 +26,7 @@ clampBoost :: Int -> Int
 clampBoost n
   | n < (-6)  = -6
   | n > 6     = 6
-  | otherwise = 6
+  | otherwise = n
 
 -- | Applies boosts to the specified PlayerSlot.
 applyBoosts :: PlayerSlot -> Boosts -> BattleState -> BattleState
