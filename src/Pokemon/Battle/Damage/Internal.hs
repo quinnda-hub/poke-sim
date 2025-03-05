@@ -9,7 +9,8 @@ import           Data.Maybe                          (fromMaybe)
 import           Pokemon.Battle.BattleState.Internal (BattleM, getRNG,
                                                       updateRNG)
 import           Pokemon.Battle.Logging              (logCrit)
-import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..))
+import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..),
+                                                      PokemonBoosts (..))
 import           Pokemon.Data.Move.Internal          (Move, MoveCategory (..),
                                                       basePower, category,
                                                       critRatio, moveType)
@@ -44,21 +45,31 @@ calculateDamage move attacker defender
   | otherwise = do
      let lvl   = attacker.level
          power = fromMaybe 0 move.basePower
-         (aStat, dStat) =
+         (baseAStat, baseDStat, boostAStage, boostDStage) =
            case move.category of
-             Physical -> (attacker.atk, defender.def)
-             Special  -> (attacker.spa, defender.spd)
-             _        -> (0, 0) -- This would only occur if there was an option besides Physical, Special and Status.
+             Physical -> (attacker.atk, defender.def, attacker.boosts.atk, defender.boosts.def)
+             Special  -> (attacker.spa, defender.spd, attacker.boosts.spa, defender.boosts.spd)
+             _        -> (0, 0, 0, 0) -- This would only occur if there was an option besides Physical, Special and Status.
+         effectiveA = floor $ fromIntegral baseAStat * boostMultiplier boostAStage
      rng0 <- getRNG
      let (randInt, rng1) = randomR (85, 100) rng0 :: (Int, StdGen)
          (isCrit,  rng2) = rollCritical move rng1
--- Base damage computed using integer arithmetic.
-         baseDamage = (((2 * lvl) `div` 5 + 2) * power * aStat)
-                      `div` dStat `div` 50 + 2
+         -- If it is a critical hit, ignore the defender's boosts.
+         effectiveD = if isCrit
+                      then baseDStat
+                      else floor $ fromIntegral baseDStat * boostMultiplier boostDStage
+         -- Base damage computed using integer arithmetic.
+         baseDamage = (((2 * lvl) `div` 5 + 2) * power * effectiveA)
+                      `div` effectiveD `div` 50 + 2
      updateRNG rng2
      when isCrit $ logCrit attacker.name
      return (calcDamage randInt isCrit baseDamage)
   where
+    -- Computes the boost multiplier for the given stage.
+    boostMultiplier :: Int -> Double
+    boostMultiplier stage
+      | stage >= 0 = (2 + fromIntegral stage) / 2
+      | otherwise  = 2 / (2 - fromIntegral stage)
     -- | Determines whether the move results in a critical hit based on its crit ratio.
     rollCritical :: Move -> StdGen -> (Bool, StdGen)
     rollCritical m rng =
