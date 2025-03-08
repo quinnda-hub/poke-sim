@@ -9,7 +9,7 @@ import           Control.Monad.Trans.State           (get, modify)
 import qualified Data.Map.Strict                     as Map
 import           Data.Maybe                          (fromMaybe)
 import           Data.Text                           (Text)
-import           Pokemon.Battle.Ability.Types        (Ability (..),
+import           Pokemon.Battle.Ability.Internal     (Ability (..),
                                                       AbilityContext (..),
                                                       AbilityEffectFunc,
                                                       AbilityTrigger (..))

@@ -64,7 +64,7 @@ library
     exposed-modules:  MyLib,
                       Pokemon.Pretty,
                       Pokemon.Battle.Ability, 
-                      Pokemon.Battle.Ability.Types,
+                      Pokemon.Battle.Ability.Internal,
                       Pokemon.Battle.Pokemon.Internal,
                       Pokemon.Battle.Pokemon,
                       Pokemon.Battle.Action.Internal,

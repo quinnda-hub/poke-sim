@@ -1,7 +1,7 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE InstanceSigs          #-}
 
-module Pokemon.Battle.Ability.Types where
+module Pokemon.Battle.Ability.Internal where
 
 import           Data.Text                           (Text)
 import           Pokemon.Battle.BattleState.Internal (BattleM, PlayerSlot)
