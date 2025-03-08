@@ -19,6 +19,7 @@ import           Pokemon.Battle.Damage.Internal      (calculateDamage)
 gatherDamage :: Move -> Maybe EffectStep
 gatherDamage mv =
   case basePower mv of
+    Just 0  -> Nothing
     Just _  -> Just DoDamage
     Nothing -> Nothing
 
