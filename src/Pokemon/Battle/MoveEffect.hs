@@ -44,10 +44,10 @@ gatherEffects mv =
 getEffectContext :: Move -> BattleM (Pokemon, Pokemon, [PlayerSlot])
 getEffectContext mv = do
   bs <- get
-  let (attackerPP, defenderP) = getAttackerAndDefender bs
+  let (attackerP, defenderP) = getAttackerAndDefender bs
       ts       = mv.target
       targets  = resolveTargets ts bs.turnContext
-  pure (attackerPP, defenderP, targets)
+  pure (attackerP, defenderP, targets)
 
 --------------------------------------------------------------------------------
 -- Applying Single Effect Steps
