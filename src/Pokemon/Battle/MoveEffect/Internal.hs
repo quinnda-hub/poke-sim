@@ -17,7 +17,8 @@ import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
                                                       TurnContext (..),
                                                       applyModifiers, getRNG,
                                                       updateRNG)
-import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..))
+import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..),
+                                                      PokemonBoosts (..))
 import           Pokemon.Data.Move.Internal          (Accuracy (..), Move (..),
                                                       Target (..))
 import           Pokemon.Mechanics.Weather           (Weather)
@@ -58,6 +59,7 @@ data EffectStep
 --------------------------------------------------------------------------------
 -- Target Resolution and Damage Helpers
 --------------------------------------------------------------------------------
+
 -- | Determines which player(s) are affected based on the move's target
 --   and the current turn context.
 resolveTargets :: Target -> TurnContext -> [PlayerSlot]
@@ -81,10 +83,23 @@ getAttackerAndDefender bs  =
 -- RNG checks
 --------------------------------------------------------------------------------
 
-checkAccuracy :: Accuracy -> BattleM Bool
-checkAccuracy AlwaysHits = return True
-checkAccuracy (Percent acc) = do
+checkAccuracy :: Accuracy -> Pokemon -> Pokemon -> BattleM Bool
+checkAccuracy AlwaysHits _ _ = return True
+checkAccuracy (Percent baseAcc) attackerP defenderP = do
     rng0 <- getRNG
-    let (roll, newRng) = randomR (1, 100) rng0
+    let (roll, newRng) = randomR (1 :: Int, 100 :: Int) rng0
     updateRNG newRng
-    return (roll <= acc)
+    -- Retrieve the relevant stat changes.
+    let attackerPAccStage = attackerP.boosts.acc
+        defenderPEvaStage = defenderP.boosts.eva
+        attackerPAccMod   = boostModifier attackerPAccStage
+        defenderPEvaMod   = boostModifier defenderPEvaStage
+        effectiveAcc     = fromIntegral baseAcc * (attackerPAccMod / defenderPEvaMod)
+        effectiveAccInt   = min 100 (floor effectiveAcc)
+    return (roll <= effectiveAccInt)
+
+boostModifier :: Int -> Double
+boostModifier stage
+  | stage >= 3 = (3 + fromIntegral stage) / 3
+  | otherwise  = 3 / (3 + fromIntegral (abs stage))
+
