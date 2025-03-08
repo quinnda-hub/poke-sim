@@ -9,6 +9,7 @@ import qualified Data.Text                           as T
 import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
                                                       Player (..),
                                                       PlayerSlot (..),
+                                                      Team (..),
                                                       getPokemonForSlot)
 
 import           Data.List                           (sortBy)
@@ -45,6 +46,19 @@ validMoveActions p = do
                                  , activeMoves.move4
                                  ]
   return [ Action { actor = p, actionType = MoveAction m } | m <- availableMoves ]
+
+validSwitchActions :: PlayerSlot -> BattleM [Action]
+validSwitchActions p = do
+  bs <- get
+  let t = case p of
+            Player1 -> bs.player1.team
+            Player2 -> bs.player2.team
+  return [ Action { actor = p, actionType = SwitchAction pk }
+         | pk <- filter (not . isFainted) (catMaybes [ t.pokemon1
+                                                     , t.pokemon2
+                                                     , t.pokemon3
+                                                     , t.pokemon4
+                                                     , t.pokemon5]) ]
 
 
 -- | Resolves actions for the turn, associating each move with its originating PlayerSlot.
