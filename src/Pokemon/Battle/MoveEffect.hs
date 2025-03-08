@@ -64,12 +64,14 @@ getEffectContext mv = do
 applyMoveAction :: Move -> BattleM ()
 applyMoveAction mv = do
   bs <- get
-  hit <- maybe (pure True) checkAccuracy mv.accuracy
+  let (attackerP, defenderP) = getAttackerAndDefender bs
+  hit <- case mv.accuracy of
+           Nothing   -> pure True
+           Just acc' -> checkAccuracy acc' attackerP defenderP
   if hit
     then mapM_ (applySingleStep mv) (gatherEffects mv)
     else do
-      let (attackerPokemon, _) = getAttackerAndDefender bs
-      logMiss attackerPokemon.name
+      logMiss attackerP.name
 
 
 -- | Applies a move given an explicit attacker and defender.
