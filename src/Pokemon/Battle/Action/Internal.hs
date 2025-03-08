@@ -8,9 +8,11 @@ import qualified Data.Text                           as T
 
 import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
                                                       Player (..),
-                                                      PlayerSlot (..))
+                                                      PlayerSlot (..),
+                                                      getPokemonForSlot)
 
 import           Data.List                           (sortBy)
+import           Data.Maybe                          (catMaybes)
 import           Pokemon.Battle.Ability              (triggerAbilityOnMoveUse)
 import           Pokemon.Battle.Logging              (logAction)
 import           Pokemon.Battle.MoveEffect           (applyMoveWithContext)
@@ -27,10 +29,23 @@ import           Pokemon.Data.Move.Internal          (Move (name), priority)
 data Action = Action
   { actor      :: PlayerSlot  -- ^ The player from whose perspective the move is used.
   , actionType :: ActionType
-  } deriving (Show)
+  } deriving (Show, Eq)
 
 -- Different types of actions. For now, only moves.
-newtype ActionType = MoveAction Move deriving (Show)
+data ActionType = MoveAction Move
+                | SwitchAction Pokemon deriving (Show, Eq)
+
+validMoveActions :: PlayerSlot -> BattleM [Action]
+validMoveActions p = do
+  bs <- get
+  let activeMoves   = moves (getPokemonForSlot p bs)
+      availableMoves = catMaybes [ Just activeMoves.move1
+                                 , activeMoves.move2
+                                 , activeMoves.move3
+                                 , activeMoves.move4
+                                 ]
+  return [ Action { actor = p, actionType = MoveAction m } | m <- availableMoves ]
+
 
 -- | Resolves actions for the turn, associating each move with its originating PlayerSlot.
 resolveActions :: BattleState -> [Action]
