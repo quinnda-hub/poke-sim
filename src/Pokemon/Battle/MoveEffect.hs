@@ -7,7 +7,6 @@ module Pokemon.Battle.MoveEffect
   , applyMoveWithContext
   ) where
 
-
 import           Control.Monad.Trans.State           (get, modify)
 import           Data.Maybe                          (catMaybes)
 import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
@@ -27,39 +26,52 @@ import           Pokemon.Battle.MoveEffect.Status    (applyStatusForMove,
 import           Pokemon.Battle.Pokemon.Internal     (Pokemon (name))
 import           Pokemon.Data.Move.Internal          (Move (..), target)
 
+--------------------------------------------------------------------------------
+-- Effect Gathering
+--------------------------------------------------------------------------------
 -- | Collects all effect steps from a move.
 gatherEffects :: Move -> [EffectStep]
 gatherEffects mv =
   catMaybes [ gatherDamage mv
             , gatherStatus mv
-            , gatherBoosts mv]
+            , gatherBoosts mv
+            ]
 
+--------------------------------------------------------------------------------
+-- Effect Context Helper
+--------------------------------------------------------------------------------
+-- | Helper for retrieving the current battle context relevant to move execution.
+getEffectContext :: Move -> BattleM (Pokemon, Pokemon, [PlayerSlot])
+getEffectContext mv = do
+  bs <- get
+  let (attackerPP, defenderP) = getAttackerAndDefender bs
+      ts       = mv.target
+      targets  = resolveTargets ts bs.turnContext
+  pure (attackerPP, defenderP, targets)
+
+--------------------------------------------------------------------------------
+-- Applying Single Effect Steps
+--------------------------------------------------------------------------------
 -- | Applies a single effect step using the current move context.
 applySingleStep :: Move -> EffectStep -> BattleM ()
 applySingleStep mv DoDamage = do
-  (attackerPokemon, defenderPokemon, targets) <- getEffectContext mv
-  applyDamageForMove mv attackerPokemon defenderPokemon targets
+  (attackerP, defenderP, targets) <- getEffectContext mv
+  applyDamageForMove mv attackerP defenderP targets
 
 applySingleStep mv InflictStatus = do
-  (attackerPokemon, defenderPokemon, targets) <- getEffectContext mv
-  applyStatusForMove mv attackerPokemon defenderPokemon targets
+  (attackerP, defenderP, targets) <- getEffectContext mv
+  applyStatusForMove mv attackerP defenderP targets
 
 applySingleStep mv BoostStats = do
-  (attackerPokemon, defenderPokemon, targets) <- getEffectContext mv
-  applyBoostsForMove mv attackerPokemon defenderPokemon targets
+  (attackerP, defenderP, targets) <- getEffectContext mv
+  applyBoostsForMove mv attackerP defenderP targets
 
 applySingleStep _ (SetWeather w) =
   modify $ \bs -> bs { weather = w }
 
--- | Helper for applySingleStep.
-getEffectContext :: Move -> BattleM (Pokemon, Pokemon, [PlayerSlot])
-getEffectContext mv = do
-  bs <- get
-  let (a, d) = getAttackerAndDefender bs
-      ts       = mv.target
-      targets  = resolveTargets ts bs.turnContext
-  pure (a, d, targets)
-
+--------------------------------------------------------------------------------
+-- Applying a Move Action
+--------------------------------------------------------------------------------
 -- | Applies all effect steps associated with a move.
 applyMoveAction :: Move -> BattleM ()
 applyMoveAction mv = do
@@ -70,17 +82,18 @@ applyMoveAction mv = do
            Just acc' -> checkAccuracy acc' attackerP defenderP
   if hit
     then mapM_ (applySingleStep mv) (gatherEffects mv)
-    else do
-      logMiss attackerP.name
+    else logMiss attackerP.name
 
-
--- | Applies a move given an explicit attacker and defender.
+--------------------------------------------------------------------------------
+-- Applying a Move with Context
+--------------------------------------------------------------------------------
+-- | Applies a move given an explicit attackerP and defenderP.
 applyMoveWithContext :: Move -> PlayerSlot -> PlayerSlot -> BattleM ()
-applyMoveWithContext mv attackerSlot defenderSlot = do
-  -- Update the turn context with the explicit attacker and defender.
+applyMoveWithContext mv attackerPSlot defenderSlot = do
+  -- Update the turn context with the explicit attackerP and defenderP.
   modify $ \bs ->
     bs { turnContext = (turnContext bs)
-                     { attacker = attackerSlot
+                     { attacker = attackerPSlot
                      , defender = defenderSlot
                      }
        }
