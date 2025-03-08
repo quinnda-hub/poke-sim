@@ -60,6 +60,9 @@ validSwitchActions p = do
                                                      , t.pokemon4
                                                      , t.pokemon5]) ]
 
+validActions :: PlayerSlot -> BattleM [Action]
+validActions p = (++) <$> validMoveActions p <*> validSwitchActions p
+
 
 -- | Resolves actions for the turn, associating each move with its originating PlayerSlot.
 resolveActions :: BattleState -> [Action]
