@@ -10,7 +10,8 @@ import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
                                                       Player (..),
                                                       PlayerSlot (..),
                                                       Team (..),
-                                                      getPokemonForSlot)
+                                                      getPokemonForSlot, getRNG,
+                                                      updateRNG)
 
 import           Data.List                           (sortBy)
 import           Data.Maybe                          (catMaybes)
@@ -20,6 +21,7 @@ import           Pokemon.Battle.MoveEffect           (applyMoveWithContext)
 import           Pokemon.Battle.Pokemon.Internal     (MoveSet (..),
                                                       Pokemon (..), isFainted)
 import           Pokemon.Data.Move.Internal          (Move (name), priority)
+import           System.Random                       (randomR)
 
 --------------------------------------------------------------------------------
 -- Actions
@@ -63,6 +65,12 @@ validSwitchActions p = do
 validActions :: PlayerSlot -> BattleM [Action]
 validActions p = (++) <$> validMoveActions p <*> validSwitchActions p
 
+uniformStrategy :: [Action] -> BattleM Action
+uniformStrategy actions = do
+  rng0 <- getRNG
+  let (idx, newRng) = randomR (0, length actions - 1) rng0
+  updateRNG newRng
+  return (actions !! idx)
 
 -- | Resolves actions for the turn, associating each move with its originating PlayerSlot.
 resolveActions :: BattleState -> [Action]
