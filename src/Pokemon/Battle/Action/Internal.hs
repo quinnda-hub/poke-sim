@@ -13,6 +13,7 @@ import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
                                                       getPokemonForSlot, getRNG,
                                                       updateRNG)
 
+import           Control.Monad.State                 (modify)
 import           Data.List                           (sortBy)
 import           Data.Maybe                          (catMaybes)
 import           Pokemon.Battle.Ability              (triggerAbilityOnMoveUse)
@@ -108,6 +109,7 @@ resolveActions = do
 -- Applying Actions
 --------------------------------------------------------------------------------
 
+-- Apply all the actions to the BattleState.
 applyActions :: [Action] -> BattleM ()
 applyActions [] = return ()
 applyActions (act:acts) = do
@@ -121,6 +123,8 @@ applyActions (act:acts) = do
 applyAction :: Action -> BattleM ()
 applyAction (Action { actor = a, actionType = MoveAction mv }) =
   applyMoveActionWithActor a mv
+applyAction (Action {actor = a, actionType = SwitchAction pk }) =
+  applySwitchActionWithActor a pk
 
 -- | Applies a move action given the actor’s slot. This function sets up a local context:
 --   the attacker is the given slot and the defender is the opponent.
@@ -134,9 +138,31 @@ applyMoveActionWithActor actorSlot mv = do
   triggerAbilityOnMoveUse attackerSlot mv
   applyMoveWithContext mv attackerSlot defenderSlot
 
+applySwitchActionWithActor :: PlayerSlot -> Pokemon -> BattleM ()
+applySwitchActionWithActor actorSlot newPoke = do
+  bs <- get
+  let currentPlayer = case actorSlot of
+                        Player1 -> bs.player1
+                        Player2 -> bs.player2
+      currentActive = currentPlayer.active
+      newTeam       = swapPokemonInTeam newPoke currentActive currentPlayer.team
+      newPlayer     = currentPlayer { active = newPoke, team = newTeam }
+  modify $ \bs' -> case actorSlot of
+                    Player1 -> bs' { player1 = newPlayer }
+                    Player2 -> bs' { player2 = newPlayer }
+
 --------------------------------------------------------------------------------
 -- Helpers
 --------------------------------------------------------------------------------
+
+swapPokemonInTeam :: Pokemon -> Pokemon -> Team -> Team
+swapPokemonInTeam newPoke oldActive t = t
+  { pokemon1 = if pokemon1 t == Just newPoke then Just oldActive else pokemon1 t
+  , pokemon2 = if pokemon2 t == Just newPoke then Just oldActive else pokemon2 t
+  , pokemon3 = if pokemon3 t == Just newPoke then Just oldActive else pokemon3 t
+  , pokemon4 = if pokemon4 t == Just newPoke then Just oldActive else pokemon4 t
+  , pokemon5 = if pokemon5 t == Just newPoke then Just oldActive else pokemon5 t
+  }
 
 -- | Retrieves the active Pokémon's name for a given PlayerSlot.
 actorName :: BattleState -> PlayerSlot -> T.Text
