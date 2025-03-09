@@ -72,17 +72,25 @@ uniformStrategy actions = do
   updateRNG newRng
   return (actions !! idx)
 
--- | Resolves actions for the turn, associating each move with its originating PlayerSlot.
-resolveActions :: BattleState -> [Action]
-resolveActions bs =
-  let act1 = Action { actor = Player1, actionType = MoveAction bs.player1.active.moves.move1 }
-      act2 = Action { actor = Player2, actionType = MoveAction bs.player2.active.moves.move1 }
-      actions = [act1, act2]
-  in sortBy compareActions actions
+chooseAction :: PlayerSlot -> BattleM Action
+chooseAction p = do
+  actions <- validActions p
+  if null actions
+    then error "No valid options available!" -- Just a place holder until we hardcode Struggle in.
+    else uniformStrategy actions
+
+-- | Resolves actions for the turn by having each player choose an action using the uniform strategy.
+resolveActions :: BattleM [Action]
+resolveActions = do
+  act1 <- chooseAction Player1
+  act2 <- chooseAction Player2
+  bs   <- get
+  let actions = [act1, act2]
+  return (sortBy (compareActions bs) actions)
   where
-    compareActions :: Action -> Action -> Ordering
-    compareActions (Action { actionType = MoveAction m1, actor = a1 })
-                   (Action { actionType = MoveAction m2, actor = a2 }) =
+    compareActions :: BattleState -> Action -> Action -> Ordering
+    compareActions bs (Action { actionType = MoveAction m1, actor = a1 })
+                        (Action { actionType = MoveAction m2, actor = a2 }) =
       let p1 = m1.priority
           p2 = m2.priority
       in if p1 /= p2 then compare (negate p1) (negate p2)
@@ -94,6 +102,7 @@ resolveActions bs =
                         Player1 -> bs.player1.active.spe
                         Player2 -> bs.player2.active.spe
            in compare (negate spd1) (negate spd2)
+    compareActions _ _ _ = EQ
 
 --------------------------------------------------------------------------------
 -- Applying Actions
