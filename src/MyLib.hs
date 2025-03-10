@@ -94,7 +94,7 @@ someDemoBattle = do
             (Just fuecocoData, Just sprigatitoData) -> do
 
               -- Define desired moves for each Pokémon.
-              let fuecocoMovesDesired = ["ember", "ember", "smokescreen", "tackle"]
+              let fuecocoMovesDesired = ["ember", "leer", "smokescreen", "tackle"]
                   sprigatitoMovesDesired = ["honeclaws", "growl", "scratch", "quickattack"]
 
               -- Lookup moves for Fuecoco.

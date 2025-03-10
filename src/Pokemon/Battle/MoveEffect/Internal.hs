@@ -100,6 +100,6 @@ checkAccuracy (Percent baseAcc) attackerP defenderP = do
 
 boostModifier :: Int -> Double
 boostModifier stage
-  | stage >= 3 = (3 + fromIntegral stage) / 3
+  | stage >= 0 = (3 + fromIntegral stage) / 3
   | otherwise  = 3 / (3 + fromIntegral (abs stage))
 

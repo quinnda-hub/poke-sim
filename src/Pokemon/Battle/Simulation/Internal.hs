@@ -56,7 +56,7 @@ simulateBattle bs0 = do
          else if isPlayerDefeated bs.player2
            then  logVictory "Player 1"
            else do
-             let actions = resolveActions bs
+             actions <- resolveActions
              applyActions actions  -- Process actions one by one.
 
              bsAfter <- get
