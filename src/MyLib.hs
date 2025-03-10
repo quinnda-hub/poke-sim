@@ -1,4 +1,4 @@
-{-# LANGUAGE DuplicateRecordFields #-}
+-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedStrings     #-}
 {-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
 
@@ -69,6 +69,7 @@ someFoo = do
 
 -- | Simulates a battle between a level 5 Fuecoco and a level 5 Sprigatito.
 --   Both Pokémon have perfect IVs (31 in all stats) and no EVs.
+
 someDemoBattle :: IO ()
 someDemoBattle = do
   putStrLn "Loading moves.json..."
@@ -85,17 +86,23 @@ someDemoBattle = do
         Right pokedexMapRaw -> do
           let pokedexMap = Map.mapKeys T.toLower pokedexMapRaw
 
-          -- Lookup Fuecoco and Sprigatito in the pokedex.
-          case (Map.lookup "fuecoco" pokedexMap, Map.lookup "sprigatito" pokedexMap) of
-            (Nothing, _) ->
+          -- Lookup Fuecoco, Sprigatito, and Wattrel in the pokedex.
+          case ( Map.lookup "fuecoco" pokedexMap
+               , Map.lookup "sprigatito" pokedexMap
+               , Map.lookup "wattrel" pokedexMap
+               ) of
+            (Nothing, _, _) ->
               putStrLn "Fuecoco not found in pokedex."
-            (_, Nothing) ->
+            (_, Nothing, _) ->
               putStrLn "Sprigatito not found in pokedex."
-            (Just fuecocoData, Just sprigatitoData) -> do
+            (_, _, Nothing) ->
+              putStrLn "Wattrel not found in pokedex."
+            (Just fuecocoData, Just sprigatitoData, Just wattrelData) -> do
 
               -- Define desired moves for each Pokémon.
-              let fuecocoMovesDesired = ["ember", "leer", "smokescreen", "tackle"]
-                  sprigatitoMovesDesired = ["honeclaws", "growl", "scratch", "quickattack"]
+              let fuecocoMovesDesired    = ["ember", "leer", "smokescreen", "tackle"]
+                  sprigatitoMovesDesired = ["honeclaws", "growl", "scratch", "leafage"]
+                  wattrelMovesDesired    = ["peck", "growl"]
 
               -- Lookup moves for Fuecoco.
               fuecocoMaybeMoves <- mapM (\mname -> pure (mname, Map.lookup mname movesMap))
@@ -115,7 +122,7 @@ someDemoBattle = do
 
                   -- Lookup moves for Sprigatito.
                   sprigatitoMaybeMoves <- mapM (\mname -> pure (mname, Map.lookup mname movesMap))
-                                                 sprigatitoMovesDesired
+                                                  sprigatitoMovesDesired
                   let missingSprigatito = [ mn | (mn, Nothing) <- sprigatitoMaybeMoves ]
                   if not (null missingSprigatito)
                     then putStrLn $ "Missing moves for Sprigatito: " <> show missingSprigatito
@@ -129,41 +136,60 @@ someDemoBattle = do
                             , move4 = Just sprigatitoMove4
                             }
 
-                      -- Perfect IVs (all 31) and no EVs.
-                      let ivs = case mkIVs 31 31 31 31 31 31 of
-                                  Just ivs' -> ivs'
-                                  Nothing   -> error "Invalid IVs configuration."
-                          evs = case mkEVs 0 0 0 0 0 0 of
-                                  Just evs' -> evs'
-                                  Nothing   -> error "Invalid EVs configuration."
+                      -- Lookup moves for Wattrel.
+                      wattrelMaybeMoves <- mapM (\mname -> pure (mname, Map.lookup mname movesMap))
+                                                  wattrelMovesDesired
+                      let missingWattrel = [ mn | (mn, Nothing) <- wattrelMaybeMoves ]
+                      if not (null missingWattrel)
+                        then putStrLn $ "Missing moves for Wattrel: " <> show missingWattrel
+                        else do
+                          let [wattrelMove1, wattrelMove2] =
+                                [ m | (_, Just m) <- wattrelMaybeMoves ]
+                              wattrelMoveSet = MoveSet
+                                { move1 = wattrelMove1
+                                , move2 = Just wattrelMove2
+                                , move3 = Nothing
+                                , move4 = Nothing
+                                }
 
-                      -- Choose a nature (for demo, we use Bold).
-                      let chosenNature = Hardy
+                          -- Perfect IVs (all 31) and no EVs.
+                          let ivs = case mkIVs 31 31 31 31 31 31 of
+                                      Just ivs' -> ivs'
+                                      Nothing   -> error "Invalid IVs configuration."
+                              evs = case mkEVs 0 0 0 0 0 0 of
+                                      Just evs' -> evs'
+                                      Nothing   -> error "Invalid EVs configuration."
 
-                      -- Level 5 for both.
-                      let lvl = 5
+                          -- Choose a nature (for demo, we use Hardy).
+                          let chosenNature = Hardy
 
-                      -- Construct the Pokémon.
-                      let fuecocoPokemon = mkPokemon fuecocoData lvl "Blaze" fuecocoMoveSet chosenNature ivs evs
-                          sprigatitoPokemon = mkPokemon sprigatitoData lvl "Overgrow" sprigatitoMoveSet chosenNature ivs evs
+                          -- Level 5 for both.
+                          let lvl = 5
 
-                      putStrLn "Constructed Pokémon:"
-                      putStrLn "Fuecoco:"
-                      printPokemon fuecocoPokemon
-                      putStrLn "Sprigatito:"
-                      printPokemon sprigatitoPokemon
+                          -- Construct the Pokémon.
+                          let fuecocoPokemon    = mkPokemon fuecocoData lvl "Blaze" fuecocoMoveSet chosenNature ivs evs
+                              sprigatitoPokemon = mkPokemon sprigatitoData lvl "Overgrow" sprigatitoMoveSet chosenNature ivs evs
+                              wattrelPokemon    = mkPokemon wattrelData 2 "Volt Absorb" wattrelMoveSet chosenNature ivs evs
 
-                      -- Construct an initial BattleState.
-                      rng0 <- newStdGen
-                      let initBattleState = BattleState
-                            { turnContext = TurnContext { attacker = Player1, defender = Player2, moveModifiers = []}
-                            , player1     = Player { team = Team {pokemon1 = Nothing, pokemon2 = Nothing, pokemon3 = Nothing, pokemon4 = Nothing, pokemon5 = Nothing}, active = fuecocoPokemon }
-                            , player2     = Player { team = Team {pokemon1 = Nothing, pokemon2 = Nothing, pokemon3 = Nothing, pokemon4 = Nothing, pokemon5 = Nothing}, active = sprigatitoPokemon }
-                            , turnNumber  = 1
-                            , weather     = Clear
-                            , rng         = rng0
-                            }
+                          putStrLn "Constructed Pokémon:"
+                          putStrLn "Fuecoco:"
+                          printPokemon fuecocoPokemon
+                          putStrLn "Sprigatito:"
+                          printPokemon sprigatitoPokemon
+                          putStrLn "Wattrel:"
+                          printPokemon wattrelPokemon
 
-                      putStrLn "Starting battle simulation..."
-                      ((), finalLogs) <- runWriterT (evalStateT (simulateBattle initBattleState) initBattleState)
-                      printLogMessages finalLogs
+                          -- Construct an initial BattleState.
+                          rng0 <- newStdGen
+                          let initBattleState = BattleState
+                                { turnContext = TurnContext { attacker = Player1, defender = Player2, moveModifiers = [] }
+                                , player1     = Player { team = Team { pokemon1 = Nothing, pokemon2 = Nothing, pokemon3 = Nothing, pokemon4 = Nothing, pokemon5 = Nothing }, active = fuecocoPokemon }
+                                , player2     = Player { team = Team { pokemon1 = Just wattrelPokemon, pokemon2 = Nothing, pokemon3 = Nothing, pokemon4 = Nothing, pokemon5 = Nothing }, active = sprigatitoPokemon }
+                                , turnNumber  = 1
+                                , weather     = Clear
+                                , rng         = rng0
+                                }
+
+                          putStrLn "Starting battle simulation..."
+                          ((), finalLogs) <- runWriterT (evalStateT (simulateBattle initBattleState) initBattleState)
+                          printLogMessages finalLogs
