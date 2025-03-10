@@ -1,7 +1,13 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedRecordDot   #-}
 
-module Pokemon.Battle.Action where
+module Pokemon.Battle.Action
+ ( applyAction
+ , applyActions
+ , uniformStrategy
+ , resolveActions
+ )
+  where
 
 import           Control.Monad.Trans.State           (get)
 
@@ -9,14 +15,17 @@ import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
                                                       Player (..),
                                                       PlayerSlot (..))
 
+import           Control.Monad                       (when)
 import           Data.List                           (sortBy)
 import           Pokemon.Battle.Action.Internal      (Action (..),
                                                       ActionType (..),
+                                                      actorName,
                                                       uniformStrategy)
 import           Pokemon.Battle.Action.MoveAction    (applyMoveActionWithActor,
                                                       validMoveActions)
 import           Pokemon.Battle.Action.SwitchAction  (applySwitchActionWithActor,
                                                       validSwitchActions)
+import           Pokemon.Battle.Logging              (logFaint)
 import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..), isFainted)
 import           Pokemon.Data.Move.Internal          (priority)
 
@@ -30,6 +39,8 @@ applyActions [] = return ()
 applyActions (act:acts) = do
   applyAction act
   bs <- get
+  when (isFainted bs.player1.active) (logFaint (actorName bs Player1))
+  when (isFainted bs.player2.active) (logFaint (actorName bs Player2))
   if isFainted bs.player1.active || isFainted bs.player2.active
      then return ()  -- Stop processing further actions.
      else applyActions acts
