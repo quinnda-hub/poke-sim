@@ -1,7 +1,13 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedRecordDot   #-}
 
-module Pokemon.Battle.Action.Internal (actorName, applyActions, resolveActions) where
+module Pokemon.Battle.Action.Internal
+  ( Action(..)
+  , ActionType(..)
+  , actorName
+  , applyActions
+  , resolveActions) where
+
 
 import           Control.Monad.Trans.State           (get)
 import qualified Data.Text                           as T
