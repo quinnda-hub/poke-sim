@@ -67,6 +67,7 @@ library
                       Pokemon.Battle.Ability.Internal,
                       Pokemon.Battle.Pokemon.Internal,
                       Pokemon.Battle.Pokemon,
+                      Pokemon.Battle.Action,
                       Pokemon.Battle.Action.Internal,
                       Pokemon.Battle.Action.MoveAction,
                       Pokemon.Battle.Action.SwitchAction,

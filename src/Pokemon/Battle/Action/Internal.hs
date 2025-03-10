@@ -5,29 +5,18 @@ module Pokemon.Battle.Action.Internal
   ( Action(..)
   , ActionType(..)
   , actorName
-  , applyActions
-  , resolveActions) where
+  , uniformStrategy
+  ) where
 
-
-import           Control.Monad.Trans.State           (get)
 import qualified Data.Text                           as T
 
 import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
                                                       Player (..),
-                                                      PlayerSlot (..),
-                                                      Team (..),
-                                                      getPokemonForSlot, getRNG,
+                                                      PlayerSlot (..), getRNG,
                                                       updateRNG)
 
-import           Control.Monad.State                 (modify)
-import           Data.List                           (sortBy)
-import           Data.Maybe                          (catMaybes)
-import           Pokemon.Battle.Ability              (triggerAbilityOnMoveUse)
-import           Pokemon.Battle.Logging              (logAction)
-import           Pokemon.Battle.MoveEffect           (applyMoveWithContext)
-import           Pokemon.Battle.Pokemon.Internal     (MoveSet (..),
-                                                      Pokemon (..), isFainted)
-import           Pokemon.Data.Move.Internal          (Move (name), priority)
+import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..))
+import           Pokemon.Data.Move.Internal          (Move)
 import           System.Random                       (randomR)
 
 --------------------------------------------------------------------------------
@@ -45,33 +34,18 @@ data Action = Action
 data ActionType = MoveAction Move
                 | SwitchAction Pokemon deriving (Show, Eq)
 
-validMoveActions :: PlayerSlot -> BattleM [Action]
-validMoveActions p = do
-  bs <- get
-  let activeMoves   = moves (getPokemonForSlot p bs)
-      availableMoves = catMaybes [ Just activeMoves.move1
-                                 , activeMoves.move2
-                                 , activeMoves.move3
-                                 , activeMoves.move4
-                                 ]
-  return [ Action { actor = p, actionType = MoveAction m } | m <- availableMoves ]
 
-validSwitchActions :: PlayerSlot -> BattleM [Action]
-validSwitchActions p = do
-  bs <- get
-  let t = case p of
-            Player1 -> bs.player1.team
-            Player2 -> bs.player2.team
-  return [ Action { actor = p, actionType = SwitchAction pk }
-         | pk <- filter (not . isFainted) (catMaybes [ t.pokemon1
-                                                     , t.pokemon2
-                                                     , t.pokemon3
-                                                     , t.pokemon4
-                                                     , t.pokemon5]) ]
+--------------------------------------------------------------------------------
+-- Helpers
+--------------------------------------------------------------------------------
 
-validActions :: PlayerSlot -> BattleM [Action]
-validActions p = (++) <$> validMoveActions p <*> validSwitchActions p
+-- | Retrieves the active Pokémon's name for a given PlayerSlot.
+actorName :: BattleState -> PlayerSlot -> T.Text
+actorName bs Player1 = bs.player1.active.name
+actorName bs Player2 = bs.player2.active.name
 
+-- | Choose a random action from a list of actions.
+-- (Doesn't really belong in this module but can live here for now.)
 uniformStrategy :: [Action] -> BattleM Action
 uniformStrategy actions = do
   rng0 <- getRNG
@@ -79,98 +53,3 @@ uniformStrategy actions = do
   updateRNG newRng
   return (actions !! idx)
 
-chooseAction :: PlayerSlot -> BattleM Action
-chooseAction p = do
-  actions <- validActions p
-  if null actions
-    then error "No valid options available!" -- Just a place holder until we hardcode Struggle in.
-    else uniformStrategy actions
-
--- | Resolves actions for the turn by having each player choose an action using the uniform strategy.
-resolveActions :: BattleM [Action]
-resolveActions = do
-  act1 <- chooseAction Player1
-  act2 <- chooseAction Player2
-  bs   <- get
-  let actions = [act1, act2]
-  return (sortBy (compareActions bs) actions)
-  where
-    compareActions :: BattleState -> Action -> Action -> Ordering
-    compareActions bs (Action { actionType = MoveAction m1, actor = a1 })
-                        (Action { actionType = MoveAction m2, actor = a2 }) =
-      let p1 = m1.priority
-          p2 = m2.priority
-      in if p1 /= p2 then compare (negate p1) (negate p2)
-         else
-           let spd1 = case a1 of
-                        Player1 -> bs.player1.active.spe
-                        Player2 -> bs.player2.active.spe
-               spd2 = case a2 of
-                        Player1 -> bs.player1.active.spe
-                        Player2 -> bs.player2.active.spe
-           in compare (negate spd1) (negate spd2)
-    compareActions _ _ _ = EQ
-
---------------------------------------------------------------------------------
--- Applying Actions
---------------------------------------------------------------------------------
-
--- Apply all the actions to the BattleState.
-applyActions :: [Action] -> BattleM ()
-applyActions [] = return ()
-applyActions (act:acts) = do
-  applyAction act
-  bs <- get
-  if isFainted bs.player1.active || isFainted bs.player2.active
-     then return ()  -- Stop processing further actions.
-     else applyActions acts
-
--- | Applies a simulation-level action.
-applyAction :: Action -> BattleM ()
-applyAction (Action { actor = a, actionType = MoveAction mv }) =
-  applyMoveActionWithActor a mv
-applyAction (Action {actor = a, actionType = SwitchAction pk }) =
-  applySwitchActionWithActor a pk
-
--- | Applies a move action given the actor’s slot. This function sets up a local context:
---   the attacker is the given slot and the defender is the opponent.
-applyMoveActionWithActor :: PlayerSlot -> Move -> BattleM ()
-applyMoveActionWithActor actorSlot mv = do
-  bs <- get
-  let (attackerSlot, defenderSlot) = case actorSlot of
-        Player1 -> (Player1, Player2)
-        Player2 -> (Player2, Player1)
-  logAction mv.name (actorName bs attackerSlot)
-  triggerAbilityOnMoveUse attackerSlot mv
-  applyMoveWithContext mv attackerSlot defenderSlot
-
-applySwitchActionWithActor :: PlayerSlot -> Pokemon -> BattleM ()
-applySwitchActionWithActor actorSlot newPoke = do
-  bs <- get
-  let currentPlayer = case actorSlot of
-                        Player1 -> bs.player1
-                        Player2 -> bs.player2
-      currentActive = currentPlayer.active
-      newTeam       = swapPokemonInTeam newPoke currentActive currentPlayer.team
-      newPlayer     = currentPlayer { active = newPoke, team = newTeam }
-  modify $ \bs' -> case actorSlot of
-                    Player1 -> bs' { player1 = newPlayer }
-                    Player2 -> bs' { player2 = newPlayer }
-
---------------------------------------------------------------------------------
--- Helpers
---------------------------------------------------------------------------------
-
-swapPokemonInTeam :: Pokemon -> Pokemon -> Team -> Team
-swapPokemonInTeam newPoke oldActive t = t
-  { pokemon1 = if pokemon1 t == Just newPoke then Just oldActive else pokemon1 t
-  , pokemon2 = if pokemon2 t == Just newPoke then Just oldActive else pokemon2 t
-  , pokemon3 = if pokemon3 t == Just newPoke then Just oldActive else pokemon3 t
-  , pokemon4 = if pokemon4 t == Just newPoke then Just oldActive else pokemon4 t
-  , pokemon5 = if pokemon5 t == Just newPoke then Just oldActive else pokemon5 t
-  }
-
--- | Retrieves the active Pokémon's name for a given PlayerSlot.
-actorName :: BattleState -> PlayerSlot -> T.Text
-actorName bs Player1 = bs.player1.active.name
-actorName bs Player2 = bs.player2.active.name

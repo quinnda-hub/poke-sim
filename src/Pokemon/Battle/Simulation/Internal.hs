@@ -6,7 +6,7 @@ module Pokemon.Battle.Simulation.Internal (simulateBattle) where
 
 import           Control.Monad.Trans.State           (get, put)
 
-import           Pokemon.Battle.Action.Internal      (applyActions,
+import           Pokemon.Battle.Action               (applyActions,
                                                       resolveActions)
 import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
                                                       Player (..), Team (..))
