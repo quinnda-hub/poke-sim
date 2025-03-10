@@ -15,9 +15,12 @@ import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
 
 import           Control.Monad.State                 (modify)
 import           Data.Maybe                          (catMaybes)
+import qualified Data.Text                           as T
 import           Pokemon.Battle.Action.Internal      (Action (..),
                                                       ActionType (..))
-import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..), isFainted)
+import           Pokemon.Battle.Logging              (logSwitch)
+import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..),
+                                                      defaultBoosts, isFainted)
 
 -- | Returns valid switch actions for the given player slot.
 validSwitchActions :: PlayerSlot -> BattleM [Action]
@@ -54,8 +57,10 @@ applySwitchActionWithActor actorSlot newPoke = do
                         Player1 -> bs.player1
                         Player2 -> bs.player2
       currentActive = currentPlayer.active
-      newTeam       = swapPokemonInTeam newPoke currentActive currentPlayer.team
+      resetActive   = currentActive { boosts = defaultBoosts }
+      newTeam       = swapPokemonInTeam newPoke resetActive currentPlayer.team
       newPlayer     = currentPlayer { active = newPoke, team = newTeam }
+  logSwitch (T.pack $ show actorSlot) currentActive.name newPoke.name
   modify $ \bs' -> case actorSlot of
                     Player1 -> bs' { player1 = newPlayer }
                     Player2 -> bs' { player2 = newPlayer }

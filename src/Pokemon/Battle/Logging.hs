@@ -1,17 +1,19 @@
 {-# LANGUAGE FlexibleContexts #-}
 
-module Pokemon.Battle.Logging (
-  logDamage,
-  logAction,
-  logTurn,
-  logWeather,
-  logVictory,
-  logMiss,
-  logCrit,
-  logStatus,
-  logBoosts,
-  LogMessage (..),
-) where
+module Pokemon.Battle.Logging
+  ( logDamage
+  , logAction
+  , logTurn
+  , logWeather
+  , logVictory
+  , logMiss
+  , logCrit
+  , logStatus
+  , logBoosts
+  , logSwitch
+  , logFaint
+  , LogMessage (..)
+  ) where
 
 import           Control.Monad.Writer            (MonadWriter, tell)
 import           Data.Text                       (Text)
@@ -20,15 +22,17 @@ import           Pokemon.Data.Move.Internal      (Boosts)
 import           Pokemon.Mechanics.Weather       (Weather)
 
 data LogMessage
-  = DamageLog {damage :: Int, target :: Text}
-  | ActionLog {moveName :: Text, actor :: Text}
-  | TurnLog {turnNumber :: Int}
-  | WeatherLog {weather :: Weather}
-  | VictoryLog {victor :: Text}
-  | MissLog {whiffer :: Text}
-  | CritLog {critter :: Text}
-  | StatusLog {actor :: Text, status :: Text}
-  | BoostsLog {actor :: Text, boosts :: Boosts, pokeBoosts :: PokemonBoosts}
+  = DamageLog { damage :: Int, target :: Text }
+  | ActionLog { moveName :: Text, actor :: Text }
+  | TurnLog { turnNumber :: Int }
+  | WeatherLog { weather :: Weather }
+  | VictoryLog { victor :: Text }
+  | MissLog { whiffer :: Text }
+  | CritLog { critter :: Text }
+  | StatusLog { actor :: Text, status :: Text }
+  | BoostsLog { actor :: Text, boosts :: Boosts, pokeBoosts :: PokemonBoosts }
+  | SwitchLog { actor :: Text, fromPoke :: Text, toPoke :: Text }
+  | FaintLog { faintedPoke :: Text }
   deriving (Show, Eq)
 
 -- | Log a damage event.
@@ -66,4 +70,12 @@ logStatus act sts = tell [StatusLog act sts]
 -- | Log boosts being applied.
 logBoosts :: (MonadWriter [LogMessage] m) => Text -> Boosts -> PokemonBoosts -> m ()
 logBoosts act mBoosts pBoosts = tell [BoostsLog act mBoosts pBoosts]
+
+-- | Log a Player switching from one Pokemon to another Pokemon.
+logSwitch :: (MonadWriter [LogMessage] m) => Text -> Text -> Text -> m ()
+logSwitch actorName fPoke tPoke = tell [SwitchLog actorName fPoke tPoke]
+
+-- Log a Pokemon fainting.
+logFaint :: (MonadWriter [LogMessage] m) => Text -> m ()
+logFaint fainter = tell [FaintLog fainter]
 
