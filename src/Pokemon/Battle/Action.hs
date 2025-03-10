@@ -62,6 +62,9 @@ resolveActions = do
   return (sortBy (compareActions bs) actions)
   where
     compareActions :: BattleState -> Action -> Action -> Ordering
+    compareActions _ (Action { actionType = SwitchAction _ }) (Action { actionType = MoveAction _ }) = LT
+    compareActions _ (Action { actionType = MoveAction _ }) (Action { actionType = SwitchAction _ }) = GT
+    compareActions _ (Action { actionType = SwitchAction _ }) (Action { actionType = SwitchAction _ }) = EQ
     compareActions bs (Action { actionType = MoveAction m1, actor = a1 })
                         (Action { actionType = MoveAction m2, actor = a2 }) =
       let p1 = m1.priority
@@ -75,7 +78,6 @@ resolveActions = do
                         Player1 -> bs.player1.active.spe
                         Player2 -> bs.player2.active.spe
            in compare (negate spd1) (negate spd2)
-    compareActions _ _ _ = EQ
 
 validActions :: PlayerSlot -> BattleM [Action]
 validActions p = (++) <$> validMoveActions p <*> validSwitchActions p
