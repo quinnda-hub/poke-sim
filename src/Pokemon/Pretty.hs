@@ -87,6 +87,10 @@ prettyLogMessage (StatusLog a s) =
   T.concat ["[Status] ", s, " is ", a <> "ed"]
 prettyLogMessage (BoostsLog a mb pb) =
   prettyBoostsLogMessage a mb pb
+prettyLogMessage (SwitchLog a fPoke tPoke) =
+  T.concat ["[Switch] ", a, " switched from ", fPoke, " to ", tPoke]
+prettyLogMessage (FaintLog f) =
+  T.concat ["[Faint] ", f, " Fainted!"]
 
 -- | Given a stat name, the boost change from the move (delta),
 --   and  the new total value, produce a pretty message for the stat. :w

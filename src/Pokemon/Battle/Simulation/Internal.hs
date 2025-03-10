@@ -6,17 +6,37 @@ module Pokemon.Battle.Simulation.Internal (simulateBattle) where
 
 import           Control.Monad.Trans.State           (get, put)
 
-import           Pokemon.Battle.Action               (applyActions,
-                                                      resolveActions)
+import           Pokemon.Battle.Action               (applyAction, applyActions,
+                                                      resolveActions,
+                                                      uniformStrategy)
 import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
-                                                      Player (..), Team (..))
+                                                      Player (..),
+                                                      PlayerSlot (..),
+                                                      Team (..))
 
-import           Pokemon.Battle.Logging              (logTurn, logVictory)
-import           Pokemon.Battle.Pokemon.Internal     (isFainted)
+import           Control.Monad                       (when)
+import           Pokemon.Battle.Action.SwitchAction  (validSwitchActions)
+import           Pokemon.Battle.Logging              (logFaint, logTurn,
+                                                      logVictory)
+import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..), isFainted)
 
 --------------------------------------------------------------------------------
 -- Helpers
 --------------------------------------------------------------------------------
+
+switchAfterFaint :: PlayerSlot -> BattleM ()
+switchAfterFaint  slot = do
+  bs <- get
+  let currentActive = case slot of
+                        Player1 -> bs.player1.active
+                        Player2 -> bs.player2.active
+  when (isFainted currentActive) $ do
+    switchActions <- validSwitchActions slot
+    if null switchActions
+      then return () -- No valid switch actions; player remains with fainted Pokemon.
+      else do
+        chosenSwitch <- uniformStrategy switchActions
+        applyAction chosenSwitch
 
 teamFainted :: Team -> Bool
 teamFainted t =
@@ -34,7 +54,7 @@ isPlayerDefeated player = isFainted player.active && teamFainted player.team
 -- | Increments the turn counter by 1.
 incrementTurn :: BattleState -> BattleState
 incrementTurn bs =
-  bs{ turnNumber = bs.turnNumber + 1}
+  bs{ turnNumber = bs.turnNumber + 1 }
 
 --------------------------------------------------------------------------------
 -- Battle Loop
@@ -58,6 +78,10 @@ simulateBattle bs0 = do
            else do
              actions <- resolveActions
              applyActions actions  -- Process actions one by one.
+
+             -- If a Pokemon has fainted, switch in a new one if possible.
+             switchAfterFaint Player1
+             switchAfterFaint Player2
 
              bsAfter <- get
              if isPlayerDefeated bsAfter.player1 || isPlayerDefeated bsAfter.player2
