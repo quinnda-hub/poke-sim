@@ -68,6 +68,7 @@ resolveTargets t tc =
     Self            -> [tc.attacker]
     Normal          -> [tc.defender]
     AllAdjacentFoes -> [tc.defender]
+    Any             -> [tc.defender]
     _               -> [] -- Placeholder.
 
 getAttackerAndDefender :: BattleState -> (Pokemon, Pokemon)

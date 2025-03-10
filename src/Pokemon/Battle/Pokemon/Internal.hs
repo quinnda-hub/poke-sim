@@ -13,6 +13,7 @@ module Pokemon.Battle.Pokemon.Internal
   , EVs
   , isFainted
   , mkPokemon
+  , defaultBoosts
   , mkIVs
   , mkEVs
   ) where
@@ -255,13 +256,13 @@ calculateStat stat bs level ivs evs modifier =
            * fromIntegral level) / 100) + 5) * modifier
 
 defaultBoosts :: PokemonBoosts
-defaultBoosts = PokemonBoosts 
-                  { acc = 0 
-                  , atk = 0 
-                  , def = 0 
-                  , eva = 0 
+defaultBoosts = PokemonBoosts
+                  { acc = 0
+                  , atk = 0
+                  , def = 0
+                  , eva = 0
                   , spa = 0
-                  , spd = 0 
+                  , spd = 0
                   , spe = 0
                   }
 
