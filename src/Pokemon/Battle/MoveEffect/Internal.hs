@@ -65,9 +65,10 @@ data EffectStep
 resolveTargets :: Target -> TurnContext -> [PlayerSlot]
 resolveTargets t tc =
   case t of
-    Self   -> [tc.attacker]
-    Normal -> [tc.defender]
-    _      -> [] -- Placeholder.
+    Self            -> [tc.attacker]
+    Normal          -> [tc.defender]
+    AllAdjacentFoes -> [tc.defender]
+    _               -> [] -- Placeholder.
 
 getAttackerAndDefender :: BattleState -> (Pokemon, Pokemon)
 getAttackerAndDefender bs  =
