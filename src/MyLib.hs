@@ -1,4 +1,4 @@
--# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedStrings     #-}
 {-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
 

@@ -10,14 +10,16 @@ module Pokemon.Battle.BattleState.Internal (BattleM,
                                            Team(..),
                                            applyModifiers,
                                            getPokemonForSlot,
+                                           pokemonName,
                                            getRNG,
                                            updateRNG) where
 
 import           Control.Monad.State             (get, put)
 import           Control.Monad.Trans.State       (StateT)
 import           Control.Monad.Trans.Writer      (WriterT)
+import           Data.Text                       (Text)
 import           Pokemon.Battle.Logging          (LogMessage)
-import           Pokemon.Battle.Pokemon.Internal (Pokemon)
+import           Pokemon.Battle.Pokemon.Internal (Pokemon (..))
 import           Pokemon.Data.Move.Internal      (Move)
 import           Pokemon.Mechanics.Weather       (Weather)
 import           System.Random                   (StdGen)
@@ -73,6 +75,11 @@ getPokemonForSlot :: PlayerSlot -> BattleState -> Pokemon
 getPokemonForSlot playerslot bs
   | playerslot == Player1 = bs.player1.active
   | otherwise             = bs.player2.active
+
+-- | Retrieves the active Pokémon's name for a given PlayerSlot.
+pokemonName :: BattleState -> PlayerSlot -> Text
+pokemonName bs Player1 = bs.player1.active.name
+pokemonName bs Player2 = bs.player2.active.name
 
 --------------------------------------------------------------------------------
 -- Move Modifiers

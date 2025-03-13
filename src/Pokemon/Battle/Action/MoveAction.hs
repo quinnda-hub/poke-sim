@@ -9,13 +9,13 @@ module Pokemon.Battle.Action.MoveAction
 import           Control.Monad.Trans.State           (get)
 
 import           Pokemon.Battle.BattleState.Internal (BattleM, PlayerSlot (..),
-                                                      getPokemonForSlot)
+                                                      getPokemonForSlot,
+                                                      pokemonName)
 
 import           Data.Maybe                          (catMaybes)
 import           Pokemon.Battle.Ability              (triggerAbilityOnMoveUse)
 import           Pokemon.Battle.Action.Internal      (Action (..),
-                                                      ActionType (..),
-                                                      actorName)
+                                                      ActionType (..))
 import           Pokemon.Battle.Logging              (logAction)
 import           Pokemon.Battle.MoveEffect           (applyMoveWithContext)
 import           Pokemon.Battle.Pokemon.Internal     (MoveSet (..),
@@ -43,7 +43,7 @@ applyMoveActionWithActor actorSlot mv = do
         Player1 -> (Player1, Player2)
         Player2 -> (Player2, Player1)
   -- Log the move, trigger abilities, and apply the move effects.
-  logAction mv.name (actorName bs attackerSlot)
+  logAction mv.name (pokemonName bs attackerSlot)
   triggerAbilityOnMoveUse attackerSlot mv
   applyMoveWithContext mv attackerSlot defenderSlot
 

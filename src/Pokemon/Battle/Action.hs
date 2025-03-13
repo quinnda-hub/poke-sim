@@ -13,14 +13,13 @@ import           Control.Monad.Trans.State           (get)
 
 import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
                                                       Player (..),
-                                                      PlayerSlot (..))
+                                                      PlayerSlot (..), getRNG,
+                                                      pokemonName, updateRNG)
 
 import           Control.Monad                       (when)
 import           Data.List                           (sortBy)
 import           Pokemon.Battle.Action.Internal      (Action (..),
-                                                      ActionType (..),
-                                                      actorName,
-                                                      uniformStrategy)
+                                                      ActionType (..))
 import           Pokemon.Battle.Action.MoveAction    (applyMoveActionWithActor,
                                                       validMoveActions)
 import           Pokemon.Battle.Action.SwitchAction  (applySwitchActionWithActor,
@@ -28,6 +27,17 @@ import           Pokemon.Battle.Action.SwitchAction  (applySwitchActionWithActor
 import           Pokemon.Battle.Logging              (logFaint)
 import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..), isFainted)
 import           Pokemon.Data.Move.Internal          (priority)
+import           System.Random                       (Random (randomR))
+
+
+-- | Choose a random action from a list of actions.
+-- (Doesn't really belong in this module but can live here for now.)
+uniformStrategy :: [Action] -> BattleM Action
+uniformStrategy actions = do
+  rng0 <- getRNG
+  let (idx, newRng) = randomR (0, length actions - 1) rng0
+  updateRNG newRng
+  return (actions !! idx)
 
 --------------------------------------------------------------------------------
 -- Applying Actions
@@ -39,8 +49,8 @@ applyActions [] = return ()
 applyActions (act:acts) = do
   applyAction act
   bs <- get
-  when (isFainted bs.player1.active) (logFaint (actorName bs Player1))
-  when (isFainted bs.player2.active) (logFaint (actorName bs Player2))
+  when (isFainted bs.player1.active) (logFaint (pokemonName bs Player1))
+  when (isFainted bs.player2.active) (logFaint (pokemonName bs Player2))
   if isFainted bs.player1.active || isFainted bs.player2.active
      then return ()  -- Stop processing further actions.
      else applyActions acts

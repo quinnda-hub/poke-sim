@@ -16,9 +16,8 @@ import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
 
 import           Control.Monad                       (when)
 import           Pokemon.Battle.Action.SwitchAction  (validSwitchActions)
-import           Pokemon.Battle.Logging              (logFaint, logTurn,
-                                                      logVictory)
-import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..), isFainted)
+import           Pokemon.Battle.Logging              (logTurn, logVictory)
+import           Pokemon.Battle.Pokemon.Internal     (isFainted)
 
 --------------------------------------------------------------------------------
 -- Helpers
