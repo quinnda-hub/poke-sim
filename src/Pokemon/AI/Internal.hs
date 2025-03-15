@@ -36,6 +36,20 @@ preferAttackStrategy actions = do
       updateRNG newRng
       return (chooseWeighted r weightedActions)
 
+-- | Choose which action to take interactively.
+--   Useful for examining state in ghci.
+interactiveStrategy :: Strategy BattleM
+interactiveStrategy actions = do
+  liftIO $ putStrLn "Choose an action:"
+  mapM_ (\(i, act) -> do liftIO $ putStrLn (show i ++ ": " ++ show act)) (zip [0 :: Int ..] actions)
+  input <- liftIO getLine
+  let idx = read input :: Int
+  if idx < 0 || idx >= length actions
+    then do
+      liftIO $ putStrLn "Invalid choice. Defaulting to first action."
+      return (head actions)
+    else return (actions !! idx)
+
 -- Choose an action based on weighted probabilities.
 chooseWeighted :: Int -> [(Action, Int)] -> Action
 chooseWeighted _ [] = error "chooseWeighted: empty list"
