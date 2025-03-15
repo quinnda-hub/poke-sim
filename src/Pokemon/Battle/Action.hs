@@ -10,11 +10,12 @@ module Pokemon.Battle.Action
   where
 
 import           Control.Monad.Trans.State           (get)
+import           Pokemon.Battle.BattleState.Types    (Player (active),
+                                                      PlayerSlot (..))
 
 import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
-                                                      Player (..),
-                                                      PlayerSlot (..), getRNG,
-                                                      pokemonName, updateRNG)
+                                                      getRNG, pokemonName,
+                                                      updateRNG)
 
 import           Control.Monad                       (when)
 import           Data.List                           (sortBy)

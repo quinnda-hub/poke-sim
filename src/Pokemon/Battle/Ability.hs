@@ -15,8 +15,8 @@ import           Pokemon.Battle.Ability.Internal     (Ability (..),
                                                       AbilityTrigger (..))
 import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
                                                       PlayerSlot,
-                                                      getPokemonForSlot,
-                                                      moveModifiers)
+                                                      getPokemonForSlot)
+import           Pokemon.Battle.BattleState.Types    (TurnContext (..))
 import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..))
 import           Pokemon.Data.Move.Internal          (Move (basePower, category, moveType),
                                                       MoveCategory (Status))

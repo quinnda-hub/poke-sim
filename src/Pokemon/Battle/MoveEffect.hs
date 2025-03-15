@@ -9,9 +9,9 @@ module Pokemon.Battle.MoveEffect
 
 import           Control.Monad.Trans.State           (get, modify)
 import           Data.Maybe                          (catMaybes)
-import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
-                                                      PlayerSlot,
-                                                      TurnContext (..))
+import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..))
+import           Pokemon.Battle.BattleState.Types    (PlayerSlot,
+                                                      TurnContext (attacker, defender, moveModifiers))
 import           Pokemon.Battle.Logging              (logMiss)
 import           Pokemon.Battle.MoveEffect.Boosts    (applyBoostsForMove,
                                                       gatherBoosts)

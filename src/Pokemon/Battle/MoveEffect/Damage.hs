@@ -2,11 +2,10 @@
 {-# LANGUAGE OverloadedRecordDot   #-}
 
 module Pokemon.Battle.MoveEffect.Damage where
-
 import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState,
-                                                      Player (..),
                                                       PlayerSlot (..), player1,
                                                       player2)
+import           Pokemon.Battle.BattleState.Types    (Player (..))
 import           Pokemon.Battle.Logging              (logDamage)
 import           Pokemon.Battle.MoveEffect.Internal  (EffectStep (DoDamage),
                                                       applyEffectForMove)

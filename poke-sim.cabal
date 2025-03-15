@@ -75,6 +75,7 @@ library
                       Pokemon.Battle.Damage.Internal,
                       Pokemon.Battle.Logging,
                       Pokemon.Battle.BattleState.Internal,
+                      Pokemon.Battle.BattleState.Types,
                       Pokemon.Battle.BattleState,
                       Pokemon.Battle.Simulation.Internal,
                       Pokemon.Battle.Simulation,

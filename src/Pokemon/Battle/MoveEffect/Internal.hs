@@ -12,11 +12,11 @@ module Pokemon.Battle.MoveEffect.Internal
 import           Control.Monad                       (forM_)
 import           Control.Monad.Trans.State           (get, modify)
 import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
-                                                      Player (..),
                                                       PlayerSlot (Player1, Player2),
+                                                      getRNG, updateRNG)
+import           Pokemon.Battle.BattleState.Types    (Player (..),
                                                       TurnContext (..),
-                                                      applyModifiers, getRNG,
-                                                      updateRNG)
+                                                      applyModifiers)
 import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..),
                                                       PokemonBoosts (..))
 import           Pokemon.Data.Move.Internal          (Accuracy (..), Move (..),

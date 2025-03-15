@@ -21,19 +21,18 @@ import           Pokemon.Data.Move.Internal          (loadMoves,
 import           Pokemon.Data.Pokedex.Internal       (loadPokedex,
                                                       showLoadPokedexError)
 
+import           Pokemon.Battle.BattleState.Types    (Player (Player, active, team),
+                                                      PlayerSlot (Player1, Player2),
+                                                      Team (Team, pokemon1, pokemon2, pokemon3, pokemon4, pokemon5),
+                                                      TurnContext (TurnContext, attacker, defender, moveModifiers))
 -- Battle state types and simulation
-import           Pokemon.Battle.BattleState.Internal (BattleState (..),
-                                                      Player (..),
-                                                      PlayerSlot (..),
-                                                      Team (..),
-                                                      TurnContext (..))
+import           Pokemon.Battle.BattleState.Internal (BattleState (..))
 
 import           Pokemon.Battle.Simulation.Internal  (simulateBattle)
 
 import           Pokemon.Mechanics.Weather           (Weather (..))
 import           Pokemon.Pretty                      (printLogMessages,
                                                       printPokemon)
-  -- Assume simulateBattle :: BattleM () is defined to run a simple battle loop.
 
 --------------------------------------------------------------------------------
 -- someFunc and someFoo (existing demos)

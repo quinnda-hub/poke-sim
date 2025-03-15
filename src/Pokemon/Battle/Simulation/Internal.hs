@@ -10,9 +10,9 @@ import           Pokemon.Battle.Action               (applyAction, applyActions,
                                                       resolveActions,
                                                       uniformStrategy)
 import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
-                                                      Player (..),
-                                                      PlayerSlot (..),
-                                                      Team (..))
+                                                      PlayerSlot (..))
+import           Pokemon.Battle.BattleState.Types    (Player (active, team),
+                                                      Team (pokemon1, pokemon2, pokemon3, pokemon4, pokemon5))
 
 import           Control.Monad                       (when)
 import           Pokemon.Battle.Action.SwitchAction  (validSwitchActions)
