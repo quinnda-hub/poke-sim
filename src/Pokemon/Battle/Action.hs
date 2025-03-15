@@ -9,26 +9,28 @@ module Pokemon.Battle.Action
  )
   where
 
-import           Control.Monad.State.Class           (get)
-import           Pokemon.Battle.BattleState.Types    (Player (active),
-                                                      PlayerSlot (..))
+import           Control.Monad.State.Class             (get)
+import           Pokemon.Battle.BattleState.Types      (Player (..))
 
-import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
-                                                      getRNG, pokemonName,
-                                                      updateRNG)
 
-import           Control.Monad                       (when)
-import           Data.List                           (sortBy)
-import           Pokemon.Battle.Action.Internal      (Action (..),
-                                                      ActionType (..))
-import           Pokemon.Battle.Action.MoveAction    (applyMoveActionWithActor,
-                                                      validMoveActions)
-import           Pokemon.Battle.Action.SwitchAction  (applySwitchActionWithActor,
-                                                      validSwitchActions)
-import           Pokemon.Battle.Logging              (logFaint)
-import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..), isFainted)
-import           Pokemon.Data.Move.Internal          (priority)
-import           System.Random                       (Random (randomR))
+import           Pokemon.Battle.BattleState.Internal   (BattleM,
+                                                        BattleState (..),
+                                                        getRNG, pokemonName,
+                                                        updateRNG)
+
+import           Control.Monad                         (when)
+import           Data.List                             (sortBy)
+import           Pokemon.Battle.Action.Internal        (Action (..),
+                                                        ActionType (..))
+import           Pokemon.Battle.Action.MoveAction      (applyMoveActionWithActor,
+                                                        validMoveActions)
+import           Pokemon.Battle.Action.SwitchAction    (applySwitchActionWithActor,
+                                                        validSwitchActions)
+import           Pokemon.Battle.BattleState.PlayerSlot (PlayerSlot (..))
+import           Pokemon.Battle.Logging                (logFaint)
+import           Pokemon.Battle.Pokemon.Internal       (Pokemon (..), isFainted)
+import           Pokemon.Data.Move.Internal            (priority)
+import           System.Random                         (Random (randomR))
 
 
 -- | Choose a random action from a list of actions.
@@ -98,5 +100,10 @@ chooseAction p = do
   actions <- validActions p
   if null actions
     then error "No valid options available!" -- Just a place holder until we hardcode Struggle in.
-    else uniformStrategy actions
+    else do
+      bs <- get
+      let strat = case p of
+                    Player1 -> bs.player1.strategy
+                    Player2 -> bs.player2.strategy
+      strat actions
 

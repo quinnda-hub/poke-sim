@@ -22,6 +22,7 @@ import           Pokemon.Battle.Logging                (LogMessage)
 import           Pokemon.Battle.Pokemon.Internal       (Pokemon (..))
 import           Pokemon.Mechanics.Weather             (Weather)
 import           System.Random                         (StdGen)
+
 -- A newtype for the BattleM monad.
 newtype BattleM a = BattleM
   { runBattleM :: StateT BattleState (WriterT [LogMessage] IO) a
