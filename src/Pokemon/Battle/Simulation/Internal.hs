@@ -16,9 +16,12 @@ import           Pokemon.Battle.BattleState.Types    (Player (active, team),
                                                       Team (pokemon1, pokemon2, pokemon3, pokemon4, pokemon5))
 
 import           Control.Monad                       (when)
+import           Control.Monad.IO.Class              (liftIO)
+import           Control.Monad.RWS                   (MonadWriter (..))
 import           Pokemon.Battle.Action.SwitchAction  (validSwitchActions)
 import           Pokemon.Battle.Logging              (logTurn, logVictory)
 import           Pokemon.Battle.Pokemon.Internal     (isFainted)
+import           Pokemon.Pretty                      (printLogMessages)
 
 --------------------------------------------------------------------------------
 -- Helpers
@@ -68,26 +71,35 @@ simulateBattle bs0 = do
   where
     loop :: BattleM ()
     loop = do
+      -- Run one turn and capture the log messages produced during that turn.
+      ((), turnLogs) <- listen simulateTurn
+      liftIO $ printLogMessages turnLogs
       bs <- get
-      logTurn bs.turnNumber
+      if isPlayerDefeated bs.player1 || isPlayerDefeated bs.player2
+        then return ()
+        else loop
 
-      if isPlayerDefeated bs.player1
-         then logVictory "Player 2"
-         else if isPlayerDefeated bs.player2
-           then  logVictory "Player 1"
-           else do
-             actions <- resolveActions
-             applyActions actions  -- Process actions one by one.
+-- | Simulates one turn of a battle.
+simulateTurn :: BattleM ()
+simulateTurn = do
+  bs <- get
+  logTurn bs.turnNumber
 
-             -- If a Pokemon has fainted, switch in a new one if possible.
-             switchAfterFaint Player1
-             switchAfterFaint Player2
+  if isPlayerDefeated bs.player1
+    then logVictory "Player 2"
+    else do
+      actions <- resolveActions
+      applyActions actions
 
-             bsAfter <- get
-             if isPlayerDefeated bsAfter.player1 || isPlayerDefeated bsAfter.player2
-                then if isPlayerDefeated bsAfter.player1
-                        then logVictory "Player 2"
-                        else logVictory "Player 1"
-                else do
-                  put $ incrementTurn bsAfter
-                  loop
+      switchAfterFaint Player1
+      switchAfterFaint Player2
+
+      bsAfter <- get
+      if isPlayerDefeated bsAfter.player1 || isPlayerDefeated bsAfter.player2
+        then if isPlayerDefeated bsAfter.player1
+          then logVictory "Player 2"
+          else logVictory "Player 1"
+        else do
+          put $ incrementTurn bsAfter
+          return ()
+

@@ -11,7 +11,6 @@ import qualified Data.Text                           as T
 import           System.IO                           (hPutStrLn, stderr)
 import           System.Random                       (newStdGen)
 
--- Import our Pokémon construction functions.
 import           Pokemon.Battle.Pokemon.Internal     (MoveSet (..), Nature (..),
                                                       mkEVs, mkIVs, mkPokemon)
 
@@ -26,7 +25,8 @@ import           Pokemon.Battle.BattleState.Types    (Player (Player, active, st
                                                       Team (Team, pokemon1, pokemon2, pokemon3, pokemon4, pokemon5),
                                                       TurnContext (TurnContext, attacker, defender, moveModifiers))
 -- Battle state types and simulation
-import           Pokemon.AI.Internal                 (preferAttackStrategy)
+import           Pokemon.AI.Internal                 (interactiveStrategy,
+                                                      preferAttackStrategy)
 import           Pokemon.Battle.BattleState.Internal (BattleState (..),
                                                       runBattleM)
 import           Pokemon.Battle.Simulation.Internal  (simulateBattle)
