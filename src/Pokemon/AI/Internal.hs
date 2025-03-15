@@ -3,6 +3,7 @@
 
 module Pokemon.AI.Internal where
 
+import           Control.Monad.IO.Class              (liftIO)
 import           Pokemon.AI.Types                    (Strategy)
 import           Pokemon.Battle.Action.Internal      (Action (..),
                                                       ActionType (..))

@@ -11,6 +11,7 @@ module Pokemon.Battle.BattleState.Internal (BattleM(..),
                                            updateRNG) where
 
 import           Control.Monad.State                   (MonadState, get, put)
+import           Control.Monad.Trans                   (MonadIO)
 import           Control.Monad.Trans.State             (StateT)
 import           Control.Monad.Trans.Writer            (WriterT)
 import           Control.Monad.Writer.Class            (MonadWriter)
@@ -26,7 +27,12 @@ import           System.Random                         (StdGen)
 -- A newtype for the BattleM monad.
 newtype BattleM a = BattleM
   { runBattleM :: StateT BattleState (WriterT [LogMessage] IO) a
-  } deriving (Functor, Applicative, Monad, MonadState BattleState, MonadWriter [LogMessage])
+  } deriving (Functor,
+              Applicative,
+              Monad,
+              MonadState BattleState,
+              MonadWriter [LogMessage],
+              MonadIO)
 
 data BattleState = BattleState
   { turnContext :: TurnContext
