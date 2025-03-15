@@ -31,7 +31,7 @@ applyStatus Player1 sts bs = bs { player1 = applyStatusToActive sts bs.player1 }
 applyStatus Player2 sts bs = bs { player2 = applyStatusToActive sts bs.player2 }
 
 -- | Updates a player's active Pokémon with new HP after damage.
-applyStatusToActive :: Status -> Player -> Player
+applyStatusToActive :: Status -> Player BattleM -> Player BattleM
 applyStatusToActive sts p =
   case p.active.pstatus of
     Just _  -> p

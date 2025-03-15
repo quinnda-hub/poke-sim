@@ -4,7 +4,7 @@
 
 module Pokemon.Battle.Simulation.Internal (simulateBattle) where
 
-import           Control.Monad.Trans.State           (get, put)
+import           Control.Monad.State.Class           (get, put)
 
 import           Pokemon.Battle.Action               (applyAction, applyActions,
                                                       resolveActions,
@@ -48,7 +48,7 @@ teamFainted t =
 
 -- | A player is defeated if their active Pokémon is fainted
 --   and their entire team (bench) is fainted.
-isPlayerDefeated :: Player -> Bool
+isPlayerDefeated :: Player BattleM -> Bool
 isPlayerDefeated player = isFainted player.active && teamFainted player.team
 
 -- | Increments the turn counter by 1.

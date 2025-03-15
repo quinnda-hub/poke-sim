@@ -1,30 +1,36 @@
-{-# LANGUAGE DuplicateRecordFields #-}
-{-# LANGUAGE OverloadedRecordDot   #-}
+{-# LANGUAGE DeriveFunctor              #-}
+{-# LANGUAGE DuplicateRecordFields      #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE OverloadedRecordDot        #-}
 
-module Pokemon.Battle.BattleState.Internal (BattleM,
+module Pokemon.Battle.BattleState.Internal (BattleM(..),
                                            BattleState(..),
                                            getPokemonForSlot,
                                            pokemonName,
                                            getRNG,
                                            updateRNG) where
 
-import           Control.Monad.State              (get, put)
-import           Control.Monad.Trans.State        (StateT)
-import           Control.Monad.Trans.Writer       (WriterT)
-import           Data.Text                        (Text)
-import           Pokemon.Battle.BattleState.Types (Player (..), PlayerSlot (..),
-                                                   TurnContext)
-import           Pokemon.Battle.Logging           (LogMessage)
-import           Pokemon.Battle.Pokemon.Internal  (Pokemon (..))
-import           Pokemon.Mechanics.Weather        (Weather)
-import           System.Random                    (StdGen)
-
-type BattleM a = StateT BattleState (WriterT [LogMessage] IO) a
+import           Control.Monad.State                   (MonadState, get, put)
+import           Control.Monad.Trans.State             (StateT)
+import           Control.Monad.Trans.Writer            (WriterT)
+import           Control.Monad.Writer.Class            (MonadWriter)
+import           Data.Text                             (Text)
+import           Pokemon.Battle.BattleState.PlayerSlot (PlayerSlot (..))
+import           Pokemon.Battle.BattleState.Types      (Player (..),
+                                                        TurnContext)
+import           Pokemon.Battle.Logging                (LogMessage)
+import           Pokemon.Battle.Pokemon.Internal       (Pokemon (..))
+import           Pokemon.Mechanics.Weather             (Weather)
+import           System.Random                         (StdGen)
+-- A newtype for the BattleM monad.
+newtype BattleM a = BattleM
+  { runBattleM :: StateT BattleState (WriterT [LogMessage] IO) a
+  } deriving (Functor, Applicative, Monad, MonadState BattleState, MonadWriter [LogMessage])
 
 data BattleState = BattleState
   { turnContext :: TurnContext
-  , player1     :: Player
-  , player2     :: Player
+  , player1     :: Player BattleM
+  , player2     :: Player BattleM
   , turnNumber  :: Int
   , weather     :: Weather
   , rng         :: StdGen

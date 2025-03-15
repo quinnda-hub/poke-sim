@@ -34,7 +34,7 @@ applyBoosts Player1 b bs = bs { player1 = applyBoostsToActive b bs.player1 }
 applyBoosts Player2 b bs = bs { player2 = applyBoostsToActive b bs.player2 }
 
 -- | Apply boosts to the active Pokemon of the Player.
-applyBoostsToActive :: Boosts -> Player -> Player
+applyBoostsToActive :: Boosts -> Player BattleM -> Player BattleM
 applyBoostsToActive moveBoosts player =
   let  poke = player.active
        currentBoosts = poke.boosts

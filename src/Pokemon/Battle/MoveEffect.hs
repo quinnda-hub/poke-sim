@@ -7,7 +7,7 @@ module Pokemon.Battle.MoveEffect
   , applyMoveWithContext
   ) where
 
-import           Control.Monad.Trans.State           (get, modify)
+import           Control.Monad.State.Class           (get, modify)
 import           Data.Maybe                          (catMaybes)
 import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..))
 import           Pokemon.Battle.BattleState.Types    (PlayerSlot,

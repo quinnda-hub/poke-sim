@@ -9,7 +9,7 @@ module Pokemon.Battle.Action
  )
   where
 
-import           Control.Monad.Trans.State           (get)
+import           Control.Monad.State.Class           (get)
 import           Pokemon.Battle.BattleState.Types    (Player (active),
                                                       PlayerSlot (..))
 

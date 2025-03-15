@@ -6,22 +6,22 @@ module Pokemon.Battle.Action.MoveAction
   , applyMoveActionWithActor
   ) where
 
-import           Control.Monad.Trans.State           (get)
+import           Control.Monad.State.Class             (get)
 
-import           Pokemon.Battle.BattleState.Internal (BattleM,
-                                                      getPokemonForSlot,
-                                                      pokemonName)
+import           Pokemon.Battle.BattleState.Internal   (BattleM,
+                                                        getPokemonForSlot,
+                                                        pokemonName)
 
-import           Data.Maybe                          (catMaybes)
-import           Pokemon.Battle.Ability              (triggerAbilityOnMoveUse)
-import           Pokemon.Battle.Action.Internal      (Action (..),
-                                                      ActionType (..))
-import           Pokemon.Battle.BattleState.Types    (PlayerSlot (..))
-import           Pokemon.Battle.Logging              (logAction)
-import           Pokemon.Battle.MoveEffect           (applyMoveWithContext)
-import           Pokemon.Battle.Pokemon.Internal     (MoveSet (..),
-                                                      Pokemon (..))
-import           Pokemon.Data.Move.Internal          (Move (name))
+import           Data.Maybe                            (catMaybes)
+import           Pokemon.Battle.Ability                (triggerAbilityOnMoveUse)
+import           Pokemon.Battle.Action.Internal        (Action (..),
+                                                        ActionType (..))
+import           Pokemon.Battle.BattleState.PlayerSlot (PlayerSlot (..))
+import           Pokemon.Battle.Logging                (logAction)
+import           Pokemon.Battle.MoveEffect             (applyMoveWithContext)
+import           Pokemon.Battle.Pokemon.Internal       (MoveSet (..),
+                                                        Pokemon (..))
+import           Pokemon.Data.Move.Internal            (Move (name))
 
 -- | Returns valid move actions for the given player slot.
 validMoveActions :: PlayerSlot -> BattleM [Action]

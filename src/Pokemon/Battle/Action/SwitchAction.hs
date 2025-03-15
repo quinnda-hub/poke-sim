@@ -6,21 +6,22 @@ module Pokemon.Battle.Action.SwitchAction
   , applySwitchActionWithActor
   ) where
 
-import           Control.Monad.Trans.State           (get)
+import           Control.Monad.State.Class             (get)
 
-import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..))
+import           Pokemon.Battle.BattleState.Internal   (BattleM,
+                                                        BattleState (..))
 
-import           Control.Monad.State                 (modify)
-import           Data.Maybe                          (catMaybes)
-import qualified Data.Text                           as T
-import           Pokemon.Battle.Action.Internal      (Action (..),
-                                                      ActionType (..))
-import           Pokemon.Battle.BattleState.Types    (Player (..),
-                                                      PlayerSlot (..),
-                                                      Team (..))
-import           Pokemon.Battle.Logging              (logSwitch)
-import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..),
-                                                      defaultBoosts, isFainted)
+import           Control.Monad.State                   (modify)
+import           Data.Maybe                            (catMaybes)
+import qualified Data.Text                             as T
+import           Pokemon.Battle.Action.Internal        (Action (..),
+                                                        ActionType (..))
+import           Pokemon.Battle.BattleState.PlayerSlot (PlayerSlot (..))
+import           Pokemon.Battle.BattleState.Types      (Player (..), Team (..))
+import           Pokemon.Battle.Logging                (logSwitch)
+import           Pokemon.Battle.Pokemon.Internal       (Pokemon (..),
+                                                        defaultBoosts,
+                                                        isFainted)
 
 -- | Returns valid switch actions for the given player slot.
 validSwitchActions :: PlayerSlot -> BattleM [Action]

@@ -7,10 +7,10 @@ module Pokemon.Battle.Action.Internal
   ) where
 
 
-import           Pokemon.Battle.BattleState.Types (PlayerSlot (..))
 
-import           Pokemon.Battle.Pokemon.Internal  (Pokemon (..))
-import           Pokemon.Data.Move.Internal       (Move)
+import           Pokemon.Battle.BattleState.PlayerSlot (PlayerSlot (..))
+import           Pokemon.Battle.Pokemon.Internal       (Pokemon (..))
+import           Pokemon.Data.Move.Internal            (Move)
 
 --------------------------------------------------------------------------------
 -- Actions

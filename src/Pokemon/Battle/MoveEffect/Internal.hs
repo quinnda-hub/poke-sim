@@ -10,7 +10,7 @@ module Pokemon.Battle.MoveEffect.Internal
   ) where
 
 import           Control.Monad                       (forM_)
-import           Control.Monad.Trans.State           (get, modify)
+import           Control.Monad.State.Class           (get, modify)
 import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
                                                       getRNG, updateRNG)
 import           Pokemon.Battle.BattleState.Types    (Player (..),

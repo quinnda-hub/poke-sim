@@ -21,13 +21,14 @@ import           Pokemon.Data.Move.Internal          (loadMoves,
 import           Pokemon.Data.Pokedex.Internal       (loadPokedex,
                                                       showLoadPokedexError)
 
-import           Pokemon.Battle.BattleState.Types    (Player (Player, active, team),
+import           Pokemon.Battle.BattleState.Types    (Player (Player, active, strategy, team),
                                                       PlayerSlot (Player1, Player2),
                                                       Team (Team, pokemon1, pokemon2, pokemon3, pokemon4, pokemon5),
                                                       TurnContext (TurnContext, attacker, defender, moveModifiers))
 -- Battle state types and simulation
-import           Pokemon.Battle.BattleState.Internal (BattleState (..))
-
+import           Pokemon.AI.Internal                 (uniformStrategy)
+import           Pokemon.Battle.BattleState.Internal (BattleState (..),
+                                                      runBattleM)
 import           Pokemon.Battle.Simulation.Internal  (simulateBattle)
 
 import           Pokemon.Mechanics.Weather           (Weather (..))
@@ -182,13 +183,13 @@ someDemoBattle = do
                           rng0 <- newStdGen
                           let initBattleState = BattleState
                                 { turnContext = TurnContext { attacker = Player1, defender = Player2, moveModifiers = [] }
-                                , player1     = Player { team = Team { pokemon1 = Nothing, pokemon2 = Nothing, pokemon3 = Nothing, pokemon4 = Nothing, pokemon5 = Nothing }, active = fuecocoPokemon }
-                                , player2     = Player { team = Team { pokemon1 = Just wattrelPokemon, pokemon2 = Nothing, pokemon3 = Nothing, pokemon4 = Nothing, pokemon5 = Nothing }, active = sprigatitoPokemon }
+                                , player1     = Player  { team = Team { pokemon1 = Nothing, pokemon2 = Nothing, pokemon3 = Nothing, pokemon4 = Nothing, pokemon5 = Nothing }, active = fuecocoPokemon, strategy = uniformStrategy }
+                                , player2     = Player { team = Team { pokemon1 = Just wattrelPokemon, pokemon2 = Nothing, pokemon3 = Nothing, pokemon4 = Nothing, pokemon5 = Nothing }, active = sprigatitoPokemon, strategy = uniformStrategy }
                                 , turnNumber  = 1
                                 , weather     = Clear
                                 , rng         = rng0
                                 }
 
                           putStrLn "Starting battle simulation..."
-                          ((), finalLogs) <- runWriterT (evalStateT (simulateBattle initBattleState) initBattleState)
+                          ((), finalLogs) <- runWriterT (evalStateT (runBattleM (simulateBattle initBattleState)) initBattleState)
                           printLogMessages finalLogs

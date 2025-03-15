@@ -4,23 +4,24 @@
 
 module Pokemon.Battle.Ability where
 
-import           Control.Monad                       (when)
-import           Control.Monad.Trans.State           (get, modify)
-import qualified Data.Map.Strict                     as Map
-import           Data.Maybe                          (fromMaybe)
-import           Data.Text                           (Text)
-import           Pokemon.Battle.Ability.Internal     (Ability (..),
-                                                      AbilityContext (..),
-                                                      AbilityEffectFunc,
-                                                      AbilityTrigger (..))
-import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
-                                                      getPokemonForSlot)
-import           Pokemon.Battle.BattleState.Types    (PlayerSlot,
-                                                      TurnContext (..))
-import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..))
-import           Pokemon.Data.Move.Internal          (Move (basePower, category, moveType),
-                                                      MoveCategory (Status))
-import           Pokemon.Mechanics.PType             (PType (..))
+import           Control.Monad                         (when)
+import           Control.Monad.State.Class             (get, modify)
+import qualified Data.Map.Strict                       as Map
+import           Data.Maybe                            (fromMaybe)
+import           Data.Text                             (Text)
+import           Pokemon.Battle.Ability.Internal       (Ability (..),
+                                                        AbilityContext (..),
+                                                        AbilityEffectFunc,
+                                                        AbilityTrigger (..))
+import           Pokemon.Battle.BattleState.Internal   (BattleM,
+                                                        BattleState (..),
+                                                        getPokemonForSlot)
+import           Pokemon.Battle.BattleState.PlayerSlot (PlayerSlot (..))
+import           Pokemon.Battle.BattleState.Types      (TurnContext (..))
+import           Pokemon.Battle.Pokemon.Internal       (Pokemon (..))
+import           Pokemon.Data.Move.Internal            (Move (basePower, category, moveType),
+                                                        MoveCategory (Status))
+import           Pokemon.Mechanics.PType               (PType (..))
 
 triggerAbilityOnMoveUse :: PlayerSlot -> Move -> BattleM ()
 triggerAbilityOnMoveUse slot mv = do

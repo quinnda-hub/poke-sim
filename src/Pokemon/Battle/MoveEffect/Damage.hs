@@ -28,7 +28,7 @@ applyDamage Player1 dmg bs = bs { player1 = applyDamageToActive dmg bs.player1 }
 applyDamage Player2 dmg bs = bs { player2 = applyDamageToActive dmg bs.player2 }
 
 -- | Updates a player's active Pokémon with new HP after damage.
-applyDamageToActive :: Int -> Player -> Player
+applyDamageToActive :: Int -> Player BattleM -> Player BattleM
 applyDamageToActive dmg p =
   let oldHP = p.active.hp
       newHP = max 0 (oldHP - dmg)
