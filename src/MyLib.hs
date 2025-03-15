@@ -26,7 +26,7 @@ import           Pokemon.Battle.BattleState.Types    (Player (Player, active, st
                                                       Team (Team, pokemon1, pokemon2, pokemon3, pokemon4, pokemon5),
                                                       TurnContext (TurnContext, attacker, defender, moveModifiers))
 -- Battle state types and simulation
-import           Pokemon.AI.Internal                 (uniformStrategy)
+import           Pokemon.AI.Internal                 (preferAttackStrategy)
 import           Pokemon.Battle.BattleState.Internal (BattleState (..),
                                                       runBattleM)
 import           Pokemon.Battle.Simulation.Internal  (simulateBattle)
@@ -183,8 +183,8 @@ someDemoBattle = do
                           rng0 <- newStdGen
                           let initBattleState = BattleState
                                 { turnContext = TurnContext { attacker = Player1, defender = Player2, moveModifiers = [] }
-                                , player1     = Player  { team = Team { pokemon1 = Nothing, pokemon2 = Nothing, pokemon3 = Nothing, pokemon4 = Nothing, pokemon5 = Nothing }, active = fuecocoPokemon, strategy = uniformStrategy }
-                                , player2     = Player { team = Team { pokemon1 = Just wattrelPokemon, pokemon2 = Nothing, pokemon3 = Nothing, pokemon4 = Nothing, pokemon5 = Nothing }, active = sprigatitoPokemon, strategy = uniformStrategy }
+                                , player1     = Player  { team = Team { pokemon1 = Nothing, pokemon2 = Nothing, pokemon3 = Nothing, pokemon4 = Nothing, pokemon5 = Nothing }, active = fuecocoPokemon, strategy = preferAttackStrategy }
+                                , player2     = Player { team = Team { pokemon1 = Just wattrelPokemon, pokemon2 = Nothing, pokemon3 = Nothing, pokemon4 = Nothing, pokemon5 = Nothing }, active = sprigatitoPokemon, strategy = preferAttackStrategy }
                                 , turnNumber  = 1
                                 , weather     = Clear
                                 , rng         = rng0
