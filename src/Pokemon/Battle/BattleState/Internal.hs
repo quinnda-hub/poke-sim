@@ -3,7 +3,6 @@
 
 module Pokemon.Battle.BattleState.Internal (BattleM,
                                            BattleState(..),
-                                           PlayerSlot(..),
                                            getPokemonForSlot,
                                            pokemonName,
                                            getRNG,

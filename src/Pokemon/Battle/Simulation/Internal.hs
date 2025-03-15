@@ -9,9 +9,10 @@ import           Control.Monad.Trans.State           (get, put)
 import           Pokemon.Battle.Action               (applyAction, applyActions,
                                                       resolveActions,
                                                       uniformStrategy)
-import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
-                                                      PlayerSlot (..))
+import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..))
+
 import           Pokemon.Battle.BattleState.Types    (Player (active, team),
+                                                      PlayerSlot (..),
                                                       Team (pokemon1, pokemon2, pokemon3, pokemon4, pokemon5))
 
 import           Control.Monad                       (when)

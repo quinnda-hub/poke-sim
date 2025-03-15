@@ -8,8 +8,10 @@ module Pokemon.Battle.BattleState.Types
   , applyModifiers
   )
 where
+
 import           Pokemon.Battle.Pokemon.Internal (Pokemon)
 import           Pokemon.Data.Move.Internal      (Move)
+
 
 -- State of the turn.
 data TurnContext = TurnContext

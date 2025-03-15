@@ -4,7 +4,8 @@
 module Pokemon.Battle.Ability.Internal where
 
 import           Data.Text                           (Text)
-import           Pokemon.Battle.BattleState.Internal (BattleM, PlayerSlot)
+import           Pokemon.Battle.BattleState.Internal (BattleM)
+import           Pokemon.Battle.BattleState.Types    (PlayerSlot)
 import           Pokemon.Data.Move.Internal          (Move)
 
 --------------------------------------------------------------------------------

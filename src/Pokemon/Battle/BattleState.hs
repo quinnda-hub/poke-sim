@@ -1,6 +1,4 @@
 module Pokemon.Battle.BattleState (BattleM,
-                                   BattleState(..),
-                                   PlayerSlot(..)) where
+                                   BattleState(..)) where
 
-import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
-                                                      PlayerSlot (..))
+import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..))

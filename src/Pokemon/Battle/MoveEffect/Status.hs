@@ -6,9 +6,10 @@ module Pokemon.Battle.MoveEffect.Status where
 import           Control.Monad.State                 (get)
 import           Data.Maybe                          (isJust)
 import           Data.Text                           as T (pack)
-import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
+import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..))
+
+import           Pokemon.Battle.BattleState.Types    (Player (..),
                                                       PlayerSlot (..))
-import           Pokemon.Battle.BattleState.Types    (Player (..))
 import           Pokemon.Battle.Logging              (logStatus)
 import           Pokemon.Battle.MoveEffect.Internal  (EffectStep (InflictStatus),
                                                       applyEffectForMove)

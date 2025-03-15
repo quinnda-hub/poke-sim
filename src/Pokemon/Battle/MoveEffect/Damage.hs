@@ -3,9 +3,9 @@
 
 module Pokemon.Battle.MoveEffect.Damage where
 import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState,
-                                                      PlayerSlot (..), player1,
-                                                      player2)
-import           Pokemon.Battle.BattleState.Types    (Player (..))
+                                                      player1, player2)
+import           Pokemon.Battle.BattleState.Types    (Player (..),
+                                                      PlayerSlot (..))
 import           Pokemon.Battle.Logging              (logDamage)
 import           Pokemon.Battle.MoveEffect.Internal  (EffectStep (DoDamage),
                                                       applyEffectForMove)

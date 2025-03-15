@@ -8,15 +8,16 @@ module Pokemon.Battle.Action.SwitchAction
 
 import           Control.Monad.Trans.State           (get)
 
-import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
-                                                      PlayerSlot (..))
+import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..))
 
 import           Control.Monad.State                 (modify)
 import           Data.Maybe                          (catMaybes)
 import qualified Data.Text                           as T
 import           Pokemon.Battle.Action.Internal      (Action (..),
                                                       ActionType (..))
-import           Pokemon.Battle.BattleState.Types    (Player (..), Team (..))
+import           Pokemon.Battle.BattleState.Types    (Player (..),
+                                                      PlayerSlot (..),
+                                                      Team (..))
 import           Pokemon.Battle.Logging              (logSwitch)
 import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..),
                                                       defaultBoosts, isFainted)

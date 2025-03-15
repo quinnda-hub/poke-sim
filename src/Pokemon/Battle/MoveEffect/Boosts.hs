@@ -4,9 +4,9 @@
 module Pokemon.Battle.MoveEffect.Boosts where
 
 import           Data.Maybe                          (fromMaybe)
-import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
+import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..))
+import           Pokemon.Battle.BattleState.Types    (Player (..),
                                                       PlayerSlot (..))
-import           Pokemon.Battle.BattleState.Types    (Player (..))
 import           Pokemon.Battle.Logging              (logBoosts)
 import           Pokemon.Battle.MoveEffect.Internal  (EffectStep (..),
                                                       applyEffectForMove)

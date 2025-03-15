@@ -8,7 +8,7 @@ module Pokemon.Battle.Action.MoveAction
 
 import           Control.Monad.Trans.State           (get)
 
-import           Pokemon.Battle.BattleState.Internal (BattleM, PlayerSlot (..),
+import           Pokemon.Battle.BattleState.Internal (BattleM,
                                                       getPokemonForSlot,
                                                       pokemonName)
 
@@ -16,6 +16,7 @@ import           Data.Maybe                          (catMaybes)
 import           Pokemon.Battle.Ability              (triggerAbilityOnMoveUse)
 import           Pokemon.Battle.Action.Internal      (Action (..),
                                                       ActionType (..))
+import           Pokemon.Battle.BattleState.Types    (PlayerSlot (..))
 import           Pokemon.Battle.Logging              (logAction)
 import           Pokemon.Battle.MoveEffect           (applyMoveWithContext)
 import           Pokemon.Battle.Pokemon.Internal     (MoveSet (..),
