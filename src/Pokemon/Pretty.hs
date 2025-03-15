@@ -4,6 +4,7 @@
 
 module Pokemon.Pretty
   ( printPokemon
+  , printAction
   , printLogMessages
   ) where
 
@@ -11,6 +12,8 @@ import           Data.Maybe                      (fromMaybe)
 import           Data.Text                       (Text)
 import qualified Data.Text                       as T
 import qualified Data.Text.IO                    as TIO
+import           Pokemon.Battle.Action.Internal  (Action (Action, actionType),
+                                                  ActionType (..))
 import           Pokemon.Battle.Logging          (LogMessage (..))
 import           Pokemon.Battle.Pokemon.Internal (MoveSet (..), Pokemon (..),
                                                   PokemonBoosts)
@@ -62,6 +65,18 @@ prettyMoveSet ms =
 -- Print a Pokemon to the console.
 printPokemon :: Pokemon -> IO ()
 printPokemon p = TIO.putStrLn (prettyPokemon p)
+--------------------------------------------------------------------------------
+-- Pretty Actions
+--------------------------------------------------------------------------------
+
+prettyAction :: Action -> Text
+prettyAction (Action { actionType = MoveAction mv }) =
+  "Move: " <>  mv.name
+prettyAction (Action { actionType = SwitchAction pk }) =
+  "Switch: " <> pk.name
+
+printAction :: Action -> IO ()
+printAction a = TIO.putStrLn (prettyAction a)
 
 --------------------------------------------------------------------------------
 -- Pretty Logging

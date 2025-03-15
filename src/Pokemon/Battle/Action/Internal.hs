@@ -1,6 +1,5 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 
-
 module Pokemon.Battle.Action.Internal
   ( Action(..)
   , ActionType(..)
