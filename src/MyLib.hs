@@ -25,8 +25,7 @@ import           Pokemon.Battle.BattleState.Types    (Player (Player, active, st
                                                       Team (Team, pokemon1, pokemon2, pokemon3, pokemon4, pokemon5),
                                                       TurnContext (TurnContext, attacker, defender, moveModifiers))
 -- Battle state types and simulation
-import           Pokemon.AI.Internal                 (interactiveStrategy,
-                                                      preferAttackStrategy)
+import           Pokemon.AI.Internal                 (preferAttackStrategy)
 import           Pokemon.Battle.BattleState.Internal (BattleState (..),
                                                       runBattleM)
 import           Pokemon.Battle.Simulation.Internal  (simulateBattle)
@@ -100,7 +99,7 @@ someDemoBattle = do
             (Just fuecocoData, Just sprigatitoData, Just wattrelData) -> do
 
               -- Define desired moves for each Pokémon.
-              let fuecocoMovesDesired    = ["ember", "leer", "smokescreen", "tackle"]
+              let fuecocoMovesDesired    = ["willowisp", "willowisp", "willowisp", "tackle"]
                   sprigatitoMovesDesired = ["honeclaws", "growl", "scratch", "leafage"]
                   wattrelMovesDesired    = ["peck", "growl"]
 
