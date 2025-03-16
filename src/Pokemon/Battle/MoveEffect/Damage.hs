@@ -2,6 +2,7 @@
 {-# LANGUAGE OverloadedRecordDot   #-}
 
 module Pokemon.Battle.MoveEffect.Damage where
+
 import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState,
                                                       player1, player2)
 import           Pokemon.Battle.BattleState.Types    (Player (..),

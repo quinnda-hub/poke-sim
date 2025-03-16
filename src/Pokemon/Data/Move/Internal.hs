@@ -8,6 +8,7 @@ module Pokemon.Data.Move.Internal
     Status(..),
     Target(..),
     MoveCategory(..),
+    Multihit(..),
     struggleMove,
     loadMoves,
     showLoadMovesError
