@@ -8,5 +8,5 @@ import           GHC.Generics (Generic)
 
 data PType = Normal | Fire   | Water  | Electric | Grass | Ice  | Fighting
            | Poison | Ground | Flying | Psychic  | Bug   | Rock | Ghost
-           | Dragon | Dark   | Steel  | Fairy
+           | Dragon | Dark   | Steel  | Fairy    | Typeless
     deriving (Show, Eq, Generic, FromJSON)

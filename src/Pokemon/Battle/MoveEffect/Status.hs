@@ -1,13 +1,16 @@
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE OverloadedRecordDot   #-}
 
 module Pokemon.Battle.MoveEffect.Status where
 
 import           Control.Monad.State                 (get)
-import           Data.Maybe                          (isJust)
+import           Data.Maybe                          (isJust, isNothing)
 import           Data.Text                           as T (pack)
-import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..))
+import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
+                                                      getPokemonForSlot)
 
+import           Control.Monad                       (when)
 import           Pokemon.Battle.BattleState.Types    (Player (..),
                                                       PlayerSlot (..))
 import           Pokemon.Battle.Logging              (logStatus)
@@ -50,35 +53,33 @@ isImmuneToStatus p mv =
        Poison   -> hasType Steel    -- Poison moves don't affect Steel-type Pokémon.
        _        -> False
 
--- | Applies a status effect and update the battle stat.
 applyStatusForMove :: Move -> Pokemon -> Pokemon -> [PlayerSlot] -> BattleM ()
 applyStatusForMove mv attacker defender targetSlots = do
   bsPre <- get
+  let getPreStatus slot = case slot of
+        Player1 -> bsPre.player1.active.pstatus
+        Player2 -> bsPre.player2.active.pstatus
+      logIfNeeded st slot bs =
+        let targetPokemon = getPokemonForSlot slot bs
+        in when (isNothing targetPokemon.pstatus && not (isImmuneToStatus targetPokemon mv)) $ do
+             let targetName = case slot of
+                   Player1 -> bs.player1.active.name
+                   Player2 -> bs.player2.active.name
+             logStatus (T.pack $ show st) targetName
+
   applyEffectForMove mv attacker defender targetSlots
-    (\mv' _ _ _ _ -> pure (status mv'))
+    (\_ _ _ _ _ -> pure (status mv))
     (\mStatus slot bs ->
        case mStatus of
          Just st ->
-           let targetPokemon = case slot of
-                                 Player1 -> bs.player1.active
-                                 Player2 -> bs.player2.active
-               preStatus = case slot of
-                             Player1 -> bsPre.player1.active.pstatus
-                             Player2 -> bsPre.player2.active.pstatus
+           let targetPokemon = getPokemonForSlot slot bs
+               preStatus     = getPreStatus slot
            in if isJust preStatus || isImmuneToStatus targetPokemon mv
-             then bs
-             else applyStatus slot st bs
+                then bs
+                else applyStatus slot st bs
          Nothing -> bs)
     (\mStatus slot bs ->
        case mStatus of
-         Just st ->
-           let targetPokemon = case slot of
-                                 Player1 -> bsPre.player1.active
-                                 Player2 -> bsPre.player2.active
-           in if isJust targetPokemon.pstatus || isImmuneToStatus targetPokemon mv
-                then pure ()  -- Skip logging.
-                else let targetName = case slot of
-                                           Player1 -> bs.player1.active.name
-                                           Player2 -> bs.player2.active.name
-                     in logStatus (T.pack $ show st) targetName
+         Just st -> logIfNeeded st slot bs
          Nothing -> pure ())
+

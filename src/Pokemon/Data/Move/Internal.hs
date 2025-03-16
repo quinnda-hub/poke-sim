@@ -113,8 +113,8 @@ struggleMove = Move
   , num = 165
   , pp = 1
   , priority = 0
-  , moveType = PT.Normal  -- Assuming the type is represented as Text; adjust as needed.
-  , category = Physical  -- Based on your moves.json, it is a Physical move.
+  , moveType = PT.Normal
+  , category = Physical
   , accuracy = Just AlwaysHits
   , basePower = Just 50
   , basePowerCallback = False
@@ -126,7 +126,7 @@ struggleMove = Move
   , secondaries = Nothing
   , status = Nothing
   , volatileStatus = Nothing
-  , recoil = Nothing  -- You can add details about recoil if you want.
+  , recoil = Nothing
   , drain = Nothing
   , heal = Nothing
   , pseudoWeather = Nothing
@@ -204,7 +204,7 @@ struggleMove = Move
   , overrideDefensiveStat = Nothing
   , onDamagePriority = Nothing
   , thawsTarget = False
-  , target = RandomNormal  -- Matches your moves.json configuration.
+  , target = RandomNormal
   }
 
 -- | Represents the accuracy of a move.
