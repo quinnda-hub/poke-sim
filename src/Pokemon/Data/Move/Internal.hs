@@ -481,9 +481,8 @@ data VolatileStatus
 
 -- | Information about multi-hit moves.
 data Multihit
-  = Single                   -- ^ Hits once.
-  | Range Int Int            -- ^ Hits between a range.
-  | Fixed Int                -- ^ Hits a fixed number of times.
+  = Range Int Int -- ^ Hits between a range.
+  | Fixed Int     -- ^ Hits a fixed number of times.
   deriving (Show, Eq)
 
 -- | Represents one-hit KO moves.
@@ -785,13 +784,7 @@ instance FromJSON VolatileStatus where
 
 instance FromJSON Multihit where
   parseJSON v =
-    parseSingle v <|> parseFixed v <|> parseRange v
-
-parseSingle :: Value -> Parser Multihit
-parseSingle = withScientific "Multihit" $ \n ->
-  if n == 1
-    then pure Single
-    else fail "Expected 1 for Single Multihit"
+    parseFixed v <|> parseRange v
 
 parseFixed :: Value -> Parser Multihit
 parseFixed = withScientific "Multihit" $ \n ->
