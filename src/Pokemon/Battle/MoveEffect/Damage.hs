@@ -10,17 +10,21 @@ import           Pokemon.Battle.Logging              (logDamage)
 import           Pokemon.Battle.MoveEffect.Internal  (EffectStep (DoDamage),
                                                       applyEffectForMove)
 import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..))
-import           Pokemon.Data.Move.Internal          (Move (basePower))
+import           Pokemon.Data.Move.Internal          (Move (basePower),
+                                                      multihit)
 
+import           Data.Maybe                          (isJust)
 import           Pokemon.Battle.Damage.Internal      (calculateDamage)
 
 -- | If the move has a base power, produce a damage step.
 gatherDamage :: Move -> Maybe EffectStep
-gatherDamage mv =
-  case basePower mv of
-    Just 0  -> Nothing
-    Just _  -> Just DoDamage
-    Nothing -> Nothing
+gatherDamage mv
+  | isJust mv.multihit = Nothing -- Multi-hit moves are handled elsewhere.
+  | otherwise =
+      case basePower mv of
+        Just 0  -> Nothing
+        Just _  -> Just DoDamage
+        Nothing -> Nothing
 
 -- | Applies damage to the specified player slot.
 applyDamage :: PlayerSlot -> Int -> BattleState -> BattleState
