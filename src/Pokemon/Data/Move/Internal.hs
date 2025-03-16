@@ -6,10 +6,11 @@ module Pokemon.Data.Move.Internal
     Accuracy(..),
     Boosts(..),
     Status(..),
-    loadMoves,
-    showLoadMovesError,
     Target(..),
-    MoveCategory(..)
+    MoveCategory(..),
+    struggleMove,
+    loadMoves,
+    showLoadMovesError
   ) where
 
 import           Control.Applicative       ((<|>))
@@ -29,7 +30,7 @@ import           Data.Map.Strict           (Map)
 import           Data.Text                 (Text)
 import qualified Data.Text                 as T
 
-import           Pokemon.Mechanics.PType   (PType)
+import qualified Pokemon.Mechanics.PType   as PT
 import           Pokemon.Mechanics.Weather (PseudoWeather, Weather)
 
 -- | Represents a Pokémon move with all its properties.
@@ -41,7 +42,7 @@ data Move = Move
   , num                   :: Int                     -- ^ Move number.
   , pp                    :: Int                     -- ^ Power points.
   , priority              :: Int                     -- ^ Move priority.
-  , moveType              :: PType                   -- ^ Type of the move.
+  , moveType              :: PT.PType                -- ^ Type of the move.
   , category              :: MoveCategory            -- ^ Physical, Special, or Status.
 
     -- Accuracy and Power
@@ -102,6 +103,109 @@ data Move = Move
   , thawsTarget           :: Bool                    -- ^ Thaws the target.
   , target                :: Target                  -- ^ Targeting information.
   } deriving (Show, Eq)
+
+-- | The hardcoded definition for the move Struggle.
+struggleMove :: Move
+struggleMove = Move
+  { name = "Struggle"
+  , description = Just "Deals typeless damage to a random opposing Pokémon. User loses 1/4 of its maximum HP."
+  , shortDesc = Just "User loses 1/4 of its max HP."
+  , num = 165
+  , pp = 1
+  , priority = 0
+  , moveType = PT.Normal  -- Assuming the type is represented as Text; adjust as needed.
+  , category = Physical  -- Based on your moves.json, it is a Physical move.
+  , accuracy = Just AlwaysHits
+  , basePower = Just 50
+  , basePowerCallback = False
+  , critRatio = Nothing
+  , damage = Nothing
+  , boosts = Nothing
+  , selfBoost = Nothing
+  , secondary = Nothing
+  , secondaries = Nothing
+  , status = Nothing
+  , volatileStatus = Nothing
+  , recoil = Nothing  -- You can add details about recoil if you want.
+  , drain = Nothing
+  , heal = Nothing
+  , pseudoWeather = Nothing
+  , weatherEffect = Nothing
+  , terrain = Nothing
+  , sideCondition = Nothing
+  , slotCondition = Nothing
+  , self = Nothing
+  , selfDestruct = Nothing
+  , condition = Nothing
+  , maxMove = Nothing
+  , zMove = Nothing
+  , ohko = Nothing
+  , multihit = Nothing
+  , flags = Just $ Flags
+      { allyanim       = False
+      , bite           = False
+      , bullet         = False
+      , bypasssub      = False
+      , cantusetwice   = False
+      , charge         = False
+      , contact        = True
+      , dance          = False
+      , defrost        = False
+      , distance       = False
+      , failcopycat    = True
+      , failencore     = True
+      , failinstruct   = True
+      , failmefirst    = True
+      , failmimic      = True
+      , futureremove   = False
+      , gravity        = False
+      , heal           = False
+      , metronome      = False
+      , mirror         = False
+      , mustpressure   = False
+      , noassist       = True
+      , nonsky         = False
+      , noparentalbond = False
+      , nosketch       = True
+      , nosleeptalk    = True
+      , pledgecombo    = False
+      , powder         = False
+      , protect        = True
+      , pulse          = False
+      , punch          = False
+      , recharge       = False
+      , reflectable    = False
+      , slicing        = False
+      , snatch         = False
+      , sound          = False
+      , wind           = False
+      }
+  , forceSwitch = False
+  , sleepUsable = False
+  , ignoreAbility = False
+  , breaksProtect = False
+  , stealsBoosts = False
+  , tracksTarget = False
+  , mindBlownRecoil = True
+  , struggleRecoil = True
+  , hasCrashDamage = False
+  , hasSheerForce = False
+  , willCrit = False
+  , callsMove = False
+  , smartTarget = False
+  , stallingMove = False
+  , nonGhostTarget = Nothing
+  , noPPBoosts = True
+  , multiaccuracy = False
+  , isMax = Nothing
+  , isZ = Nothing
+  , isNonstandard = Nothing
+  , realMove = Nothing
+  , overrideDefensiveStat = Nothing
+  , onDamagePriority = Nothing
+  , thawsTarget = False
+  , target = RandomNormal  -- Matches your moves.json configuration.
+  }
 
 -- | Represents the accuracy of a move.
 data Accuracy

@@ -1,6 +1,5 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric  #-}
-{-# LANGUAGE StrictData     #-}
 
 module Pokemon.Mechanics.PType (PType(..)) where
 
