@@ -65,6 +65,7 @@ prettyMoveSet ms =
 -- Print a Pokemon to the console.
 printPokemon :: Pokemon -> IO ()
 printPokemon p = TIO.putStrLn (prettyPokemon p)
+
 --------------------------------------------------------------------------------
 -- Pretty Actions
 --------------------------------------------------------------------------------
