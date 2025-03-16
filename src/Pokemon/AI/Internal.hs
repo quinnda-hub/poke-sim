@@ -3,6 +3,7 @@
 
 module Pokemon.AI.Internal where
 
+import           Control.Monad                       (forM_)
 import           Control.Monad.IO.Class              (liftIO)
 import           Pokemon.AI.Types                    (Strategy)
 import           Pokemon.Battle.Action.Internal      (Action (..),
@@ -11,6 +12,7 @@ import           Pokemon.Battle.BattleState.Internal (BattleM, getRNG,
                                                       updateRNG)
 import           Pokemon.Data.Move.Internal          (Move (category),
                                                       MoveCategory (..))
+import           Pokemon.Pretty                      (printAction)
 import           System.Random                       (Random (randomR))
 
 -- | A strategy that chooses an action uniformly at random.
@@ -41,7 +43,10 @@ preferAttackStrategy actions = do
 interactiveStrategy :: Strategy BattleM
 interactiveStrategy actions = do
   liftIO $ putStrLn "Choose an action:"
-  mapM_ (\(i, act) -> do liftIO $ putStrLn (show i ++ ": " ++ show act)) (zip [0 :: Int ..] actions)
+  -- For each action, print its index and pretty-print the action.
+  forM_ (zip [0 :: Int .. ] actions) $ \ (i, act) -> do
+    liftIO $ putStr (show i ++ ": ")
+    liftIO $ printAction act
   input <- liftIO getLine
   let idx = read input :: Int
   if idx < 0 || idx >= length actions
