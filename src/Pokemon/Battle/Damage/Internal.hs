@@ -297,3 +297,6 @@ singleEffectiveness Fairy defender =
     Poison   -> 0.5
     Steel    -> 0.5
     _        -> 1.0
+-- Typeless (Struggle)
+singleEffectiveness _ _ = 1.0
+
