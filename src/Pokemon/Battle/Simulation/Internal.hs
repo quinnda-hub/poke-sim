@@ -15,7 +15,7 @@ import           Pokemon.Battle.BattleState.Types    (Player (active, team),
                                                       PlayerSlot (..),
                                                       Team (pokemon1, pokemon2, pokemon3, pokemon4, pokemon5))
 
-import           Control.Monad                       (when)
+import           Control.Monad                       (unless, when)
 import           Control.Monad.IO.Class              (liftIO)
 import           Control.Monad.RWS                   (MonadWriter (..))
 import           Pokemon.Battle.Action.SwitchAction  (validSwitchActions)
@@ -75,9 +75,7 @@ simulateBattle bs0 = do
       ((), turnLogs) <- listen simulateTurn
       liftIO $ printLogMessages turnLogs
       bs <- get
-      if isPlayerDefeated bs.player1 || isPlayerDefeated bs.player2
-        then return ()
-        else loop
+      unless (isPlayerDefeated bs.player1 || isPlayerDefeated bs.player2) loop
 
 -- | Simulates one turn of a battle.
 simulateTurn :: BattleM ()

@@ -169,7 +169,7 @@ someDemoBattle = do
                           -- Construct the Pokémon.
                           let fuecocoPokemon    = mkPokemon fuecocoData lvl "Blaze" fuecocoMoveSet chosenNature ivs evs
                               sprigatitoPokemon = mkPokemon sprigatitoData lvl "Overgrow" sprigatitoMoveSet chosenNature ivs evs
-                              wattrelPokemon    = mkPokemon wattrelData 2 "Volt Absorb" wattrelMoveSet chosenNature ivs evs
+                              wattrelPokemon    = mkPokemon wattrelData 3 "Volt Absorb" wattrelMoveSet chosenNature ivs evs
 
                           putStrLn "Constructed Pokémon:"
                           putStrLn "Fuecoco:"
