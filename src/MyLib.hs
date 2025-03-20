@@ -99,7 +99,7 @@ someDemoBattle = do
             (Just fuecocoData, Just sprigatitoData, Just wattrelData) -> do
 
               -- Define desired moves for each Pokémon.
-              let fuecocoMovesDesired    = ["willowisp", "willowisp", "willowisp", "tackle"]
+              let fuecocoMovesDesired    = ["leer", "bite", "willowisp", "tackle"]
                   sprigatitoMovesDesired = ["honeclaws", "growl", "scratch", "leafage"]
                   wattrelMovesDesired    = ["peck", "growl"]
 
