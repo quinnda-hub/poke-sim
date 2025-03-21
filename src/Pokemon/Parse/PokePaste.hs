@@ -2,13 +2,16 @@
 
 module Pokemon.Parse.PokePaste where
 
-import           Control.Applicative  (many, (<|>))
-import           Data.Attoparsec.Text
+import           Control.Applicative  (optional, (<|>))
+import           Data.Attoparsec.Text (Parser, char, endOfInput, endOfLine,
+                                       isEndOfLine, option, satisfy, skipSpace,
+                                       takeTill)
 import           Data.Maybe           (fromMaybe)
 import           Data.Text            (Text)
 import qualified Data.Text            as T
 
-
+-- | Parse the header line of a PokePaste, which includes an optional nickname,
+--   the species name, the optional gender, and the optinal item of the Pokemon.
 parseHeaderLine ::  Parser (Maybe Text, Text, Maybe Char, Maybe Text)
 parseHeaderLine = do
   -- Try to parse a nickname (anything before a '('))
@@ -33,5 +36,15 @@ parseHeaderLine = do
     i <- takeTill isEndOfLine
     return (Just (T.strip i))
   return (nick, T.strip species, gender, item)
+
+-- | Parse a move line.
+moveParser :: Parser Text
+moveParser = do
+  skipSpace
+  _ <- char '-'
+  _ <- optional (char ' ')
+  move <- takeTill isEndOfLine
+  endOfLine <|> endOfInput
+  return (T.strip move)
 
 
