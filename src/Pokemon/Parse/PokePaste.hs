@@ -5,10 +5,10 @@
 module Pokemon.Parse.PokePaste where
 
 import           Control.Applicative           (optional, (<|>))
-import           Data.Attoparsec.Text          (Parser, char, endOfInput,
-                                                endOfLine, isEndOfLine, option,
-                                                satisfy, skipSpace, string,
-                                                takeTill)
+import           Data.Attoparsec.Text          (Parser, char, decimal,
+                                                endOfInput, endOfLine,
+                                                isEndOfLine, option, satisfy,
+                                                skipSpace, string, takeTill)
 import           Data.Maybe                    (fromMaybe, isNothing,
                                                 maybeToList)
 import           Data.Text                     (Text)
@@ -75,6 +75,16 @@ parseAbilityLine = do
   ability <- takeTill isEndOfLine
   endOfLine <|> endOfInput
   return (T.strip ability)
+
+-- | Parse a level line, e.g., "Level: 100".
+parseLevel :: Parser Int
+parseLevel = do
+  skipSpace
+  _ <- string "Level:"
+  skipSpace
+  lvl <- decimal
+  endOfLine <|> endOfInput
+  return lvl
 
 -- | Parse a move line.
 moveParser :: Parser Text
