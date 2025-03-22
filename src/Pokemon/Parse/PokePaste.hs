@@ -7,12 +7,17 @@ module Pokemon.Parse.PokePaste where
 import           Control.Applicative           (optional, (<|>))
 import           Data.Attoparsec.Text          (Parser, char, endOfInput,
                                                 endOfLine, isEndOfLine, option,
-                                                satisfy, skipSpace, takeTill)
+                                                satisfy, skipSpace, string,
+                                                takeTill)
 import           Data.Maybe                    (fromMaybe, isNothing,
                                                 maybeToList)
 import           Data.Text                     (Text)
 import qualified Data.Text                     as T
 import           Pokemon.Data.Pokedex.Internal (Abilities (..), PokedexMon (..))
+
+------------------------------------------------------------
+-- Ability Resolution
+------------------------------------------------------------
 
 -- | Custom error type for erros that can occur when parsing an ability.
 data AbilityError
@@ -60,6 +65,16 @@ parseHeaderLine = do
     i <- takeTill isEndOfLine
     return (Just (T.strip i))
   return (nick, T.strip species, gender, item)
+
+-- | Parse an ability line, e.g., "Ability: Gale Wings".
+parseAbilityLine :: Parser Text
+parseAbilityLine = do
+  skipSpace
+  _ <- string "Ability:"
+  skipSpace
+  ability <- takeTill isEndOfLine
+  endOfLine <|> endOfInput
+  return (T.strip ability)
 
 -- | Parse a move line.
 moveParser :: Parser Text
