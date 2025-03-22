@@ -1,19 +1,38 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE OverloadedRecordDot   #-}
+{-# LANGUAGE OverloadedStrings     #-}
 
 module Pokemon.Parse.PokePaste where
 
-import           Control.Applicative  (optional, (<|>))
-import           Data.Attoparsec.Text (Parser, char, endOfInput, endOfLine,
-                                       isEndOfLine, option, satisfy, skipSpace,
-                                       takeTill)
-import           Data.Maybe           (fromMaybe)
-import           Data.Text            (Text)
-import qualified Data.Text            as T
+import           Control.Applicative           (optional, (<|>))
+import           Data.Attoparsec.Text          (Parser, char, endOfInput,
+                                                endOfLine, isEndOfLine, option,
+                                                satisfy, skipSpace, takeTill)
+import           Data.Maybe                    (fromMaybe, isNothing,
+                                                maybeToList)
+import           Data.Text                     (Text)
+import qualified Data.Text                     as T
+import           Pokemon.Data.Pokedex.Internal (Abilities (..), PokedexMon (..))
 
+-- | Custom error type for erros that can occur when parsing an ability.
 data AbilityError
   = MultipleAbilitiesError { speciesName :: Text, availableAbilities :: [Text] }
-  | NoAbilityInfoError { speciesName :: Text }
   deriving (Show, Eq)
+
+-- | Resolve the ability for a Pokemon.
+--   If the ability was provided in the input text file, then use that.
+--   Otherwise, if the species only has one ability (ability1 and abilityh are Nothing),
+--   then that one ability (ability0) is used.
+--   If there are multiple abilities available but none specified in the input,
+--   then an error is returned.
+resolveAbility :: PokedexMon -> Maybe Text -> Either AbilityError Text
+resolveAbility _ (Just ability) = Right ability
+resolveAbility pmon Nothing =
+  let Abilities { ability0 = a0, ability1 = a1, abilityh = ah } = pmon.abilities
+      availableAbilities' = [a0] ++ maybeToList a1 ++ maybeToList ah
+  in if isNothing a1 && isNothing ah
+    then Right a0
+    else Left $ MultipleAbilitiesError pmon.name availableAbilities'
 
 -- | Parse the header line of a PokePaste, which includes an optional nickname,
 --   the species name, the optional gender, and the optinal item of the Pokemon.

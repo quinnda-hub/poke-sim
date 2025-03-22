@@ -1,9 +1,9 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedStrings     #-}
-{-# LANGUAGE StrictData            #-}
 
 module Pokemon.Data.Pokedex.Internal
   ( PokedexMon(..),
+    Abilities(..),
     BaseStats(..),
    loadPokedex,
    showLoadPokedexError
@@ -14,7 +14,7 @@ import           Data.Aeson              (FromJSON, eitherDecode, withObject,
                                           (.:), (.:?))
 import           Data.Aeson.Types        (FromJSON (parseJSON))
 import qualified Data.ByteString.Lazy    as BL
-import Data.List.NonEmpty ( NonEmpty )
+import           Data.List.NonEmpty      (NonEmpty)
 import           Data.Map.Strict         (Map)
 import           Data.Text               (Text)
 import           Pokemon.Mechanics.PType (PType)
