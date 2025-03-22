@@ -4,16 +4,21 @@
 
 module Pokemon.Parse.PokePaste where
 
-import           Control.Applicative           (optional, (<|>))
-import           Data.Attoparsec.Text          (Parser, char, decimal,
-                                                endOfInput, endOfLine,
-                                                isEndOfLine, option, satisfy,
-                                                skipSpace, string, takeTill)
-import           Data.Maybe                    (fromMaybe, isNothing,
-                                                maybeToList)
-import           Data.Text                     (Text)
-import qualified Data.Text                     as T
-import           Pokemon.Data.Pokedex.Internal (Abilities (..), PokedexMon (..))
+import           Control.Applicative             (optional, (<|>))
+import           Data.Attoparsec.Text            (Parser, char, decimal,
+                                                  endOfInput, endOfLine,
+                                                  isEndOfLine, option, satisfy,
+                                                  sepBy1, skipSpace, string,
+                                                  takeTill)
+import           Data.List                       (foldl')
+import qualified Data.Map.Strict                 as Map
+import           Data.Maybe                      (fromMaybe, isNothing,
+                                                  maybeToList)
+import           Data.Text                       (Text)
+import qualified Data.Text                       as T
+import           Pokemon.Battle.Pokemon.Internal (EVs, mkEVs)
+import           Pokemon.Data.Pokedex.Internal   (Abilities (..),
+                                                  PokedexMon (..))
 
 ------------------------------------------------------------
 -- Ability Resolution
@@ -85,6 +90,34 @@ parseLevel = do
   lvl <- decimal
   endOfLine <|> endOfInput
   return lvl
+
+-- Parse an EVs line, e.g., "EVs: 252 Atk / 4 Def / 252 spe".
+parseEVsLine :: Parser EVs
+parseEVsLine = do
+  skipSpace
+  _ <- string "EVs:"
+  skipSpace
+  segments <- parseSegment `sepBy1` (skipSpace >> char '/' >> skipSpace)
+  let evMap = foldl' (\m (stat, value) -> Map.insert stat value m) Map.empty segments
+      evHP  = Map.findWithDefault 0 "HP" evMap
+      evAtk = Map.findWithDefault 0 "Atk" evMap
+      evDef = Map.findWithDefault 0 "Def" evMap
+      evSpa = Map.findWithDefault 0 "Spa" evMap
+      evSpd = Map.findWithDefault 0 "Spd" evMap
+      evSpe = Map.findWithDefault 0 "Spe" evMap
+  endOfLine <|> endOfInput
+  maybe (fail $ "Invalid EVs: " ++ show (evHP, evAtk, evDef, evSpa, evSpd, evSpe))
+        return
+        (mkEVs evHP evAtk evDef evSpa evSpd evSpe)
+
+-- | Parse a segment of stat to value, e.g., "252 Atk" -> ("Atk", 252).
+parseSegment :: Parser (Text, Int)
+parseSegment = do
+  skipSpace
+  value <- decimal
+  skipSpace
+  stat <- takeTill (\c -> c == '/' || isEndOfLine c)
+  return (T.strip stat, value)
 
 -- | Parse a move line.
 moveParser :: Parser Text
