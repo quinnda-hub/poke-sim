@@ -1,13 +1,15 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedRecordDot   #-}
 {-# LANGUAGE OverloadedStrings     #-}
+{-# OPTIONS_GHC -Wno-name-shadowing #-}
 
 module Pokemon.Parse.PokePaste where
 
-import           Control.Applicative             (optional, (<|>))
+import           Control.Applicative             (many, optional, (<|>))
 import           Data.Attoparsec.Text            (Parser, char, decimal,
                                                   endOfInput, endOfLine,
-                                                  isEndOfLine, option, satisfy,
+                                                  isEndOfLine, many1, option,
+                                                  parseOnly, satisfy, sepBy,
                                                   sepBy1, skipSpace, string,
                                                   takeTill)
 import           Data.List                       (foldl')
@@ -86,8 +88,8 @@ parseAbilityLine = do
   return (T.strip ability)
 
 -- | Parse a level line, e.g., "Level: 100".
-parseLevel :: Parser Int
-parseLevel = do
+parseLevelLine :: Parser Int
+parseLevelLine = do
   skipSpace
   _ <- string "Level:"
   skipSpace
@@ -161,5 +163,55 @@ parseMoveLine = do
   move <- takeTill isEndOfLine
   endOfLine <|> endOfInput
   return (T.strip move)
+
+------------------------------------------------------------
+-- Intermediate Parsed Data Type
+------------------------------------------------------------
+
+-- | Data type to represent a parsed Pokemon from a PokePaste text.
+data ParsedPokemon = ParsedPokemon
+  { nickname :: Maybe Text
+  , species  :: Text
+  , gender   :: Maybe Char
+  , item     :: Maybe Text
+  , ability  :: Maybe Text
+  , level    :: Maybe Int
+  , evs      :: EVs
+  , ivs      :: IVs
+  , nature   :: Maybe Text
+  , moves    :: [Text]
+  } deriving (Show, Eq)
+
+-- | Parse a single Pokemon block.
+pokemonBlockParser :: Parser ParsedPokemon
+pokemonBlockParser = do
+  (nick, species, gender, item) <- parseHeaderLine
+  ability <- optional parseAbilityLine
+  level   <- optional parseLevelLine
+  evs     <- parseEVsLine
+  ivs     <- parseIVsLine
+  nature  <- optional parseNatureLine
+  moves   <- many parseMoveLine
+  return ParsedPokemon
+           { nickname = nick
+           , species  = species
+           , gender   = gender
+           , item     = item
+           , ability  = ability
+           , level    = level
+           , evs      = evs
+           , ivs      = ivs
+           , nature   = nature
+           , moves    = moves
+           }
+
+-- | Parse a team of Pokemon.
+--   Pokemon blocks are separated by one or more spaces.
+teamParser :: Parser [ParsedPokemon]
+teamParser = pokemonBlockParser `sepBy` many1 endOfLine
+
+-- | Function to parse an entire PokePaste text.
+parsePokePaste :: Text -> Either String [ParsedPokemon]
+parsePokePaste = parseOnly (teamParser <* endOfInput)
 
 
