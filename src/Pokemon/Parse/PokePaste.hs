@@ -16,7 +16,7 @@ import           Data.Maybe                      (fromMaybe, isNothing,
                                                   maybeToList)
 import           Data.Text                       (Text)
 import qualified Data.Text                       as T
-import           Pokemon.Battle.Pokemon.Internal (EVs, mkEVs)
+import           Pokemon.Battle.Pokemon.Internal (EVs, IVs, mkEVs, mkIVs)
 import           Pokemon.Data.Pokedex.Internal   (Abilities (..),
                                                   PokedexMon (..))
 
@@ -43,6 +43,10 @@ resolveAbility pmon Nothing =
   in if isNothing a1 && isNothing ah
     then Right a0
     else Left $ MultipleAbilitiesError pmon.name availableAbilities'
+
+------------------------------------------------------------
+-- Parsers for the Different Sections of a Pokemon Block
+------------------------------------------------------------
 
 -- | Parse the header line of a PokePaste, which includes an optional nickname,
 --   the species name, the optional gender, and the optinal item of the Pokemon.
@@ -109,6 +113,25 @@ parseEVsLine = do
   maybe (fail $ "Invalid EVs: " ++ show (evHP, evAtk, evDef, evSpa, evSpd, evSpe))
         return
         (mkEVs evHP evAtk evDef evSpa evSpd evSpe)
+
+-- Parse an IVs line, e.g., "IVs: 0 Atk"
+parseIVsLine :: Parser IVs
+parseIVsLine = do
+  skipSpace
+  _ <- string "IVs:"
+  skipSpace
+  segments <- parseSegment `sepBy1` (skipSpace >> char '/' >> skipSpace)
+  let ivMap = foldl' (\m (stat, value) -> Map.insert stat value m) Map.empty segments
+      ivHP  = Map.findWithDefault 31 "HP" ivMap
+      ivAtk = Map.findWithDefault 31 "Atk" ivMap
+      ivDef = Map.findWithDefault 31 "Def" ivMap
+      ivSpa = Map.findWithDefault 31 "Spa" ivMap
+      ivSpd = Map.findWithDefault 31 "Spd" ivMap
+      ivSpe = Map.findWithDefault 31 "Spe" ivMap
+  endOfLine <|> endOfInput
+  maybe (fail $ "Invalid IVs: " ++ show (ivHP, ivAtk, ivDef, ivSpa, ivSpd, ivSpe))
+        return
+        (mkIVs ivHP ivAtk ivDef ivSpa ivSpd ivSpe)
 
 -- | Parse a segment of stat to value, e.g., "252 Atk" -> ("Atk", 252).
 parseSegment :: Parser (Text, Int)
