@@ -142,9 +142,19 @@ parseSegment = do
   stat <- takeTill (\c -> c == '/' || isEndOfLine c)
   return (T.strip stat, value)
 
+-- | Parse a nature line, e.g., "Jolly Nature".
+parseNatureLine :: Parser Text
+parseNatureLine = do
+  skipSpace
+  nat <- takeTill (\c -> c == ' ' || isEndOfLine c)
+  skipSpace
+  _ <- string "Nature"
+  endOfLine <|> endOfInput
+  return (T.strip nat)
+
 -- | Parse a move line.
-moveParser :: Parser Text
-moveParser = do
+parseMoveLine :: Parser Text
+parseMoveLine = do
   skipSpace
   _ <- char '-'
   _ <- optional (char ' ')
