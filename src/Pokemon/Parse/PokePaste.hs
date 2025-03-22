@@ -10,6 +10,11 @@ import           Data.Maybe           (fromMaybe)
 import           Data.Text            (Text)
 import qualified Data.Text            as T
 
+data AbilityError
+  = MultipleAbilitiesError { speciesName :: Text, availableAbilities :: [Text] }
+  | NoAbilityInfoError { speciesName :: Text }
+  deriving (Show, Eq)
+
 -- | Parse the header line of a PokePaste, which includes an optional nickname,
 --   the species name, the optional gender, and the optinal item of the Pokemon.
 parseHeaderLine ::  Parser (Maybe Text, Text, Maybe Char, Maybe Text)
