@@ -18,6 +18,7 @@ import           Data.Maybe                      (fromMaybe, isNothing,
                                                   maybeToList)
 import           Data.Text                       (Text)
 import qualified Data.Text                       as T
+import qualified Data.Text.IO                    as TIO
 import           Pokemon.Battle.Pokemon.Internal (EVs, IVs, mkEVs, mkIVs)
 import           Pokemon.Data.Pokedex.Internal   (Abilities (..),
                                                   PokedexMon (..))
@@ -214,4 +215,9 @@ teamParser = pokemonBlockParser `sepBy` many1 endOfLine
 parsePokePaste :: Text -> Either String [ParsedPokemon]
 parsePokePaste = parseOnly (teamParser <* endOfInput)
 
+-- | Parse a PokePaste text from disk.
+parsePokePasteFile :: FilePath -> IO (Either String [ParsedPokemon])
+parsePokePasteFile filePath = do
+  content <- TIO.readFile filePath
+  return (parsePokePaste content)
 
