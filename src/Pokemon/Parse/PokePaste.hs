@@ -88,6 +88,16 @@ parseAbilityLine = do
   endOfLine <|> endOfInput
   return (T.strip ability)
 
+-- | Parse a tera type line and ignore it (for now).
+parseTeraTypeLine :: Parser ()
+parseTeraTypeLine = do
+  skipSpace
+  _ <- string "Tera Type:"
+  skipSpace
+  _ <- takeTill isEndOfLine
+  endOfLine <|> endOfInput
+  return ()
+
 -- | Parse a level line, e.g., "Level: 100".
 parseLevelLine :: Parser Int
 parseLevelLine = do
@@ -188,6 +198,7 @@ pokemonBlockParser :: Parser ParsedPokemon
 pokemonBlockParser = do
   (nick, species, gender, item) <- parseHeaderLine
   ability <- optional parseAbilityLine
+  _       <- optional parseTeraTypeLine
   level   <- optional parseLevelLine
   evs     <- parseEVsLine
   ivs     <- parseIVsLine
@@ -213,7 +224,7 @@ teamParser = pokemonBlockParser `sepBy` many1 endOfLine
 
 -- | Function to parse an entire PokePaste text.
 parsePokePaste :: Text -> Either String [ParsedPokemon]
-parsePokePaste = parseOnly (teamParser <* endOfInput)
+parsePokePaste = parseOnly (skipSpace *> teamParser <* skipSpace <* endOfInput)
 
 -- | Parse a PokePaste text from disk.
 parsePokePasteFile :: FilePath -> IO (Either String [ParsedPokemon])
