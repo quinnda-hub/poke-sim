@@ -9,9 +9,9 @@ import           Control.Applicative             (many, optional, (<|>))
 import           Data.Attoparsec.Text            (Parser, char, decimal,
                                                   endOfInput, endOfLine,
                                                   isEndOfLine, many1, option,
-                                                  parseOnly, satisfy, sepBy,
-                                                  sepBy1, skipSpace, string,
-                                                  takeTill)
+                                                  parseOnly, peekChar, satisfy,
+                                                  sepBy, sepBy1, skipSpace,
+                                                  string, takeTill)
 import           Data.List                       (foldl')
 import qualified Data.Map.Strict                 as Map
 import           Data.Maybe                      (fromMaybe, isNothing,
@@ -53,30 +53,62 @@ resolveAbility pmon Nothing =
 
 -- | Parse the header line of a PokePaste, which includes an optional nickname,
 --   the species name, the optional gender, and the optinal item of the Pokemon.
-parseHeaderLine ::  Parser (Maybe Text, Text, Maybe Char, Maybe Text)
-parseHeaderLine = do
-  -- Try to parse a nickname (anything before a '('))
-  nick <- option Nothing $ do
-    n <- takeTill (== '(')
-    _ <- char '('
-    return (Just $ T.strip n)
-  -- Parse the Pokemon species name up to a closing ')'
-  species <- option (T.strip $ fromMaybe "" nick) (takeTill (== ')') <* char ')')
-  -- Optionally parse gender in parenthesis
+parseHeaderLine :: Parser (Maybe Text, Text, Maybe Char, Maybe Text)
+parseHeaderLine = parseNickAndSpeciesHeader <|> parseSimpleHeader
+
+-- | Parse a header line with a nickname.
+--   Pattern: <nickname> ( <species> ) [ ( <gender> ) ] [ @ <item> ]
+--   This parser fails if the content inside the first parentheses is "M" or "F",
+--   so that the simple header parser can handle that case.
+parseNickAndSpeciesHeader :: Parser (Maybe Text, Text, Maybe Char, Maybe Text)
+parseNickAndSpeciesHeader = do
+  -- Parse everything before the first '(' as a potential nickname.
+  nick <- takeTill (== '(')
+  let nick' = T.strip nick
+  if T.null nick'
+    then fail "No nickname found"
+    else do
+      _ <- char '('
+      species <- takeTill (== ')') <* char ')'
+      let species' = T.strip species
+      -- If the parenthesized group is just a gender indicator, then this branch isn’t valid.
+      if species' == "M" || species' == "F"
+        then fail "Parenthesized group is gender, not species"
+        else do
+          skipSpace
+          gender <- option Nothing $ do
+            _ <- char '('
+            g <- satisfy (\c -> c == 'M' || c == 'F')
+            _ <- char ')'
+            return (Just g)
+          item <- option Nothing $ do
+            skipSpace
+            _ <- char '@'
+            skipSpace
+            i <- takeTill isEndOfLine
+            return (Just (T.strip i))
+          return (Just nick', species', gender, item)
+
+-- | Parse a simple header without a nickname.
+--   Pattern: <species> [ ( <gender> ) ] [ @ <item> ]
+parseSimpleHeader :: Parser (Maybe Text, Text, Maybe Char, Maybe Text)
+parseSimpleHeader = do
+  species <- takeTill (\c -> c == '@' || c == '(' || isEndOfLine c)
+  let species' = T.strip species
   gender <- option Nothing $ do
     skipSpace
     _ <- char '('
     g <- satisfy (\c -> c == 'M' || c == 'F')
     _ <- char ')'
     return (Just g)
-  -- Optionally parse an item if present
+  skipSpace
   item <- option Nothing $ do
-    skipSpace
     _ <- char '@'
     skipSpace
     i <- takeTill isEndOfLine
     return (Just (T.strip i))
-  return (nick, T.strip species, gender, item)
+  endOfLine <|> endOfInput
+  return (Nothing, species', gender, item)
 
 -- | Parse an ability line, e.g., "Ability: Gale Wings".
 parseAbilityLine :: Parser Text
