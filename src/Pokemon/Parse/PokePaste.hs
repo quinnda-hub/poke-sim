@@ -1,7 +1,6 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedRecordDot   #-}
 {-# LANGUAGE OverloadedStrings     #-}
-{-# OPTIONS_GHC -Wno-name-shadowing #-}
 
 module Pokemon.Parse.PokePaste where
 
@@ -9,13 +8,13 @@ import           Control.Applicative             (many, optional, (<|>))
 import           Data.Attoparsec.Text            (Parser, char, decimal,
                                                   endOfInput, endOfLine,
                                                   isEndOfLine, many1, option,
-                                                  parseOnly, peekChar, satisfy,
-                                                  sepBy, sepBy1, skipSpace,
-                                                  string, takeTill)
+                                                  parseOnly, satisfy, sepBy,
+                                                  sepBy1, skipSpace, string,
+                                                  takeTill, try)
+import           Data.Either                     (lefts, rights)
 import           Data.List                       (foldl')
 import qualified Data.Map.Strict                 as Map
-import           Data.Maybe                      (fromMaybe, isNothing,
-                                                  maybeToList)
+import           Data.Maybe                      (isNothing, maybeToList)
 import           Data.Text                       (Text)
 import qualified Data.Text                       as T
 import qualified Data.Text.IO                    as TIO
@@ -27,7 +26,7 @@ import           Pokemon.Data.Pokedex.Internal   (Abilities (..),
 -- Ability Resolution
 ------------------------------------------------------------
 
--- | Custom error type for erros that can occur when parsing an ability.
+-- | Custom error type for errors that can occur when parsing an ability.
 data AbilityError
   = MultipleAbilitiesError { speciesName :: Text, availableAbilities :: [Text] }
   deriving (Show, Eq)
@@ -39,20 +38,20 @@ data AbilityError
 --   If there are multiple abilities available but none specified in the input,
 --   then an error is returned.
 resolveAbility :: PokedexMon -> Maybe Text -> Either AbilityError Text
-resolveAbility _ (Just ability) = Right ability
+resolveAbility _ (Just abilityText) = Right abilityText
 resolveAbility pmon Nothing =
-  let Abilities { ability0 = a0, ability1 = a1, abilityh = ah } = pmon.abilities
-      availableAbilities' = [a0] ++ maybeToList a1 ++ maybeToList ah
-  in if isNothing a1 && isNothing ah
-    then Right a0
-    else Left $ MultipleAbilitiesError pmon.name availableAbilities'
+  let Abilities { ability0 = ability0Val, ability1 = ability1Val, abilityh = abilityhVal } = pmon.abilities
+      availableAbilitiesList = [ability0Val] ++ maybeToList ability1Val ++ maybeToList abilityhVal
+  in if isNothing ability1Val && isNothing abilityhVal
+    then Right ability0Val
+    else Left $ MultipleAbilitiesError pmon.name availableAbilitiesList
 
 ------------------------------------------------------------
 -- Parsers for the Different Sections of a Pokemon Block
 ------------------------------------------------------------
 
 -- | Parse the header line of a PokePaste, which includes an optional nickname,
---   the species name, the optional gender, and the optinal item of the Pokemon.
+--   the species name, the optional gender, and the optional item of the Pokemon.
 parseHeaderLine :: Parser (Maybe Text, Text, Maybe Char, Maybe Text)
 parseHeaderLine = parseNickAndSpeciesHeader <|> parseSimpleHeader
 
@@ -62,53 +61,51 @@ parseHeaderLine = parseNickAndSpeciesHeader <|> parseSimpleHeader
 --   so that the simple header parser can handle that case.
 parseNickAndSpeciesHeader :: Parser (Maybe Text, Text, Maybe Char, Maybe Text)
 parseNickAndSpeciesHeader = do
-  -- Parse everything before the first '(' as a potential nickname.
-  nick <- takeTill (== '(')
-  let nick' = T.strip nick
-  if T.null nick'
+  rawNick <- takeTill (== '(')
+  let nickStr = T.strip rawNick
+  if T.null nickStr
     then fail "No nickname found"
     else do
       _ <- char '('
-      species <- takeTill (== ')') <* char ')'
-      let species' = T.strip species
-      -- If the parenthesized group is just a gender indicator, then this branch isn’t valid.
-      if species' == "M" || species' == "F"
+      rawSpecies <- takeTill (== ')') <* char ')'
+      let speciesStr = T.strip rawSpecies
+      if speciesStr == "M" || speciesStr == "F"
         then fail "Parenthesized group is gender, not species"
         else do
           skipSpace
-          gender <- option Nothing $ do
+          genderVal <- option Nothing $ do
             _ <- char '('
-            g <- satisfy (\c -> c == 'M' || c == 'F')
+            genderChar <- satisfy (\c -> c == 'M' || c == 'F')
             _ <- char ')'
-            return (Just g)
-          item <- option Nothing $ do
+            return (Just genderChar)
+          itemVal <- option Nothing $ do
             skipSpace
             _ <- char '@'
             skipSpace
-            i <- takeTill isEndOfLine
-            return (Just (T.strip i))
-          return (Just nick', species', gender, item)
+            rawItem <- takeTill isEndOfLine
+            return (Just (T.strip rawItem))
+          return (Just nickStr, speciesStr, genderVal, itemVal)
 
 -- | Parse a simple header without a nickname.
 --   Pattern: <species> [ ( <gender> ) ] [ @ <item> ]
 parseSimpleHeader :: Parser (Maybe Text, Text, Maybe Char, Maybe Text)
 parseSimpleHeader = do
-  species <- takeTill (\c -> c == '@' || c == '(' || isEndOfLine c)
-  let species' = T.strip species
-  gender <- option Nothing $ do
+  rawSpecies <- takeTill (\c -> c == '@' || c == '(' || isEndOfLine c)
+  let speciesStr = T.strip rawSpecies
+  genderVal <- option Nothing $ do
     skipSpace
     _ <- char '('
-    g <- satisfy (\c -> c == 'M' || c == 'F')
+    genderChar <- satisfy (\c -> c == 'M' || c == 'F')
     _ <- char ')'
-    return (Just g)
+    return (Just genderChar)
   skipSpace
-  item <- option Nothing $ do
+  itemVal <- option Nothing $ do
     _ <- char '@'
     skipSpace
-    i <- takeTill isEndOfLine
-    return (Just (T.strip i))
+    rawItem <- takeTill isEndOfLine
+    return (Just (T.strip rawItem))
   endOfLine <|> endOfInput
-  return (Nothing, species', gender, item)
+  return (Nothing, speciesStr, genderVal, itemVal)
 
 -- | Parse an ability line, e.g., "Ability: Gale Wings".
 parseAbilityLine :: Parser Text
@@ -116,9 +113,9 @@ parseAbilityLine = do
   skipSpace
   _ <- string "Ability:"
   skipSpace
-  ability <- takeTill isEndOfLine
+  rawAbility <- takeTill isEndOfLine
   endOfLine <|> endOfInput
-  return (T.strip ability)
+  return (T.strip rawAbility)
 
 -- | Parse a tera type line and ignore it (for now).
 parseTeraTypeLine :: Parser ()
@@ -136,22 +133,22 @@ parseLevelLine = do
   skipSpace
   _ <- string "Level:"
   skipSpace
-  lvl <- decimal
+  levelNumber <- decimal
   endOfLine <|> endOfInput
-  return lvl
+  return levelNumber
 
--- Parse an EVs line, e.g., "EVs: 252 Atk / 4 Def / 252 spe".
+-- | Parse an EVs line, e.g., "EVs: 252 Atk / 4 Def / 252 Spe".
 parseEVsLine :: Parser EVs
 parseEVsLine = do
   skipSpace
   _ <- string "EVs:"
   skipSpace
-  segments <- parseSegment `sepBy1` (skipSpace >> char '/' >> skipSpace)
-  let evMap = foldl' (\m (stat, value) -> Map.insert stat value m) Map.empty segments
+  segmentsList <- parseSegment `sepBy1` (skipSpace >> char '/' >> skipSpace)
+  let evMap = foldl' (\acc (statName, statValue) -> Map.insert statName statValue acc) Map.empty segmentsList
       evHP  = Map.findWithDefault 0 "HP" evMap
       evAtk = Map.findWithDefault 0 "Atk" evMap
       evDef = Map.findWithDefault 0 "Def" evMap
-      evSpa = Map.findWithDefault 0 "Spa" evMap
+      evSpa = Map.findWithDefault 0 "SpA" evMap
       evSpd = Map.findWithDefault 0 "Spd" evMap
       evSpe = Map.findWithDefault 0 "Spe" evMap
   endOfLine <|> endOfInput
@@ -159,18 +156,18 @@ parseEVsLine = do
         return
         (mkEVs evHP evAtk evDef evSpa evSpd evSpe)
 
--- Parse an IVs line, e.g., "IVs: 0 Atk"
+-- | Parse an IVs line, e.g., "IVs: 0 Atk".
 parseIVsLine :: Parser IVs
 parseIVsLine = do
   skipSpace
   _ <- string "IVs:"
   skipSpace
-  segments <- parseSegment `sepBy1` (skipSpace >> char '/' >> skipSpace)
-  let ivMap = foldl' (\m (stat, value) -> Map.insert stat value m) Map.empty segments
+  segmentsList <- parseSegment `sepBy1` (skipSpace >> char '/' >> skipSpace)
+  let ivMap = foldl' (\acc (statName, statValue) -> Map.insert statName statValue acc) Map.empty segmentsList
       ivHP  = Map.findWithDefault 31 "HP" ivMap
       ivAtk = Map.findWithDefault 31 "Atk" ivMap
       ivDef = Map.findWithDefault 31 "Def" ivMap
-      ivSpa = Map.findWithDefault 31 "Spa" ivMap
+      ivSpa = Map.findWithDefault 31 "SpA" ivMap
       ivSpd = Map.findWithDefault 31 "Spd" ivMap
       ivSpe = Map.findWithDefault 31 "Spe" ivMap
   endOfLine <|> endOfInput
@@ -182,20 +179,20 @@ parseIVsLine = do
 parseSegment :: Parser (Text, Int)
 parseSegment = do
   skipSpace
-  value <- decimal
+  statValue <- decimal
   skipSpace
-  stat <- takeTill (\c -> c == '/' || isEndOfLine c)
-  return (T.strip stat, value)
+  rawStat <- takeTill (\c -> c == '/' || isEndOfLine c)
+  return (T.strip rawStat, statValue)
 
 -- | Parse a nature line, e.g., "Jolly Nature".
 parseNatureLine :: Parser Text
 parseNatureLine = do
   skipSpace
-  nat <- takeTill (\c -> c == ' ' || isEndOfLine c)
+  rawNat <- takeTill (\c -> c == ' ' || isEndOfLine c)
   skipSpace
   _ <- string "Nature"
   endOfLine <|> endOfInput
-  return (T.strip nat)
+  return (T.strip rawNat)
 
 -- | Parse a move line.
 parseMoveLine :: Parser Text
@@ -203,9 +200,9 @@ parseMoveLine = do
   skipSpace
   _ <- char '-'
   _ <- optional (char ' ')
-  move <- takeTill isEndOfLine
+  rawMove <- takeTill isEndOfLine
   endOfLine <|> endOfInput
-  return (T.strip move)
+  return (T.strip rawMove)
 
 ------------------------------------------------------------
 -- Intermediate Parsed Data Type
@@ -220,7 +217,7 @@ data ParsedPokemon = ParsedPokemon
   , ability  :: Maybe Text
   , level    :: Maybe Int
   , evs      :: EVs
-  , ivs      :: IVs
+  , ivs      :: Maybe IVs
   , nature   :: Maybe Text
   , moves    :: [Text]
   } deriving (Show, Eq)
@@ -228,29 +225,34 @@ data ParsedPokemon = ParsedPokemon
 -- | Parse a single Pokemon block.
 pokemonBlockParser :: Parser ParsedPokemon
 pokemonBlockParser = do
-  (nick, species, gender, item) <- parseHeaderLine
-  ability <- optional parseAbilityLine
-  _       <- optional parseTeraTypeLine
-  level   <- optional parseLevelLine
-  evs     <- parseEVsLine
-  ivs     <- parseIVsLine
-  nature  <- optional parseNatureLine
-  moves   <- many parseMoveLine
+  (maybeNick, speciesVal, genderChar, itemText) <- parseHeaderLine
+  abilityText <- optional parseAbilityLine
+  _ <- optional parseTeraTypeLine
+  levelNumber <- optional parseLevelLine
+  evsValue <- parseEVsLine
+  extras <- many $ try $ Left <$> parseIVsLine <|> Right <$> parseNatureLine
+  let ivsValue   = case lefts extras of
+                     (firstIV:_) -> Just firstIV
+                     []          -> Nothing
+      natureValue = case rights extras of
+                     (firstNat:_) -> Just firstNat
+                     []           -> Nothing
+  movesList <- many parseMoveLine
   return ParsedPokemon
-           { nickname = nick
-           , species  = species
-           , gender   = gender
-           , item     = item
-           , ability  = ability
-           , level    = level
-           , evs      = evs
-           , ivs      = ivs
-           , nature   = nature
-           , moves    = moves
+           { nickname = maybeNick
+           , species  = speciesVal
+           , gender   = genderChar
+           , item     = itemText
+           , ability  = abilityText
+           , level    = levelNumber
+           , evs      = evsValue
+           , ivs      = ivsValue
+           , nature   = natureValue
+           , moves    = movesList
            }
 
 -- | Parse a team of Pokemon.
---   Pokemon blocks are separated by one or more spaces.
+--   Pokemon blocks are separated by one or more end-of-line characters.
 teamParser :: Parser [ParsedPokemon]
 teamParser = pokemonBlockParser `sepBy` many1 endOfLine
 
@@ -261,6 +263,10 @@ parsePokePaste = parseOnly (skipSpace *> teamParser <* skipSpace <* endOfInput)
 -- | Parse a PokePaste text from disk.
 parsePokePasteFile :: FilePath -> IO (Either String [ParsedPokemon])
 parsePokePasteFile filePath = do
-  content <- TIO.readFile filePath
-  return (parsePokePaste content)
+  fileContent <- TIO.readFile filePath
+  return (parsePokePaste $ cleanContent fileContent)
+
+-- | Remove any Windows-style carriage returns and trim each line.
+cleanContent :: Text -> Text
+cleanContent = T.unlines . map T.strip . T.lines . T.replace "\r" ""
 
