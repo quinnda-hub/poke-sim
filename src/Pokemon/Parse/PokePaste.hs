@@ -3,7 +3,7 @@
 
 module Pokemon.Parse.PokePaste
   ( parsePokePasteFile
-  , ParsedPokemon(..)
+     , ParsedPokemon(..)
   ) where
 
 import           Control.Applicative             (many, optional, (<|>))
