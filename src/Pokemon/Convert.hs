@@ -116,3 +116,11 @@ parsedPokemonToPokemon pokedex moveMap parsedMon = do
   let basePoke = mkPokemon pmon lvl abilityText moveSetVal natureVal ivsFinal evsFinal
   return basePoke
 
+-- | Convert a list of ParsedPokemon into full Pokemon.
+convertTeam
+  :: Map Text PokedexMon
+  -> Map Text Move
+  -> [ParsedPokemon]
+  -> Either ConvertError [Pokemon]
+convertTeam pokedex moveMap = mapM (parsedPokemonToPokemon pokedex moveMap)
+
