@@ -10,15 +10,22 @@ import           Data.Maybe                      (fromMaybe, isNothing,
                                                   maybeToList)
 import           Data.Text                       (Text)
 import qualified Data.Text                       as T
-import           Pokemon.Battle.Pokemon.Internal (EVs, IVs, MoveSet (..),
-                                                  Nature (..), Pokemon (..),
-                                                  defaultBoosts, mkEVs, mkIVs,
-                                                  mkPokemon)
 import           Pokemon.Data.Move.Internal      (Move)
 import           Pokemon.Data.Pokedex.Internal   (Abilities (..),
                                                   PokedexMon (..))
 
-import           Pokemon.Parse.PokePaste         ()
+import           Pokemon.Battle.Pokemon.Internal (MoveSet (..), Nature (..),
+                                                  Pokemon (..), mkIVs,
+                                                  mkPokemon)
+import           Pokemon.Parse.PokePaste         (ParsedPokemon (..), species)
+
+data ConvertError
+  = AbilityErr AbilityError
+  | NatureErr NatureError
+  | MoveSetErr MoveSetError
+  | UnknownSpeciesErr Text
+  | OtherErr Text
+  deriving (Show, Eq)
 
 -- | Custom error type for errors that can occur when parsing an ability.
 data AbilityError
@@ -34,6 +41,7 @@ newtype NatureError
 data MoveSetError
   = NoMovesProvidedError
   | UnknownMove { unknownMove :: Text }
+  deriving (Show, Eq)
 
 -- | Resolve the ability for a Pokemon.
 --   If the ability was provided in the input text file, then use that.
@@ -86,7 +94,25 @@ buildMoveSet moveMap moveNames =
                  , move4 = move4Final
                  }
 
-
-
-
+-- | Convert a single ParsedPokemon into a full Pokemon using lookup maps.
+parsedPokemonToPokemon
+  :: Map.Map Text PokedexMon  -- ^ Pokedex database.
+  -> Map.Map Text Move        -- ^ Move database.
+  -> ParsedPokemon            -- ^ The parsed Pokémon.
+  -> Either ConvertError Pokemon
+parsedPokemonToPokemon pokedex moveMap parsedMon = do
+  pmon <- maybe (Left $ UnknownSpeciesErr (species parsedMon))
+                Right
+                (Map.lookup (species parsedMon) pokedex)
+  let lvl = fromMaybe 100 parsedMon.level
+      ivsFinal = fromMaybe (fromMaybe (error "mkIVs failed") (mkIVs 31 31 31 31 31 31))
+                           parsedMon.ivs
+      evsFinal = parsedMon.evs
+  abilityText <- either (Left . AbilityErr) Right (resolveAbility pmon parsedMon.ability)
+  natureVal <- case parsedMon.nature of
+                 Nothing    -> Right Hardy
+                 Just natTxt -> either (Left . NatureErr) Right (parseNature natTxt)
+  moveSetVal <- either (Left . MoveSetErr) Right (buildMoveSet moveMap parsedMon.moves)
+  let basePoke = mkPokemon pmon lvl abilityText moveSetVal natureVal ivsFinal evsFinal
+  return basePoke
 
