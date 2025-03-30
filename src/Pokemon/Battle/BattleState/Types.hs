@@ -7,6 +7,7 @@ module Pokemon.Battle.BattleState.Types
   , Team(..)
   , MoveModifier
   , applyModifiers
+  , buildTeamFromList
   , createPlayer
   )
 where
@@ -36,11 +37,10 @@ data Player m = Player
   , strategy :: Strategy m
   }
 
--- We can create a Player from a list of Pokemon and a strategy.
-createPlayer :: [Pokemon] -> Strategy m -> Maybe (Player m)
-createPlayer [] _ = Nothing
-createPlayer (lead:bench) strat = Just Player
-  { team = buildTeamFromList bench
+-- | Create a Player from a lead Pokemon, a team, and a strategy.
+createPlayer :: Pokemon -> Team -> Strategy m -> Player m
+createPlayer lead t strat = Player
+  { team   = t
   , active = lead
   , strategy = strat
   }
