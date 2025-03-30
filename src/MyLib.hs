@@ -68,7 +68,6 @@ someFoo = do
 
 -- | Simulates a battle between a level 5 Fuecoco and a level 5 Sprigatito.
 --   Both Pokémon have perfect IVs (31 in all stats) and no EVs.
-
 someDemoBattle :: IO ()
 someDemoBattle = do
   putStrLn "Loading moves.json..."

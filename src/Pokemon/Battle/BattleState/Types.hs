@@ -15,7 +15,6 @@ import           Pokemon.Battle.BattleState.PlayerSlot (PlayerSlot (..))
 import           Pokemon.Battle.Pokemon.Internal       (Pokemon)
 import           Pokemon.Data.Move.Internal            (Move)
 
-
 -- State of the turn.
 data TurnContext = TurnContext
   { attacker      :: PlayerSlot

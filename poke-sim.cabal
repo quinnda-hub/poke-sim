@@ -81,6 +81,7 @@ library
                       Pokemon.Battle.BattleState.PlayerSlot,
                       Pokemon.Battle.BattleState,
                       Pokemon.Battle.Simulation.Internal,
+                      Pokemon.Battle.Simulation.Modes,
                       Pokemon.Battle.Simulation,
                       Pokemon.Data.Move.Internal,
                       Pokemon.Battle.MoveEffect.Internal,
