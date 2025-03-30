@@ -7,9 +7,11 @@ module Pokemon.Battle.BattleState.Types
   , Team(..)
   , MoveModifier
   , applyModifiers
+  , createPlayer
   )
 where
 
+import           Data.Maybe                            (listToMaybe)
 import           Pokemon.AI.Types                      (Strategy)
 import           Pokemon.Battle.BattleState.PlayerSlot (PlayerSlot (..))
 import           Pokemon.Battle.Pokemon.Internal       (Pokemon)
@@ -32,6 +34,24 @@ data Player m = Player
   { team     :: Team
   , active   :: Pokemon
   , strategy :: Strategy m
+  }
+
+-- We can create a Player from a list of Pokemon and a strategy.
+createPlayer :: [Pokemon] -> Strategy m -> Maybe (Player m)
+createPlayer [] _ = Nothing
+createPlayer (lead:bench) strat = Just Player
+  { team = buildTeamFromList bench
+  , active = lead
+  , strategy = strat
+  }
+
+buildTeamFromList :: [Pokemon] -> Team
+buildTeamFromList pokes = Team
+  { pokemon1 = listToMaybe pokes
+  , pokemon2 = listToMaybe (drop 1 pokes)
+  , pokemon3 = listToMaybe (drop 2 pokes)
+  , pokemon4 = listToMaybe (drop 3 pokes)
+  , pokemon5 = listToMaybe (drop 4 pokes)
   }
 
 instance Show (Player m) where
