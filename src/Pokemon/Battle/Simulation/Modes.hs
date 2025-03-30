@@ -20,7 +20,7 @@ import           Control.Monad.IO.Class              (liftIO)
 import           Control.Monad.Trans.Except          (runExceptT, throwE)
 import           Data.Map.Strict                     (Map)
 import           Data.Text                           (Text)
-import           Pokemon.Battle.Action               (uniformStrategy)
+import           Pokemon.AI.Internal                 (preferAttackStrategy)
 import           Pokemon.Convert                     (convertTeam)
 import           Pokemon.Data.Move                   (Move)
 import           Pokemon.Data.Pokedex                (PokedexMon)
@@ -59,8 +59,8 @@ simulateBattleFromFiles movesMap pokedexMap team1File team2File = do
     parsedTeam2 <- either throwE return parsedTeam2Res
     team1 <- either (throwE . show) return $ convertTeam pokedexMap movesMap parsedTeam1
     team2 <- either (throwE . show) return $ convertTeam pokedexMap movesMap parsedTeam2
-    let p1 = createPlayer (head team1) (buildTeamFromList $ drop 1 team1) uniformStrategy
-        p2 = createPlayer (head team2) (buildTeamFromList $ drop 1 team2) uniformStrategy
+    let p1 = createPlayer (head team1) (buildTeamFromList $ drop 1 team1) preferAttackStrategy
+        p2 = createPlayer (head team2) (buildTeamFromList $ drop 1 team2) preferAttackStrategy
     return (p1, p2)
   case result of
     Left err       -> hPutStrLn stderr err
