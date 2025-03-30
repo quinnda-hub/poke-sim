@@ -2,7 +2,11 @@
 {-# LANGUAGE OverloadedStrings     #-}
 {-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
 
-module MyLib (someFunc, someFoo, someDemoBattle) where
+module MyLib
+  ( someFunc
+  , someFoo
+  , someDemoBattle
+  , someDemoBattle2) where
 
 import           Control.Monad.Trans.State           (evalStateT)
 import           Control.Monad.Trans.Writer          (runWriterT)
@@ -30,6 +34,7 @@ import           Pokemon.Battle.BattleState.Internal (BattleState (..),
                                                       runBattleM)
 import           Pokemon.Battle.Simulation.Internal  (simulateBattle)
 
+import           Pokemon.Battle.Simulation.Modes     (simulateBattleFromFiles)
 import           Pokemon.Mechanics.Weather           (Weather (..))
 import           Pokemon.Pretty                      (printLogMessages,
                                                       printPokemon)
@@ -191,3 +196,19 @@ someDemoBattle = do
                           putStrLn "Starting battle simulation..."
                           ((), finalLogs) <- runWriterT (evalStateT (runBattleM (simulateBattle initBattleState)) initBattleState)
                           printLogMessages finalLogs
+
+-- | Run a battle from a PokePaste file.
+someDemoBattle2 :: IO ()
+someDemoBattle2 = do
+  movesResult <- loadMoves "data/moves.json"
+  case movesResult of
+    Left err -> hPutStrLn stderr $ "Error loading moves: " <> showLoadMovesError err
+    Right movesMap -> do
+
+      putStrLn "Loading pokedex.json..."
+      pokedexResult <- loadPokedex "data/pokedex.json"
+      case pokedexResult of
+        Left err -> hPutStrLn stderr $ "Error loading pokedex: " <> showLoadPokedexError err
+        Right pokedexMap -> do
+          simulateBattleFromFiles movesMap pokedexMap "data/pokepaste.txt" "data/pokepaste.txt"
+

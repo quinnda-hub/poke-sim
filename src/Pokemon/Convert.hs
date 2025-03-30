@@ -14,6 +14,7 @@ import           Pokemon.Data.Move.Internal      (Move)
 import           Pokemon.Data.Pokedex.Internal   (Abilities (..),
                                                   PokedexMon (..))
 
+import           Data.Char                       (isSpace)
 import           Pokemon.Battle.Pokemon.Internal (MoveSet (..), Nature (..),
                                                   Pokemon (..), mkIVs,
                                                   mkPokemon)
@@ -103,7 +104,7 @@ parsedPokemonToPokemon
 parsedPokemonToPokemon pokedex moveMap parsedMon = do
   pmon <- maybe (Left $ UnknownSpeciesErr (species parsedMon))
                 Right
-                (Map.lookup (species parsedMon) pokedex)
+                (Map.lookup (cleanText parsedMon.species) pokedex)
   let lvl = fromMaybe 100 parsedMon.level
       ivsFinal = fromMaybe (fromMaybe (error "mkIVs failed") (mkIVs 31 31 31 31 31 31))
                            parsedMon.ivs
@@ -112,9 +113,11 @@ parsedPokemonToPokemon pokedex moveMap parsedMon = do
   natureVal <- case parsedMon.nature of
                  Nothing    -> Right Hardy
                  Just natTxt -> either (Left . NatureErr) Right (parseNature natTxt)
-  moveSetVal <- either (Left . MoveSetErr) Right (buildMoveSet moveMap parsedMon.moves)
+  moveSetVal <- either (Left . MoveSetErr) Right (buildMoveSet moveMap (map cleanText parsedMon.moves))
   let basePoke = mkPokemon pmon lvl abilityText moveSetVal natureVal ivsFinal evsFinal
   return basePoke
+  where
+    cleanText = T.filter (\c -> not (isSpace c || c == '-')) . T.toLower
 
 -- | Convert a list of ParsedPokemon into full Pokemon.
 convertTeam

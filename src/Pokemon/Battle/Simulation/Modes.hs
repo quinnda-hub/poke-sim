@@ -1,4 +1,7 @@
-module Pokemon.Battle.Simulation.Modes where
+module Pokemon.Battle.Simulation.Modes
+  ( simulateBattleFromPlayers
+  , simulateBattleFromFiles
+  ) where
 
 import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
                                                       runBattleM)
