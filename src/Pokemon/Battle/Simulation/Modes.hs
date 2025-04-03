@@ -22,11 +22,11 @@ import           Data.Map.Strict                     (Map)
 import           Data.Text                           (Text)
 import           Pokemon.AI.Internal                 (preferAttackStrategy)
 import           Pokemon.Convert                     (convertTeam)
-import           Pokemon.Data.Move                   (Move)
-import           Pokemon.Data.Pokedex                (PokedexMon)
+import           Pokemon.Data.Move.Internal          (Move)
+import           Pokemon.Data.Pokedex.Internal       (PokedexMon)
 import           Pokemon.Mechanics.Weather           (Weather (..))
 import           Pokemon.Parse.PokePaste             (parsePokePasteFile)
-import           System.IO
+import           System.IO                           (hPutStrLn, stderr)
 
 -- | Simulate a battle given two pre-constructed players and their team of Pokemon.
 simulateBattleFromPlayers :: Player BattleM -> Player BattleM -> IO ()
