@@ -61,16 +61,33 @@ calculateDamage move attacker defender
          -- Base damage computed using integer arithmetic.
          baseDamage = (((2 * lvl) `div` 5 + 2) * power * effectiveA)
                       `div` effectiveD `div` 50 + 2
+         -- 1. Apply the random factor.
+         damage1 = floor ((fromIntegral (of32 (baseDamage * randInt)) :: Double) / 100.0)
+         -- 2. Apply the STAB modifier:
+         stabMod = if move.moveType == attacker.type1 || Just move.moveType == attacker.type2
+           then 6144 -- 1.5 x 4096
+           else 4096
+         damage2 = if stabMod /= 4096 then of32 (damage1 * stabMod) `div` 4096 else damage1
+         -- 3. Apply type effectivenss:
+         damage3 = floor ((fromIntegral (pokeRound (fromIntegral damage2)) :: Double) *
+                          effectiveness move.moveType defender.type1 defender.type2) :: Int
+         -- 4. Apply the critical multiplier:
+         critMod = if isCrit then 6144 else 4096 :: Integer
+         damage4 = pokeRound ((fromIntegral damage3 * fromIntegral critMod) / 4096.0)
+         -- 5. Final step.
+         finalDamage = pokeRound (((fromIntegral damage4 :: Double) * 4096.0) / 4090.0)
+         result = of16 finalDamage
      updateRNG rng2
      when isCrit $ logCrit attacker.name
-     return (calcDamage randInt isCrit baseDamage)
+     return result
   where
     -- Computes the boost multiplier for the given stage.
     boostMultiplier :: Int -> Double
     boostMultiplier stage
       | stage >= 0 = (2 + fromIntegral stage) / 2
       | otherwise  = 2 / (2 - fromIntegral stage)
-    -- | Determines whether the move results in a critical hit based on its crit ratio.
+
+    -- Determines whether the move results in a critical hit based on its crit ratio.
     rollCritical :: Move -> StdGen -> (Bool, StdGen)
     rollCritical m rng =
       case m.critRatio of
@@ -81,16 +98,19 @@ calculateDamage move attacker defender
           let (roll, rng') = randomR (1, 12) rng :: (Int, StdGen)
           in (roll == 1, rng')
 
-    -- | Given a random integer, compute the final damage.
-    calcDamage randInt isCrit baseDamage =
-      let randFactor = fromIntegral randInt / 100.0
-          stab | move.moveType == attacker.type1 = 1.5
-               | Just move.moveType == attacker.type2 = 1.5
-               | otherwise = 1.0
-          typeEffect = effectiveness move.moveType defender.type1 defender.type2
-          crit       = if isCrit then 1.5 else 1.0
-          modifier   = randFactor * stab * typeEffect * crit
-      in floor (fromIntegral baseDamage * modifier)
+
+    -- GameFreak rounds UP at 0.5
+    pokeRound :: Double -> Int
+    pokeRound x | x - fromIntegral (floor x :: Int) > 0.5 = ceiling x
+                | otherwise = floor x
+
+    -- 16-bit overflow.
+    of16 :: Int -> Int
+    of16 n | n > 65535 = n `mod` 6536 | otherwise = n
+
+    -- 32-bit overflow.
+    of32 :: Int -> Int
+    of32 n | n > 4294967295 = n `mod` 4294967296 | otherwise = n
 
 --------------------------------------------------------------------------------
 -- Type Effectiveness Calculation
