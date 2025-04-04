@@ -89,6 +89,7 @@ library
                       Pokemon.Battle.MoveEffect.Damage,
                       Pokemon.Battle.MoveEffect.MultiHitDamage,
                       Pokemon.Battle.MoveEffect.Status,
+                      Pokemon.Battle.MoveEffect.RecoilDamage,
                       Pokemon.Battle.MoveEffect,
                       Pokemon.Data.Move,
                       Pokemon.Data.Pokedex.Internal,
