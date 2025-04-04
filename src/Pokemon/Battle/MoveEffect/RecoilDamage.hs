@@ -35,8 +35,8 @@ applyRecoilToActive recoilDmg p =
 
 -- | Applies recoil damage to the appropriate player.
 applyRecoil :: PlayerSlot -> Int -> BattleState -> BattleState
-applyRecoil Player1 recoilDmg bs = bs { player1 = applyRecoilToActive recoilDmg bs.player1 }
-applyRecoil Player2 recoilDmg bs = bs { player2 = applyRecoilToActive recoilDmg bs.player2 }
+applyRecoil Player1 recoilDmg bs = bs { player2 = applyRecoilToActive recoilDmg bs.player2 }
+applyRecoil Player2 recoilDmg bs = bs { player1 = applyRecoilToActive recoilDmg bs.player1 }
 
 applyRecoilForMove :: Move -> Pokemon -> Pokemon -> [PlayerSlot] -> BattleM ()
 applyRecoilForMove mv attackerPokemon defenderPokemon targetSlots =
@@ -48,7 +48,7 @@ applyRecoilForMove mv attackerPokemon defenderPokemon targetSlots =
     (flip applyRecoil)
     (\recoilDmg slot bs ->
       let attackerName = case slot of
-                           Player1 -> bs.player1.active.name
-                           Player2 -> bs.player2.active.name
+                           Player1 -> bs.player2.active.name
+                           Player2 -> bs.player1.active.name
       in logRecoil recoilDmg attackerName)
 

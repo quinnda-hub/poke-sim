@@ -213,5 +213,5 @@ someDemoBattle2 = do
       case pokedexResult of
         Left err -> hPutStrLn stderr $ "Error loading pokedex: " <> showLoadPokedexError err
         Right pokedexMap -> do
-          simulateBattleFromFiles movesMap pokedexMap "data/pokepaste.txt" "data/pokepaste.txt"
+          simulateBattleFromFiles movesMap pokedexMap "data/rillaboom.txt" "data/blissey.txt"
 

@@ -32,7 +32,6 @@ applyDamage :: PlayerSlot -> Int -> BattleState -> BattleState
 applyDamage Player1 dmg bs = bs { player1 = applyDamageToActive dmg bs.player1 }
 applyDamage Player2 dmg bs = bs { player2 = applyDamageToActive dmg bs.player2 }
 
-
 -- | Helper function to apply damage and update the lastDamage field.
 applyDamageAndUpdateLast :: PlayerSlot -> Int -> BattleState -> BattleState
 applyDamageAndUpdateLast slot dmg bs =
@@ -51,7 +50,7 @@ applyDamageForMove :: Move -> Pokemon -> Pokemon -> [PlayerSlot] -> BattleM ()
 applyDamageForMove mv attackerPokemon defenderPokemon targetSlots =
   applyEffectForMove mv attackerPokemon defenderPokemon targetSlots
     (\mv' attackerPokemon' defenderPokemon' _ _ -> calculateDamage mv' attackerPokemon' defenderPokemon')
-    (flip applyDamage)
+    (flip applyDamageAndUpdateLast)
     (\dmg slot bs ->
         let targetName = case slot of
                            Player1 -> bs.player1.active.name
