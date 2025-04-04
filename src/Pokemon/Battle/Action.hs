@@ -32,16 +32,6 @@ import           Pokemon.Battle.Pokemon.Internal       (Pokemon (..), isFainted)
 import           Pokemon.Data.Move.Internal            (priority)
 import           System.Random                         (Random (randomR))
 
-
--- | Choose a random action from a list of actions.
--- (Doesn't really belong in this module but can live here for now.)
-uniformStrategy :: [Action] -> BattleM Action
-uniformStrategy actions = do
-  rng0 <- getRNG
-  let (idx, newRng) = randomR (0, length actions - 1) rng0
-  updateRNG newRng
-  return (actions !! idx)
-
 --------------------------------------------------------------------------------
 -- Applying Actions
 --------------------------------------------------------------------------------
