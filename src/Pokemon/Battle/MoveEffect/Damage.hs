@@ -3,10 +3,9 @@
 
 module Pokemon.Battle.MoveEffect.Damage where
 
-import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState,
-                                                      player1, player2)
 import           Pokemon.Battle.BattleState.Types    (Player (..),
-                                                      PlayerSlot (..))
+                                                      PlayerSlot (..),
+                                                      lastDamage)
 import           Pokemon.Battle.Logging              (logDamage)
 import           Pokemon.Battle.MoveEffect.Internal  (EffectStep (DoDamage),
                                                       applyEffectForMove)
@@ -15,6 +14,7 @@ import           Pokemon.Data.Move.Internal          (Move (basePower),
                                                       multihit)
 
 import           Data.Maybe                          (isJust)
+import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..))
 import           Pokemon.Battle.Damage.Internal      (calculateDamage)
 
 -- | If the move has a base power, produce a damage step.
@@ -31,6 +31,13 @@ gatherDamage mv
 applyDamage :: PlayerSlot -> Int -> BattleState -> BattleState
 applyDamage Player1 dmg bs = bs { player1 = applyDamageToActive dmg bs.player1 }
 applyDamage Player2 dmg bs = bs { player2 = applyDamageToActive dmg bs.player2 }
+
+
+-- | Helper function to apply damage and update the lastDamage field.
+applyDamageAndUpdateLast :: PlayerSlot -> Int -> BattleState -> BattleState
+applyDamageAndUpdateLast slot dmg bs =
+  let bs' = applyDamage slot dmg bs
+  in  bs' { turnContext  = bs'.turnContext { lastDamage = dmg } }
 
 -- | Updates a player's active Pokémon with new HP after damage.
 applyDamageToActive :: Int -> Player BattleM -> Player BattleM
