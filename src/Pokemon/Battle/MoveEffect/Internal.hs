@@ -51,11 +51,11 @@ applyEffectForMove mv attackerPokemon defenderPokemon targetSlots effectFn modif
 
 -- | Represents a single effect step during move usage.
 data EffectStep
-    = DoDamage            -- Indicates that damage should be calculated and applied.
-    | InflictStatus       -- Inflicts a primary status effect.
-    | RecoilDamage        -- Inflicts recoil damage on the user proportional to the damage inflicted.
-    | BoostStats          -- Raises or lowers the targets stats.
-    | SetWeather Weather  -- Change the battle's weather.
+    = DoDamage            -- ^ Indicates that damage should be calculated and applied.
+    | InflictStatus       -- ^ Inflicts a primary status effect.
+    | RecoilDamage        -- ^ Inflicts recoil damage on the user proportional to the damage inflicted.
+    | BoostStats          -- ^ Raises or lowers the targets stats.
+    | SetWeather Weather  -- ^ Change the battle's weather.
 
 --------------------------------------------------------------------------------
 -- Target Resolution and Damage Helpers
