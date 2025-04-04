@@ -22,13 +22,20 @@ import           Pokemon.Data.Move.Internal            (Move)
 data TurnContext = TurnContext
   { attacker      :: PlayerSlot
   , defender      :: PlayerSlot
+  , lastDamage    :: Int
   , moveModifiers :: [MoveModifier]
   }
 
 instance Show TurnContext where
   show :: TurnContext -> String
-  show (TurnContext a d _) =
-    "TurnContext { attacker = " ++ show a ++ ", triggers = " ++ show d ++ " }"
+  show (TurnContext a d dmg _) =
+    "TurnContext { attacker = "
+    ++ show a
+    ++ ", defender = "
+    ++ show d
+    ++ ", lastDamage = "
+    ++ show dmg
+    ++ " }"
 
 -- A Player has a team of Pokemon and an active Pokemon.
 data Player m = Player

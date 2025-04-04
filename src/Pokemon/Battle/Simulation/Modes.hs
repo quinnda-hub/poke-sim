@@ -33,7 +33,10 @@ simulateBattleFromPlayers :: Player BattleM -> Player BattleM -> IO ()
 simulateBattleFromPlayers p1 p2 = do
   rng0 <- newStdGen
   let initialBattleState = BattleState
-        { turnContext = TurnContext { attacker = Player1, defender = Player2, moveModifiers = [] }
+        { turnContext = TurnContext { attacker = Player1
+                                    , defender = Player2
+                                    , lastDamage = 0
+                                    , moveModifiers = [] }
         , player1     = p1
         , player2     = p2
         , turnNumber  = 1

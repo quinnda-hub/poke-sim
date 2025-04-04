@@ -5,6 +5,7 @@ module Pokemon.Data.Move.Internal
   ( Move(..),
     Accuracy(..),
     Boosts(..),
+    Recoil(..),
     Status(..),
     Target(..),
     MoveCategory(..),
