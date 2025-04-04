@@ -4,7 +4,6 @@
 module Pokemon.Battle.Action
  ( applyAction
  , applyActions
- , uniformStrategy
  , resolveActions
  )
   where
@@ -15,8 +14,7 @@ import           Pokemon.Battle.BattleState.Types      (Player (..))
 
 import           Pokemon.Battle.BattleState.Internal   (BattleM,
                                                         BattleState (..),
-                                                        getRNG, pokemonName,
-                                                        updateRNG)
+                                                        pokemonName)
 
 import           Control.Monad                         (when)
 import           Data.List                             (sortBy)
@@ -30,7 +28,6 @@ import           Pokemon.Battle.BattleState.PlayerSlot (PlayerSlot (..))
 import           Pokemon.Battle.Logging                (logFaint)
 import           Pokemon.Battle.Pokemon.Internal       (Pokemon (..), isFainted)
 import           Pokemon.Data.Move.Internal            (priority)
-import           System.Random                         (Random (randomR))
 
 --------------------------------------------------------------------------------
 -- Applying Actions

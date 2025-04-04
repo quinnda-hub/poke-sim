@@ -7,8 +7,7 @@ module Pokemon.Battle.Simulation.Internal (simulateBattle) where
 import           Control.Monad.State.Class           (get, put)
 
 import           Pokemon.Battle.Action               (applyAction, applyActions,
-                                                      resolveActions,
-                                                      uniformStrategy)
+                                                      resolveActions)
 import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..))
 
 import           Pokemon.Battle.BattleState.Types    (Player (active, team),
@@ -18,6 +17,7 @@ import           Pokemon.Battle.BattleState.Types    (Player (active, team),
 import           Control.Monad                       (unless, when)
 import           Control.Monad.IO.Class              (liftIO)
 import           Control.Monad.RWS                   (MonadWriter (..))
+import           Pokemon.AI.Internal                 (uniformStrategy)
 import           Pokemon.Battle.Action.SwitchAction  (validSwitchActions)
 import           Pokemon.Battle.Logging              (logTurn, logVictory)
 import           Pokemon.Battle.Pokemon.Internal     (isFainted)

@@ -8,15 +8,12 @@ import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
 import           Pokemon.Battle.BattleState.Types    (Player (..),
                                                       PlayerSlot (..),
                                                       TurnContext (..))
-import           Pokemon.Battle.Logging              (logDamage)
+import           Pokemon.Battle.Logging              (logRecoil)
 import           Pokemon.Battle.MoveEffect.Internal  (EffectStep (RecoilDamage),
                                                       applyEffectForMove)
 import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..))
 import           Pokemon.Data.Move.Internal          (Move (recoil),
-                                                      Recoil (..), multihit)
-
-import           Data.Maybe                          (isJust)
-import           Pokemon.Battle.Damage.Internal      (calculateDamage)
+                                                      Recoil (..))
 
 -- | If the move has recoil, produce a recoil effect step.
 gatherRecoil :: Move -> Maybe EffectStep
@@ -53,5 +50,5 @@ applyRecoilForMove mv attackerPokemon defenderPokemon targetSlots =
       let attackerName = case slot of
                            Player1 -> bs.player1.active.name
                            Player2 -> bs.player2.active.name
-      in logDamage recoilDmg attackerName)
+      in logRecoil recoilDmg attackerName)
 
