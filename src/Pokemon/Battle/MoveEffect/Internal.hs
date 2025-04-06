@@ -55,7 +55,9 @@ data EffectStep
     | InflictStatus       -- ^ Inflicts a primary status effect.
     | RecoilDamage        -- ^ Inflicts recoil damage on the user proportional to the damage inflicted.
     | BoostStats          -- ^ Raises or lowers the targets stats.
+    | GenericSelfHeal     -- ^ Moves that heal 50% of your health, no other conditions.
     | SetWeather Weather  -- ^ Change the battle's weather.
+    deriving (Show, Eq)
 
 --------------------------------------------------------------------------------
 -- Target Resolution and Damage Helpers

@@ -1,7 +1,11 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedRecordDot   #-}
 
-module Pokemon.Battle.MoveEffect.RecoilDamage where
+module Pokemon.Battle.MoveEffect.RecoilDamage
+  ( gatherRecoil
+  , applyRecoilForMove
+  )
+where
 
 import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
                                                       player1, player2)
