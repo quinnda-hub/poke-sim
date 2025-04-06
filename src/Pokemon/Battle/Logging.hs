@@ -13,6 +13,7 @@ module Pokemon.Battle.Logging
   , logSwitch
   , logFaint
   , logRecoil
+  , logSelfHeal
   , LogMessage (..)
   ) where
 
@@ -35,6 +36,7 @@ data LogMessage
   | SwitchLog { actor :: Text, fromPoke :: Text, toPoke :: Text }
   | FaintLog { faintedPoke :: Text }
   | RecoilLog { recoilDmg :: Int, actor :: Text }
+  | SelfHealLog { healAmount :: Int, actor :: Text }
   deriving (Show, Eq)
 
 -- | Log a damage event.
@@ -81,7 +83,11 @@ logSwitch actorName fPoke tPoke = tell [SwitchLog actorName fPoke tPoke]
 logFaint :: (MonadWriter [LogMessage] m) => Text -> m ()
 logFaint fainter = tell [FaintLog fainter]
 
--- | Log a damage event.
+-- | Log a Pokemon taking recoil damage.
 logRecoil :: (MonadWriter [LogMessage] m) => Int -> Text -> m ()
 logRecoil recoil actorName = tell [RecoilLog recoil actorName]
+
+-- | Log a Pokemon healing.
+logSelfHeal :: (MonadWriter [LogMessage] m) => Int -> Text -> m ()
+logSelfHeal hAmount actorName = tell [SelfHealLog hAmount actorName]
 

@@ -87,6 +87,7 @@ library
                       Pokemon.Battle.MoveEffect.Internal,
                       Pokemon.Battle.MoveEffect.Boosts,
                       Pokemon.Battle.MoveEffect.Damage,
+                      Pokemon.Battle.MoveEffect.GenericSelfHeal,
                       Pokemon.Battle.MoveEffect.MultiHitDamage,
                       Pokemon.Battle.MoveEffect.Status,
                       Pokemon.Battle.MoveEffect.RecoilDamage,

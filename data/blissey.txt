@@ -4,6 +4,6 @@ Tera Type: Normal
 EVs: 252 HP / 252 Def 
 Bold Nature  
 IVs: 0 Atk  
-- Icebeam
+- Soft-Boiled
 
 

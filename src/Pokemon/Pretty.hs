@@ -109,6 +109,8 @@ prettyLogMessage (FaintLog f) =
   T.concat ["[Faint] ", f, " Fainted!"]
 prettyLogMessage (RecoilLog d a) =
   T.concat ["[Recoil] ", T.pack (show d), " recoil dealt to ", a]
+prettyLogMessage (SelfHealLog h a) =
+  T.concat ["[Heal] ", a, " healed ", T.pack (show h), " HP!"]
 
 -- | Given a stat name, the boost change from the move (delta),
 --   and  the new total value, produce a pretty message for the stat. :w
