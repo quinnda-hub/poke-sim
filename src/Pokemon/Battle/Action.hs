@@ -9,7 +9,8 @@ module Pokemon.Battle.Action
   where
 
 import           Control.Monad.State.Class             (get)
-import           Pokemon.Battle.BattleState.Types      (Player (..))
+import           Pokemon.Battle.BattleState.Types      (Player (..),
+                                                        TurnContext (..))
 
 
 import           Pokemon.Battle.BattleState.Internal   (BattleM,
@@ -17,6 +18,7 @@ import           Pokemon.Battle.BattleState.Internal   (BattleM,
                                                         pokemonName)
 
 import           Control.Monad                         (when)
+import           Control.Monad.State                   (modify)
 import           Data.List                             (sortBy)
 import           Pokemon.Battle.Action.Internal        (Action (..),
                                                         ActionType (..))
@@ -57,6 +59,8 @@ resolveActions :: BattleM [Action]
 resolveActions = do
   act1 <- chooseAction Player1
   act2 <- chooseAction Player2
+  updateTurnContext act1 Player1
+  updateTurnContext act2 Player2
   bs   <- get
   let actions = [act1, act2]
   return (sortBy (compareActions bs) actions)
@@ -93,4 +97,15 @@ chooseAction p = do
                     Player1 -> bs.player1.strategy
                     Player2 -> bs.player2.strategy
       strat actions
+
+-- | Update the turn context with the player's current choice of action.
+updateTurnContext :: Action -> PlayerSlot -> BattleM ()
+updateTurnContext act slot = modify update
+  where
+    update bs =
+      let tc = bs.turnContext
+          updatedTC = case slot of
+                        Player1 -> tc { player1Action = Just act }
+                        Player2 -> tc { player2Action = Just act }
+      in bs { turnContext = updatedTC }
 
