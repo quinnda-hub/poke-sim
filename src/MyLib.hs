@@ -188,7 +188,9 @@ someDemoBattle = do
                                 { turnContext = TurnContext { attacker = Player1
                                                             , defender = Player2
                                                             , lastDamage = 0
-                                                            , moveModifiers = [] }
+                                                            , moveModifiers = []
+                                                            , player1Action = Nothing
+                                                            , player2Action = Nothing}
                                 , player1     = Player  { team = Team { pokemon1 = Nothing, pokemon2 = Nothing, pokemon3 = Nothing, pokemon4 = Nothing, pokemon5 = Nothing }, active = fuecocoPokemon, strategy = preferAttackStrategy }
                                 , player2     = Player { team = Team { pokemon1 = Just wattrelPokemon, pokemon2 = Nothing, pokemon3 = Nothing, pokemon4 = Nothing, pokemon5 = Nothing }, active = sprigatitoPokemon, strategy = preferAttackStrategy }
                                 , turnNumber  = 1

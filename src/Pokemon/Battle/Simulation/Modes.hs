@@ -36,7 +36,9 @@ simulateBattleFromPlayers p1 p2 = do
         { turnContext = TurnContext { attacker = Player1
                                     , defender = Player2
                                     , lastDamage = 0
-                                    , moveModifiers = [] }
+                                    , moveModifiers = []
+                                    , player1Action = Nothing
+                                    , player2Action = Nothing}
         , player1     = p1
         , player2     = p2
         , turnNumber  = 1

@@ -14,6 +14,7 @@ where
 
 import           Data.Maybe                            (listToMaybe)
 import           Pokemon.AI.Types                      (Strategy)
+import           Pokemon.Battle.Action.Internal        (Action)
 import           Pokemon.Battle.BattleState.PlayerSlot (PlayerSlot (..))
 import           Pokemon.Battle.Pokemon.Internal       (Pokemon)
 import           Pokemon.Data.Move.Internal            (Move)
@@ -24,17 +25,23 @@ data TurnContext = TurnContext
   , defender      :: PlayerSlot
   , lastDamage    :: Int
   , moveModifiers :: [MoveModifier]
+  , player1Action :: Maybe Action
+  , player2Action :: Maybe Action
   }
 
 instance Show TurnContext where
   show :: TurnContext -> String
-  show (TurnContext a d dmg _) =
+  show (TurnContext a d dmg _ a1 a2) =
     "TurnContext { attacker = "
     ++ show a
     ++ ", defender = "
     ++ show d
     ++ ", lastDamage = "
     ++ show dmg
+    ++ ", player1Action = "
+    ++ show a1
+    ++ ", player2Action = "
+    ++ show a2
     ++ " }"
 
 -- A Player has a team of Pokemon and an active Pokemon.
