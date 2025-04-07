@@ -1,0 +1,6 @@
+Kingambit @ Leftovers  
+Ability: Supreme Overlord  
+Tera Type: Dark  
+EVs: 4 HP / 252 Atk / 252 Spe  
+Adamant Nature  
+- Sucker Punch

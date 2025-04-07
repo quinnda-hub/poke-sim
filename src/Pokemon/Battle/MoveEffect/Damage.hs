@@ -1,5 +1,6 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedRecordDot   #-}
+{-# LANGUAGE OverloadedStrings     #-}
 
 module Pokemon.Battle.MoveEffect.Damage where
 

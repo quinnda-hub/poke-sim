@@ -5,3 +5,4 @@ EVs: 252 Atk / 4 Def / 252 Spe
 Adamant Nature  
 - Wood Hammer  
 - Knock Off  
+- Swords Dance
