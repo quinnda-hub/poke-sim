@@ -1,4 +1,5 @@
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleContexts  #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Pokemon.Battle.Logging
   ( logDamage
@@ -14,6 +15,7 @@ module Pokemon.Battle.Logging
   , logFaint
   , logRecoil
   , logSelfHeal
+  , logMoveFail
   , LogMessage (..)
   ) where
 
@@ -37,6 +39,7 @@ data LogMessage
   | FaintLog { faintedPoke :: Text }
   | RecoilLog { recoilDmg :: Int, actor :: Text }
   | SelfHealLog { healAmount :: Int, actor :: Text }
+  | MoveFailLog { failure :: Text }
   deriving (Show, Eq)
 
 -- | Log a damage event.
@@ -90,4 +93,8 @@ logRecoil recoil actorName = tell [RecoilLog recoil actorName]
 -- | Log a Pokemon healing.
 logSelfHeal :: (MonadWriter [LogMessage] m) => Int -> Text -> m ()
 logSelfHeal hAmount actorName = tell [SelfHealLog hAmount actorName]
+
+-- | Log a move failing.
+logMoveFail :: (MonadWriter [LogMessage] m) => m ()
+logMoveFail = tell [MoveFailLog "But it failed!"]
 

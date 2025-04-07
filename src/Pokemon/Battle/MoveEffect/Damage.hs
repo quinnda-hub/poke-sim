@@ -10,7 +10,7 @@ import           Pokemon.Battle.Logging              (logDamage)
 import           Pokemon.Battle.MoveEffect.Internal  (EffectStep (DoDamage),
                                                       applyEffectForMove)
 import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..))
-import           Pokemon.Data.Move.Internal          (Move (basePower),
+import           Pokemon.Data.Move.Internal          (Move (basePower, name),
                                                       multihit)
 
 import           Data.Maybe                          (isJust)
@@ -20,7 +20,9 @@ import           Pokemon.Battle.Damage.Internal      (calculateDamage)
 -- | If the move has a base power, produce a damage step.
 gatherDamage :: Move -> Maybe EffectStep
 gatherDamage mv
-  | isJust mv.multihit = Nothing -- Multi-hit moves are handled elsewhere.
+  | isJust mv.multihit        = Nothing -- Multi-hit moves are handled elsewhere.
+  | mv.name == "Sucker Punch" = Nothing
+  | mv.name == "Thunderclap"  = Nothing
   | otherwise =
       case basePower mv of
         Just 0  -> Nothing

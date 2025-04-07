@@ -7,29 +7,32 @@ module Pokemon.Battle.MoveEffect
   , applyMoveWithContext
   ) where
 
-import           Control.Monad.State.Class                 (get, modify)
-import           Data.Maybe                                (catMaybes)
-import           Pokemon.Battle.BattleState.Internal       (BattleM,
-                                                            BattleState (..))
-import           Pokemon.Battle.BattleState.Types          (PlayerSlot,
-                                                            TurnContext (attacker, defender, moveModifiers))
-import           Pokemon.Battle.Logging                    (logMiss)
-import           Pokemon.Battle.MoveEffect.Boosts          (applyBoostsForMove,
-                                                            gatherBoosts)
-import           Pokemon.Battle.MoveEffect.Damage          (applyDamageForMove,
-                                                            gatherDamage)
-import           Pokemon.Battle.MoveEffect.GenericSelfHeal (applyGenericHealForMove,
-                                                            gatherGenericSelfHeal)
-import           Pokemon.Battle.MoveEffect.Internal        (EffectStep (..),
-                                                            checkAccuracy,
-                                                            getAttackerAndDefender,
-                                                            resolveTargets)
-import           Pokemon.Battle.MoveEffect.RecoilDamage    (applyRecoilForMove,
-                                                            gatherRecoil)
-import           Pokemon.Battle.MoveEffect.Status          (applyStatusForMove,
-                                                            gatherStatus)
-import           Pokemon.Battle.Pokemon.Internal           (Pokemon (name))
-import           Pokemon.Data.Move.Internal                (Move (..), target)
+import           Control.Monad.State.Class                   (get, modify)
+import           Data.Maybe                                  (catMaybes)
+import           Pokemon.Battle.BattleState.Internal         (BattleM,
+                                                              BattleState (..))
+import           Pokemon.Battle.BattleState.Types            (PlayerSlot,
+                                                              TurnContext (attacker, defender, moveModifiers))
+import           Pokemon.Battle.Logging                      (logMiss)
+import           Pokemon.Battle.MoveEffect.Boosts            (applyBoostsForMove,
+                                                              gatherBoosts)
+import           Pokemon.Battle.MoveEffect.ConditionalDamage (applyConditionalDamageForMove,
+                                                              gatherConditionalDamage)
+import           Pokemon.Battle.MoveEffect.Damage            (applyDamageForMove,
+                                                              gatherDamage)
+import           Pokemon.Battle.MoveEffect.GenericSelfHeal   (applyGenericHealForMove,
+                                                              gatherGenericSelfHeal)
+import           Pokemon.Battle.MoveEffect.Internal          (Condition (..),
+                                                              EffectStep (..),
+                                                              checkAccuracy,
+                                                              getAttackerAndDefender,
+                                                              resolveTargets)
+import           Pokemon.Battle.MoveEffect.RecoilDamage      (applyRecoilForMove,
+                                                              gatherRecoil)
+import           Pokemon.Battle.MoveEffect.Status            (applyStatusForMove,
+                                                              gatherStatus)
+import           Pokemon.Battle.Pokemon.Internal             (Pokemon (name))
+import           Pokemon.Data.Move.Internal                  (Move (..), target)
 
 --------------------------------------------------------------------------------
 -- Effect Gathering
@@ -38,6 +41,7 @@ import           Pokemon.Data.Move.Internal                (Move (..), target)
 gatherEffects :: Move -> [EffectStep]
 gatherEffects mv =
   catMaybes [ gatherDamage mv
+            , gatherConditionalDamage mv
             , gatherRecoil mv
             , gatherGenericSelfHeal mv
             , gatherStatus mv
@@ -64,6 +68,10 @@ applySingleStep :: Move -> EffectStep -> BattleM ()
 applySingleStep mv DoDamage = do
   (attackerP, defenderP, targets) <- getEffectContext mv
   applyDamageForMove mv attackerP defenderP targets
+
+applySingleStep mv (ConditionalDamage IsTargetAttacking) = do
+  (attackerP, defenderP, targets) <- getEffectContext mv
+  applyConditionalDamageForMove mv attackerP defenderP targets IsTargetAttacking
 
 applySingleStep mv RecoilDamage = do
   (attackerP, defenderP, targets) <- getEffectContext mv

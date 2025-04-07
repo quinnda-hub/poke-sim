@@ -86,6 +86,7 @@ library
                       Pokemon.Data.Move.Internal,
                       Pokemon.Battle.MoveEffect.Internal,
                       Pokemon.Battle.MoveEffect.Boosts,
+                      Pokemon.Battle.MoveEffect.ConditionalDamage,
                       Pokemon.Battle.MoveEffect.Damage,
                       Pokemon.Battle.MoveEffect.GenericSelfHeal,
                       Pokemon.Battle.MoveEffect.MultiHitDamage,
