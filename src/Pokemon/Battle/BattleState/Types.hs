@@ -2,6 +2,7 @@
 
 module Pokemon.Battle.BattleState.Types
   ( TurnContext(..)
+  , DelayedMove(..)
   , Player(..)
   , PlayerSlot(..)
   , Team(..)
@@ -13,6 +14,7 @@ module Pokemon.Battle.BattleState.Types
 where
 
 import           Data.Maybe                            (listToMaybe)
+import           Data.Text                             (Text)
 import           Pokemon.AI.Types                      (Strategy)
 import           Pokemon.Battle.Action.Internal        (Action)
 import           Pokemon.Battle.BattleState.PlayerSlot (PlayerSlot (..))
@@ -74,8 +76,8 @@ instance Show (Player m) where
     ", active = " ++ show a ++
     ", strategy = <strategy> }"
 
--- Standard team in which you need at least one Pokemon
--- but no more than five (plus the active Pokemon).
+-- | Standard team in which you need at least one Pokemon
+--   but no more than five (plus the active Pokemon).
 data Team = Team
   { pokemon1 :: Maybe Pokemon
   , pokemon2 :: Maybe Pokemon
@@ -83,6 +85,21 @@ data Team = Team
   , pokemon4 :: Maybe Pokemon
   , pokemon5 :: Maybe Pokemon
   } deriving (Show, Eq)
+
+-- | A move like future sight that hits some time after its use.
+data DelayedMove = DelayedMove
+  { delayedMove    :: Move       -- ^ The move being used.
+  , userId         :: UserID     -- ^ Some identifer for the user of the move.
+  , userSnapshot   :: Pokemon    -- ^ Snapshot of the Pokemon taken at move use.
+  , targetSlot     :: PlayerSlot -- ^ Selected target slot.
+  , turnsRemaining :: Int        -- ^ Turns until activation.
+  } deriving (Show, Eq)
+
+-- ^ You can't have two of the same Pokemon on a team, so a combination of
+--   PlayerSlot and and PokemonName is unique.
+type UserID = (PlayerSlot, PokemonName)
+
+type PokemonName = Text
 
 --------------------------------------------------------------------------------
 -- Move Modifiers

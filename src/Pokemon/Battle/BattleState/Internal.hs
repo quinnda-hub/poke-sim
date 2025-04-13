@@ -17,7 +17,8 @@ import           Control.Monad.Trans.Writer            (WriterT)
 import           Control.Monad.Writer.Class            (MonadWriter)
 import           Data.Text                             (Text)
 import           Pokemon.Battle.BattleState.PlayerSlot (PlayerSlot (..))
-import           Pokemon.Battle.BattleState.Types      (Player (..),
+import           Pokemon.Battle.BattleState.Types      (DelayedMove,
+                                                        Player (..),
                                                         TurnContext)
 import           Pokemon.Battle.Logging                (LogMessage)
 import           Pokemon.Battle.Pokemon.Internal       (Pokemon (..))
@@ -35,12 +36,13 @@ newtype BattleM a = BattleM
               MonadIO)
 
 data BattleState = BattleState
-  { turnContext :: TurnContext
-  , player1     :: Player BattleM
-  , player2     :: Player BattleM
-  , turnNumber  :: Int
-  , weather     :: Weather
-  , rng         :: StdGen
+  { turnContext  :: TurnContext
+  , player1      :: Player BattleM
+  , player2      :: Player BattleM
+  , turnNumber   :: Int
+  , weather      :: Weather
+  , rng          :: StdGen
+  , delayedMoves :: [DelayedMove]
   } deriving (Show)
 
 -- Helper that looks up the Pokemon for a given player slot

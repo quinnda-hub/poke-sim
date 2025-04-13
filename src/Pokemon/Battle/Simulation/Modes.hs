@@ -44,6 +44,7 @@ simulateBattleFromPlayers p1 p2 = do
         , turnNumber  = 1
         , weather     = Clear
         , rng         = rng0
+        , delayedMoves = []
         }
   ((), _) <- runWriterT (evalStateT (runBattleM (simulateBattle initialBattleState)) initialBattleState)
   return ()

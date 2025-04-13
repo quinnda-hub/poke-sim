@@ -196,6 +196,7 @@ someDemoBattle = do
                                 , turnNumber  = 1
                                 , weather     = Clear
                                 , rng         = rng0
+                                , delayedMoves = []
                                 }
 
                           putStrLn "Starting battle simulation..."
