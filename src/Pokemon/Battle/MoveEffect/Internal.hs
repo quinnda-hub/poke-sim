@@ -59,6 +59,7 @@ data EffectStep
     | BoostStats          -- ^ Raises or lowers the targets stats.
     | GenericSelfHeal     -- ^ Moves that heal 50% of your health, no other conditions.
     | SetWeather Weather  -- ^ Change the battle's weather.
+    | DelayedMove         -- ^ A move that hits later such as Future Sight.
     deriving (Show, Eq)
 
 data Condition = IsTargetAttacking deriving (Show, Eq)
