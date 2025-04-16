@@ -15,6 +15,7 @@ import           Pokemon.Data.Move.Internal          (Move (basePower, name),
                                                       multihit)
 
 import           Control.Monad.State.Class           (get, modify)
+import           Data.List                           (partition)
 import           Data.Maybe                          (fromMaybe, isJust)
 import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
                                                       getPokemonForSlot,
@@ -59,6 +60,16 @@ triggerDelayedMove dm = do
           attacker = fromMaybe dm.userSnapshot mUser
       dmg <- calculateDamage dm.delayedMove attacker mTarget
       modify (applyDamageAndUpdateLast dm.targetSlot dmg)
+
+-- | Processes all delayed moves in the BattleState: decrement their counters
+--   and trigger those that are ready.
+processDelayedMoves :: BattleM ()
+processDelayedMoves = do
+  modify (\bs -> bs { delayedMoves = map (\dm -> dm { turnsRemaining = dm.turnsRemaining - 1 }) (delayedMoves bs) })
+  bs <- get
+  let (ready, remaining) = partition (\dm -> dm.turnsRemaining <= 0) bs.delayedMoves
+  mapM_ triggerDelayedMove ready
+  modify (\bs' -> bs' { delayedMoves = remaining })
 
 -- | Looks up the active Pokemon according to a PokemonID, which in this case is simply a
 --   tuple of (PlayerSlot, PokemonName (=Text)).
