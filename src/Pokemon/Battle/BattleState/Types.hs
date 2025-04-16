@@ -5,6 +5,7 @@ module Pokemon.Battle.BattleState.Types
   , DelayedMove(..)
   , Player(..)
   , PlayerSlot(..)
+  , PokemonID
   , Team(..)
   , MoveModifier
   , applyModifiers
@@ -89,7 +90,7 @@ data Team = Team
 -- | A move like future sight that hits some time after its use.
 data DelayedMove = DelayedMove
   { delayedMove    :: Move       -- ^ The move being used.
-  , userId         :: UserID     -- ^ Some identifer for the user of the move.
+  , userId         :: PokemonID  -- ^ Some identifer for the user of the move.
   , userSnapshot   :: Pokemon    -- ^ Snapshot of the Pokemon taken at move use.
   , targetSlot     :: PlayerSlot -- ^ Selected target slot.
   , turnsRemaining :: Int        -- ^ Turns until activation.
@@ -97,7 +98,7 @@ data DelayedMove = DelayedMove
 
 -- ^ You can't have two of the same Pokemon on a team, so a combination of
 --   PlayerSlot and and PokemonName is unique.
-type UserID = (PlayerSlot, PokemonName)
+type PokemonID = (PlayerSlot, PokemonName)
 
 type PokemonName = Text
 
