@@ -46,7 +46,7 @@ applyDelayedMove mv attacker _defender targets =
 queueDelayedMove :: Move -> Pokemon -> PlayerSlot -> BattleM ()
 queueDelayedMove mv attacker target = do
   bs <- get
-  let delay = 2
+  let delay = 3
       uId   = case target of
                 Player1 -> (Player2, pokemonName bs Player2)
                 Player2 -> (Player1, pokemonName bs Player1)
