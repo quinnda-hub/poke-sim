@@ -24,6 +24,8 @@ gatherDamage mv
   | isJust mv.multihit        = Nothing -- Multi-hit moves are handled elsewhere.
   | mv.name == "Sucker Punch" = Nothing
   | mv.name == "Thunderclap"  = Nothing
+  | mv.name == "Future Sight" = Nothing
+  | mv.name == "Doom Desire"  = Nothing
   | otherwise =
       case basePower mv of
         Just 0  -> Nothing
