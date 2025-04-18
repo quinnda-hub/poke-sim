@@ -4,24 +4,27 @@
 
 module Pokemon.Battle.Simulation.Internal (simulateBattle) where
 
-import           Control.Monad.State.Class           (get, put)
+import           Control.Monad.State.Class             (get, put)
 
-import           Pokemon.Battle.Action               (applyAction, applyActions,
-                                                      resolveActions)
-import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..))
+import           Pokemon.Battle.Action                 (applyAction,
+                                                        applyActions,
+                                                        resolveActions)
+import           Pokemon.Battle.BattleState.Internal   (BattleM,
+                                                        BattleState (..))
 
-import           Pokemon.Battle.BattleState.Types    (Player (active, team),
-                                                      PlayerSlot (..),
-                                                      Team (pokemon1, pokemon2, pokemon3, pokemon4, pokemon5))
+import           Pokemon.Battle.BattleState.Types      (Player (active, team),
+                                                        PlayerSlot (..),
+                                                        Team (pokemon1, pokemon2, pokemon3, pokemon4, pokemon5))
 
-import           Control.Monad                       (unless, when)
-import           Control.Monad.IO.Class              (liftIO)
-import           Control.Monad.RWS                   (MonadWriter (..))
-import           Pokemon.AI.Internal                 (uniformStrategy)
-import           Pokemon.Battle.Action.SwitchAction  (validSwitchActions)
-import           Pokemon.Battle.Logging              (logTurn, logVictory)
-import           Pokemon.Battle.Pokemon.Internal     (isFainted)
-import           Pokemon.Pretty                      (printLogMessages)
+import           Control.Monad                         (unless, when)
+import           Control.Monad.IO.Class                (liftIO)
+import           Control.Monad.RWS                     (MonadWriter (..))
+import           Pokemon.AI.Internal                   (uniformStrategy)
+import           Pokemon.Battle.Action.SwitchAction    (validSwitchActions)
+import           Pokemon.Battle.Logging                (logTurn, logVictory)
+import           Pokemon.Battle.MoveEffect.DelayedMove (processDelayedMoves)
+import           Pokemon.Battle.Pokemon.Internal       (isFainted)
+import           Pokemon.Pretty                        (printLogMessages)
 
 --------------------------------------------------------------------------------
 -- Helpers
@@ -88,6 +91,8 @@ simulateTurn = do
     else do
       actions <- resolveActions
       applyActions actions
+
+      processDelayedMoves
 
       switchAfterFaint Player1
       switchAfterFaint Player2

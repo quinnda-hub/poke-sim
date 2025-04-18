@@ -2,7 +2,12 @@
 {-# LANGUAGE OverloadedRecordDot   #-}
 {-# LANGUAGE OverloadedStrings     #-}
 
-module Pokemon.Battle.MoveEffect.DelayedMove where
+module Pokemon.Battle.MoveEffect.DelayedMove
+  ( gatherDelayedMove
+  , applyDelayedMove
+  , processDelayedMoves
+  )
+where
 
 import           Pokemon.Battle.BattleState.Types    (DelayedMove (..),
                                                       Player (..),
