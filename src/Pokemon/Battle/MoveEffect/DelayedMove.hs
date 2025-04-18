@@ -28,9 +28,12 @@ gatherDelayedMove mv
   | mv.name `elem` ["Future Sight", "Doom Desire"] = Just ME.DelayedMove
   | otherwise = Nothing
 
--- Applies a delayed move by enqueuing it.
-applyDelayedMove :: Move -> Pokemon -> Pokemon -> PlayerSlot -> BattleM ()
-applyDelayedMove mv attackerPokemon _ = queueDelayedMove mv attackerPokemon
+-- | Applies a delayed move by enqueuing it.
+applyDelayedMove :: Move -> Pokemon -> Pokemon -> [PlayerSlot] -> BattleM ()
+applyDelayedMove mv attacker _defender targets =
+  case targets of
+    []    -> return () -- No target available; do nothing.
+    (t:_) -> queueDelayedMove mv attacker t
 
 -- | Queue a delayed move in the BattleState.
 --   This function captures a snapshot of the user and pushes a new DelayedMove

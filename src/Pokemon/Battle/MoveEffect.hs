@@ -94,6 +94,10 @@ applySingleStep mv BoostStats = do
 applySingleStep _ (SetWeather w) =
   modify $ \bs -> bs { weather = w }
 
+applySingleStep mv DelayedMove = do
+  (attackerP, defenderP, targets) <- getEffectContext mv
+  applyDelayedMove mv attackerP defenderP targets
+
 --------------------------------------------------------------------------------
 -- Applying a Move Action
 --------------------------------------------------------------------------------
