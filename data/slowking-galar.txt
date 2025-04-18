@@ -1,0 +1,7 @@
+Slowking-Galar @ Leftovers  
+Ability: Regenerator  
+Tera Type: Poison  
+EVs: 252 HP / 252 SpA / 4 SpD  
+Modest Nature  
+IVs: 0 Atk  
+- Future Sight
