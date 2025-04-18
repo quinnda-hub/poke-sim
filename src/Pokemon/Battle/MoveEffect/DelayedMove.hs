@@ -7,16 +7,15 @@ module Pokemon.Battle.MoveEffect.DelayedMove where
 import           Pokemon.Battle.BattleState.Types    (DelayedMove (..),
                                                       Player (..),
                                                       PlayerSlot (..),
-                                                      PokemonID, lastDamage)
-import           Pokemon.Battle.Logging              (logDamage)
+                                                      PokemonID)
+import           Pokemon.Battle.Logging              (logDamage, logMoveFail)
 import qualified Pokemon.Battle.MoveEffect.Internal  as ME
 import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..), isFainted)
-import           Pokemon.Data.Move.Internal          (Move (basePower, name),
-                                                      multihit)
+import           Pokemon.Data.Move.Internal          (Move (name))
 
 import           Control.Monad.State.Class           (get, modify)
 import           Data.List                           (partition)
-import           Data.Maybe                          (fromMaybe, isJust)
+import           Data.Maybe                          (fromMaybe)
 import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..),
                                                       getPokemonForSlot,
                                                       pokemonName)
@@ -28,6 +27,10 @@ gatherDelayedMove :: Move -> Maybe ME.EffectStep
 gatherDelayedMove mv
   | mv.name `elem` ["Future Sight", "Doom Desire"] = Just ME.DelayedMove
   | otherwise = Nothing
+
+-- Applies a delayed move by enqueuing it.
+applyDelayedMove :: Move -> Pokemon -> Pokemon -> PlayerSlot -> BattleM ()
+applyDelayedMove mv attackerPokemon _ = queueDelayedMove mv attackerPokemon
 
 -- | Queue a delayed move in the BattleState.
 --   This function captures a snapshot of the user and pushes a new DelayedMove
@@ -54,16 +57,18 @@ triggerDelayedMove dm = do
   -- Retrieve the target from the queued slot.
   let mTarget = getPokemonForSlot dm.targetSlot bs
   if isFainted mTarget
-    then undefined -- Placeholder.
+    then
+    logMoveFail
     else do
       let mUser    = lookupActivePokemonById bs dm.userId
           attacker = fromMaybe dm.userSnapshot mUser
       dmg <- calculateDamage dm.delayedMove attacker mTarget
+      logDamage dmg mTarget.name
       modify (applyDamageAndUpdateLast dm.targetSlot dmg)
 
 -- | Processes all delayed moves in the BattleState: decrement their counters
 --   and trigger those that are ready.
-processDelayedMoves :: BattleM ()
+processDelayedMoves ::BattleM ()
 processDelayedMoves = do
   modify (\bs -> bs { delayedMoves = map (\dm -> dm { turnsRemaining = dm.turnsRemaining - 1 }) (delayedMoves bs) })
   bs <- get
@@ -86,13 +91,5 @@ lookupActivePokemonById bs (pslot, pname) =
           in if p.name == pname && not (isFainted p)
             then Just p
             else Nothing
-
-
-
-
-
-
-
-
 
 

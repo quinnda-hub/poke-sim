@@ -20,6 +20,7 @@ import           Pokemon.Battle.MoveEffect.ConditionalDamage (applyConditionalDa
                                                               gatherConditionalDamage)
 import           Pokemon.Battle.MoveEffect.Damage            (applyDamageForMove,
                                                               gatherDamage)
+import           Pokemon.Battle.MoveEffect.DelayedMove
 import           Pokemon.Battle.MoveEffect.GenericSelfHeal   (applyGenericHealForMove,
                                                               gatherGenericSelfHeal)
 import           Pokemon.Battle.MoveEffect.Internal          (Condition (..),
@@ -46,6 +47,7 @@ gatherEffects mv =
             , gatherGenericSelfHeal mv
             , gatherStatus mv
             , gatherBoosts mv
+            , gatherDelayedMove mv
             ]
 
 --------------------------------------------------------------------------------
