@@ -16,6 +16,7 @@ module Pokemon.Battle.Logging
   , logRecoil
   , logSelfHeal
   , logMoveFail
+  , logDelayedMove
   , LogMessage (..)
   ) where
 
@@ -40,6 +41,7 @@ data LogMessage
   | RecoilLog { recoilDmg :: Int, actor :: Text }
   | SelfHealLog { healAmount :: Int, actor :: Text }
   | MoveFailLog { failure :: Text }
+  | DelayedMoveLog { actor :: Text, flavourText :: Text }
   deriving (Show, Eq)
 
 -- | Log a damage event.
@@ -97,4 +99,8 @@ logSelfHeal hAmount actorName = tell [SelfHealLog hAmount actorName]
 -- | Log a move failing.
 logMoveFail :: (MonadWriter [LogMessage] m) => m ()
 logMoveFail = tell [MoveFailLog "But it failed!"]
+
+-- | Log a delayed move.
+logDelayedMove :: (MonadWriter [LogMessage] m) => Text -> Text -> m ()
+logDelayedMove actorName mName = tell [DelayedMoveLog actorName mName]
 

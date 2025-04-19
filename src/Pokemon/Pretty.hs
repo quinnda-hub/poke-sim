@@ -113,9 +113,13 @@ prettyLogMessage (SelfHealLog h a) =
   T.concat ["[Heal] ", a, " healed ", T.pack (show h), " HP!"]
 prettyLogMessage (MoveFailLog t) =
   T.concat ["[Fail] ", t]
+prettyLogMessage (DelayedMoveLog a mv)
+  | mv == "Future Sight" = T.concat ["[Future Sight] ", a, " foresaw an attack!"]
+  | mv == "Doom Desire"  = T.concat ["[Doom Desire] ", a, " chose Doom Desire as its destiny!"]
+  | otherwise            = T.concat ["[", mv, "] ", a, " queued ", mv]
 
 -- | Given a stat name, the boost change from the move (delta),
---   and  the new total value, produce a pretty message for the stat. :w
+--   and  the new total value, produce a pretty message for the stat.
 prettyBoostChange :: Text -> Int -> Int -> Text
 prettyBoostChange statName delta newVal
   | delta > 0 =
