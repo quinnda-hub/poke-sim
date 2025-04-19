@@ -13,7 +13,8 @@ import           Pokemon.Battle.BattleState.Types    (DelayedMove (..),
                                                       Player (..),
                                                       PlayerSlot (..),
                                                       PokemonID)
-import           Pokemon.Battle.Logging              (logDamage, logMoveFail)
+import           Pokemon.Battle.Logging              (logDamage, logDelayedMove,
+                                                      logMoveFail)
 import qualified Pokemon.Battle.MoveEffect.Internal  as ME
 import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..), isFainted)
 import           Pokemon.Data.Move.Internal          (Move (name))
@@ -67,6 +68,7 @@ queueDelayedMove mv attacker target = do
                        , targetSlot     = target
                        , turnsRemaining = delay
                        }
+      logDelayedMove attacker.name mv.name
       modify (\bs' -> bs' { delayedMoves = dm : bs'.delayedMoves })
 
 -- | When a move's counter reaches 0, calculate and apply its damage.
