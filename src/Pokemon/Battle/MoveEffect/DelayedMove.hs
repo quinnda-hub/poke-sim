@@ -50,13 +50,24 @@ queueDelayedMove mv attacker target = do
       uId   = case target of
                 Player1 -> (Player2, pokemonName bs Player2)
                 Player2 -> (Player1, pokemonName bs Player1)
-      dm = DelayedMove { delayedMove    = mv
+      attackerSlot = fst uId
+      -- Look at all the queued delayed moves and see if this player already has
+      -- one of the same move queued.
+      existing = filter
+        (\dm' ->
+          let (pslot, _) = dm'.userId
+          in pslot == attackerSlot && mv.name == dm'.delayedMove.name)
+        bs.delayedMoves
+  if not (null existing)
+    then logMoveFail
+    else do
+      let dm = DelayedMove { delayedMove    = mv
                        , userId         = uId
                        , userSnapshot   = attacker
                        , targetSlot     = target
                        , turnsRemaining = delay
                        }
-  modify (\bs' -> bs' { delayedMoves = dm : bs'.delayedMoves })
+      modify (\bs' -> bs' { delayedMoves = dm : bs'.delayedMoves })
 
 -- | When a move's counter reaches 0, calculate and apply its damage.
 triggerDelayedMove :: DelayedMove -> BattleM ()
