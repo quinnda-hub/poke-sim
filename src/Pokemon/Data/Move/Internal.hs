@@ -388,7 +388,7 @@ data Status
   | Paralyze
   | Poison
   | Sleep
-  | Toxic
+  | Toxic Int
   deriving (Show, Eq)
 
 -- | Targeting information for moves.
@@ -767,7 +767,7 @@ instance FromJSON Status where
     "par" -> pure Paralyze
     "psn" -> pure Poison
     "slp" -> pure Sleep
-    "tox" -> pure Toxic
+    "tox" -> pure $ Toxic 0
     _     -> fail $ "Invalid Status: " ++ T.unpack t
 
 instance FromJSON Target where
