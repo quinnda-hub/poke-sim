@@ -83,6 +83,7 @@ library
                       Pokemon.Battle.Simulation.Internal,
                       Pokemon.Battle.Simulation.Modes,
                       Pokemon.Battle.Simulation,
+                      Pokemon.Battle.StatusEffects,
                       Pokemon.Data.Move.Internal,
                       Pokemon.Battle.MoveEffect.Internal,
                       Pokemon.Battle.MoveEffect.Boosts,
