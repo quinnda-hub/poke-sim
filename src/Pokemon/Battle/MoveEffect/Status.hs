@@ -4,7 +4,7 @@
 
 module Pokemon.Battle.MoveEffect.Status where
 
-import           Control.Monad.State                 (get)
+import           Control.Monad.State                 (get, modify)
 import           Data.Maybe                          (isJust)
 import           Data.Text                           as T (pack)
 import           Pokemon.Battle.BattleState.Internal (BattleM, BattleState (..))
@@ -15,9 +15,35 @@ import           Pokemon.Battle.Logging              (logStatus)
 import           Pokemon.Battle.MoveEffect.Internal  (EffectStep (InflictStatus),
                                                       applyEffectForMove)
 import           Pokemon.Battle.Pokemon.Internal     (Pokemon (..))
-import           Pokemon.Data.Move.Internal          (Move, Status, moveType,
-                                                      status)
-import           Pokemon.Mechanics.PType             (PType (..))
+import           Pokemon.Data.Move.Internal          (Move, Status (..),
+                                                      moveType, status)
+import qualified Pokemon.Mechanics.PType             as PT
+
+applyStatusEffects :: PlayerSlot -> BattleM ()
+applyStatusEffects slot = do
+  bs <- get
+  let p = case slot of
+            Player1 -> bs.player1.active
+            Player2 -> bs.player2.active
+  case p.pstatus of
+    Just Poison -> do
+      let dmg   = max 1 (p.maxHP `div` 8)
+          newHP = max 0 (p.hp - dmg)
+      modify $ \bs' -> case slot of
+        Player1 ->
+          bs' { player1 = bs'.player1 { active = p { hp = newHP } } }
+        Player2 ->
+          bs' { player2 = bs'.player2 { active = p { hp = newHP } } }
+    Just Burn -> do
+      let dmg   = max 1 (p.maxHP `div` 16)
+          newHP = max 0 (p.hp - dmg)
+      modify $ \bs' -> case slot of
+        Player1 ->
+          bs' { player1 = bs'.player1 { active = p { hp = newHP } } }
+        Player2 ->
+          bs' { player2 = bs'.player2 { active = p { hp = newHP } } }
+    -- Just Poison and Burn implemented for now.
+    _ -> pure ()
 
 -- | If the move applies status, produce an EffectStep.
 gatherStatus :: Move -> Maybe EffectStep
@@ -46,10 +72,10 @@ isImmuneToStatus p mv =
       secondaryType = p.type2
       hasType t = primaryType == t || Just t == secondaryType
   in case mType of
-       Fire     -> hasType Fire     -- Fire-type moves do not affect Fire-type Pokémon.
-       Electric -> hasType Ground   -- Electric moves don't affect Ground-type Pokémon.
-       Poison   -> hasType Steel    -- Poison moves don't affect Steel-type Pokémon.
-       _        -> False
+       PT.Fire     -> hasType PT.Fire     -- Fire-type moves do not affect Fire-type Pokémon.
+       PT.Electric -> hasType PT.Ground   -- Electric moves don't affect Ground-type Pokémon.
+       PT.Poison   -> hasType PT.Steel    -- Poison moves don't affect Steel-type Pokémon.
+       _           -> False
 
 -- | Applies a status effect and update the battle state.
 applyStatusForMove :: Move -> Pokemon -> Pokemon -> [PlayerSlot] -> BattleM ()
