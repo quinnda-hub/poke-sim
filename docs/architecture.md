@@ -3,8 +3,10 @@
 This describes the new engine core under `src/Engine/` and the decisions behind
 it. The older simulator under `src/Pokemon/` is described at the end.
 
-Status: the first slice is being built. Nothing below has been demonstrated
-against Showdown yet; see [roadmap.md](roadmap.md) for what has.
+Status: slice 0 is built and replays 800 recorded Showdown battles with
+identical draws and state. Decisions 1 to 5 and 7 are implemented for that
+slice. Decisions 6 and 8 (rules as data, the usage whitelist) are not built yet.
+See [roadmap.md](roadmap.md).
 
 ## Goals, in order
 
@@ -55,13 +57,27 @@ compare and serialise.
 ```haskell
 newBattle    :: MonadChance m => Dex -> Format -> Team -> Team -> m Battle
 request      :: Battle -> Request
-legalChoices :: Dex -> Battle -> Player -> [Choice]
-step         :: MonadChance m => Dex -> Battle -> (Maybe Choice, Maybe Choice) -> m Battle
+legalChoices :: Battle -> Player -> [Choice]
+step         :: MonadChance m => Dex -> Battle -> (Maybe Choice, Maybe Choice)
+             -> m (Either StepError Battle)
 ```
 
-`step` applies both sides' choices and runs to the next decision point or the
-end. A side that is not being asked passes `Nothing`. Players, strategies and
-logging live outside the engine.
+`newBattle` stops at team preview. `step` applies both sides' choices and runs
+to the next decision point or the end. A side that is not being asked passes
+`Nothing`. Players, strategies and logging live outside the engine.
+
+The battle carries its `Format`, and its pending action queue, because Showdown
+can stop for a forced replacement in the middle of a turn and resume the same
+queue afterwards.
+
+`step` returns an error, makes no draws and changes nothing when the battle is
+already over, a side that must choose gives no choice, a choice is not legal, or
+a side that is not being asked gives one. A silent no-op would let a search loop
+forever on the same position.
+
+Teams can only be built through `parseTeam`, which rejects anything the engine
+cannot simulate exactly: moves and species outside the tested pool, any ability
+or item, and levels outside 1 to 100. A set the engine accepts is a set it matches Showdown on.
 
 ### 5. Showdown's ordering, not Showdown's machinery
 

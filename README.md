@@ -9,12 +9,14 @@ level. The simulator comes first.
 
 ## Status
 
-Early. The reference tooling works; the engine core is being built.
+Early. The reference tooling works and the first slice of the engine matches
+Showdown exactly.
 
 - **Working:** recording battles on a pinned Showdown build with every random
   draw captured, and exporting game data from that build.
-- **In progress:** the first slice of the new engine core (plain damaging
-  moves, switching, fainting), tested by replaying 500 recorded battles.
+- **Working:** the first slice of the new engine core (team preview, plain
+  damaging moves, Struggle, switching, fainting, forced replacement). It
+  replays 800 recorded battles with identical random draws and identical state.
 - **Not started:** status conditions, abilities, items, field effects,
   Terastallization, and everything about the bot.
 
@@ -43,6 +45,7 @@ are in [docs/oracle-testing.md](docs/oracle-testing.md)), then:
 
 ```sh
 node tools/oracle/gen-slice0.js local/traces/slice0 500
+node tools/oracle/gen-slice0.js local/traces/slice0 300 1 gen9ou struggle
 cabal test parity --test-show-details=direct
 ```
 

@@ -11,7 +11,8 @@ correct, fast simulator first, and no bot work until it exists.
 - Build: `cabal build all`
 - Parity test: `cabal test parity --test-show-details=direct`
 - Benchmark: `cabal bench`
-- Record traces: `node tools/oracle/gen-slice0.js local/traces/slice0 500`
+- Record traces: `node tools/oracle/gen-slice0.js local/traces/slice0 500`,
+  then `node tools/oracle/gen-slice0.js local/traces/slice0 300 1 gen9ou struggle`
 - Re-export game data: `node tools/oracle/export-dex.js`
 
 Toolchain: GHC 9.4.8, cabal 3.14, Node 22.18 or newer.
@@ -44,8 +45,8 @@ by nothing else.
   by `tools/oracle/export-dex.js`; regenerate it, never edit it by hand. The
   files directly under `data/` belong to the legacy simulator.
 - `local/` is gitignored. It holds the Showdown checkout (`local/showdown`,
-  read-only) and recorded traces (`local/traces`, about 240 MB per 500
-  battles). Write throwaway scripts elsewhere.
+  read-only) and recorded traces (`local/traces`, about 280 MB for the
+  current 800 battles). Write throwaway scripts elsewhere.
 - Scope is bounded by Gen 9 OU usage. Do not implement mechanics for other
   generations or build a generation-agnostic framework.
 

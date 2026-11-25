@@ -67,16 +67,25 @@ back to `local/showdown`.
 | Tool | Purpose |
 |---|---|
 | `record.js <scenario.json> [out.json]` | Play one battle on Showdown and write its trace. |
-| `gen-slice0.js <outDir> <count> [firstSeed] [format]` | Generate random slice-0 battles and record each. Deterministic per seed. |
+| `gen-slice0.js <outDir> <count> [firstSeed] [format] [profile]` | Generate random slice-0 battles and record each. Deterministic per seed. |
 | `export-dex.js [outDir] [mod]` | Export species, moves, abilities, items, types and natures to `data/gen9/`. |
 
 ### Recording traces
 
 ```sh
 node tools/oracle/gen-slice0.js local/traces/slice0 500
+node tools/oracle/gen-slice0.js local/traces/slice0 300 1 gen9ou struggle
 ```
 
-500 battles take about 240 MB, so traces live under `local/` and are not
+The generator has two profiles, because random battles alone never reach some
+in-scope behaviour:
+
+| Profile | Teams | What it reaches |
+|---|---|---|
+| `random` (default) | Six random Pokémon with four random plain moves | Speed ties, priority, never-miss and high-crit moves, immunities, varied levels and spreads |
+| `struggle` | One to three Ghost types with one low-PP Normal or Fighting move | PP running out, Struggle and its recoil, both sides fainting at once, both sides replacing at once, Shedinja's fixed 1 HP |
+
+The 800 battles take about 280 MB, so traces live under `local/` and are not
 committed. They are reproducible from the seeds.
 
 To isolate one behaviour, write a scenario by hand and give it explicit choices:
@@ -142,6 +151,17 @@ cabal test parity --test-show-details=direct
 
 The test reads traces from `$POKESIM_TRACES`, defaulting to
 `local/traces/slice0`. It fails if the directory is missing or empty.
+
+Besides replaying each trace, it checks that:
+
+- every draw is three integers with a non-empty range;
+- the trace is version 1, format `gen9ou`, with two sides in every snapshot;
+- every snapshot field the engine does not model holds its default value, so a
+  trace that uses a mechanic outside the current slice fails loudly;
+- the moves and species the engine accepts equal `slice0-moves.json` and
+  `slice0-species.json` in the trace directory, which the generator writes, so
+  the engine accepts exactly what it has been tested on;
+- `step` returns the right error for each kind of bad input.
 
 ## Debugging a divergence
 
