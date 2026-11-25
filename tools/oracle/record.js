@@ -165,7 +165,7 @@ function snapshot(battle, origOf) {
 	};
 }
 
-function record(scenario) {
+function record(scenario, hooks) {
 	const draws = [];
 	const prng = new RecordingPRNG(scenario.seed, draws);
 	const battle = new Battle({ formatid: scenario.format, prng });
@@ -218,6 +218,8 @@ function record(scenario) {
 		});
 	}
 
+	if (hooks && hooks.onEnd) hooks.onEnd(battle);
+
 	return {
 		traceVersion: TRACE_VERSION,
 		showdownVersion: require(path.join(SHOWDOWN_DIR, 'package.json')).version,
@@ -234,6 +236,8 @@ function record(scenario) {
 }
 
 module.exports = { record };
+// record(scenario, hooks): hooks.onEnd(battle) is called with the finished Battle (for its log), before
+// the trace is returned. Optional; the trace is the same with or without it.
 
 if (require.main === module) {
 	const [scenarioPath, outPath] = process.argv.slice(2);

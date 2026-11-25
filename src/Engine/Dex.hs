@@ -27,13 +27,14 @@ import qualified Data.Aeson.Key as K
 import qualified Data.Aeson.KeyMap as KM
 import Data.Char (isAlphaNum, toLower)
 import qualified Data.Map.Strict as M
-import qualified Data.Set as Set
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isNothing)
 import Data.Scientific (toBoundedInteger)
 import qualified Data.Text as T
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as U
 import System.FilePath ((</>))
+
+import Engine.Rule
 
 -- | A species' fixed gender, if any (Showdown @species.gender@).
 data FixedGender = FixedMale | FixedFemale | FixedGenderless | GenderFree
@@ -55,7 +56,7 @@ data SpeciesData = SpeciesData
   }
   deriving (Show)
 
--- | Per-move static data (only what plain damaging moves use).
+-- | Per-move static data.
 data MoveData = MoveData
   { mvId :: !T.Text
   , mvType :: !Int
@@ -69,8 +70,12 @@ data MoveData = MoveData
   , mvNoPPBoosts :: !Bool
   , mvStruggleRecoil :: !Bool
   -- ^ Showdown @struggleRecoil@: recoil of a quarter of max HP, whatever the damage.
+  , mvRule :: !MoveRule
+  -- ^ What the move does ('plainRule' when the move did not translate).
+  , mvReject :: !(Maybe Reason)
+  -- ^ Why the move does not translate ('Engine.Rule.moveRule'), if it does not.
   , mvSupported :: !Bool
-  -- ^ A plain move the slice supports (same criteria as @isPlainMove@ in tools/oracle/gen-slice0.js).
+  -- ^ The move translates and its rule is 'executable'.
   }
   deriving (Show)
 
@@ -140,13 +145,9 @@ loadDex dir = do
     chart <- chartOf tnames typesV
     speciesL <- objectEntries speciesV >>= traverse (speciesOf tix . snd)
     moveEntries <- objectEntries movesV
-    tackle <- maybe (Left "moves.json has no tackle") Right (lookup "tackle" moveEntries)
-    let plainKeys = case tackle of
-          Object o -> Set.fromList (map K.toText (KM.keys o))
-          _ -> Set.empty
-    movesL <- traverse (moveOf tix plainKeys . snd) moveEntries
+    movesL <- traverse (moveOf tix . snd) moveEntries
     struggleV <- maybe (Left "moves.json has no struggle") Right (lookup "struggle" moveEntries)
-    struggle <- (\m -> m {mvType = noType, mvSupported = False}) <$> moveOf tix plainKeys struggleV
+    struggle <- (\m -> m {mvType = noType, mvSupported = False}) <$> moveOf tix struggleV
     natureEntries <- objectEntries naturesV
     natureL <- traverse (natureOf . snd) natureEntries
     pure Dex
@@ -228,8 +229,8 @@ speciesOf tix v = do
 typeIx :: M.Map T.Text Int -> T.Text -> Either String Int
 typeIx tix t = maybe (Left ("unknown type " ++ T.unpack t)) Right (M.lookup t tix)
 
-moveOf :: M.Map T.Text Int -> Set.Set T.Text -> Value -> Either String MoveData
-moveOf tix plainKeys v = do
+moveOf :: M.Map T.Text Int -> Value -> Either String MoveData
+moveOf tix v = do
   ident <- field "id" v >>= asText
   ty <- field "type" v >>= asText >>= typeIx tix
   cat <- field "category" v >>= asText
@@ -243,7 +244,11 @@ moveOf tix plainKeys v = do
   noBoost <- field "noPPBoosts" v >>= \b -> case b of
     Bool x -> Right x
     _ -> Left "noPPBoosts is not a boolean"
-  pure (MoveData ident ty (cat == "Physical") bp acc prio crit pp noBoost (truthyField "struggleRecoil" v) (isPlainMove plainKeys v))
+  let (rule, rejected) = case moveRule v of
+        Left why -> (plainRule, Just why)
+        Right r -> (r, Nothing)
+      supported = isNothing rejected && executable rule
+  pure (MoveData ident ty (cat == "Physical") bp acc prio crit pp noBoost (truthyField "struggleRecoil" v) rule rejected supported)
 
 natureOf :: Value -> Either String NatureData
 natureOf v = do
@@ -262,28 +267,6 @@ supportedMoves dx = [mvId m | m <- V.toList (dxMoves dx), mvSupported m]
 supportedSpecies :: Dex -> [T.Text]
 supportedSpecies dx = [spId s | s <- V.toList (dxSpecies dx), spSupported s]
 
--- | The criteria of @isPlainMove@ (tools/oracle/gen-slice0.js) applied to the exported move data:
--- a damaging single-target move with none of the listed fields set, no handlers, no keys beyond
--- those @tackle@ has (unless falsy) and only inert flags.
-isPlainMove :: Set.Set T.Text -> Value -> Bool
-isPlainMove plainKeys (Object o) =
-  category /= Just "Status"
-    && maybe False (> 0) (numberField "basePower")
-    && target `elem` [Just "normal", Just "any"]
-    && not (any (truthy . lookupKey) mustBeEmpty)
-    && not (case lookupKey "secondaries" of Array xs -> not (V.null xs); _ -> False)
-    && not (KM.member "handlers" o)
-    && all (\(k, x) -> Set.member (K.toText k) plainKeys || not (truthy x)) (KM.toList o)
-    && (case lookupKey "flags" of
-          Object fl -> all (\k -> K.toText k `elem` inertFlags) (KM.keys fl)
-          _ -> True)
-  where
-    lookupKey k = fromMaybe Null (KM.lookup (K.fromText k) o)
-    category = case lookupKey "category" of String t -> Just t; _ -> Nothing
-    target = case lookupKey "target" of String t -> Just t; _ -> Nothing
-    numberField k = case lookupKey k of Number _ -> either (const Nothing) Just (asInt (lookupKey k)); _ -> Nothing
-isPlainMove _ _ = False
-
 -- | JavaScript truthiness of an exported value.
 truthy :: Value -> Bool
 truthy Null = False
@@ -291,28 +274,6 @@ truthy (Bool b) = b
 truthy (Number n) = n /= 0
 truthy (String t) = not (T.null t)
 truthy _ = True
-
-mustBeEmpty :: [T.Text]
-mustBeEmpty =
-  [ "isNonstandard", "secondary", "damage", "volatileStatus", "ignoreImmunity", "pseudoWeather"
-  , "isZ", "isMax", "ohko", "thawsTarget", "heal", "forceSwitch", "selfSwitch", "selfBoost"
-  , "selfdestruct", "breaksProtect", "recoil", "drain", "mindBlownRecoil", "stealsBoosts"
-  , "struggleRecoil", "overrideOffensivePokemon", "overrideOffensiveStat"
-  , "overrideDefensivePokemon", "overrideDefensiveStat", "ignoreAbility", "ignoreAccuracy"
-  , "ignoreDefensive", "ignoreEvasion", "ignoreNegativeOffensive", "ignoreOffensive"
-  , "ignorePositiveDefensive", "ignorePositiveEvasion", "multiaccuracy", "multihit"
-  , "noDamageVariance", "willCrit", "tracksTarget", "sleepUsable", "smartTarget"
-  , "stallingMove", "status", "weather", "terrain", "sideCondition", "slotCondition"
-  , "boosts", "self", "basePowerCallback", "callsMove", "hasCrashDamage", "forceSTAB"
-  , "realMove", "nonGhostTarget", "defensiveCategory"
-  ]
-
-inertFlags :: [T.Text]
-inertFlags =
-  [ "contact", "protect", "mirror", "metronome", "slicing", "punch", "bite", "bullet"
-  , "pulse", "wind", "distance", "allyanim", "noassist", "failcopycat", "failmefirst"
-  , "nosleeptalk", "failinstruct", "failencore", "failmimic", "nosketch"
-  ]
 
 truthyField :: T.Text -> Value -> Bool
 truthyField k (Object o) = maybe False truthy (KM.lookup (K.fromText k) o)

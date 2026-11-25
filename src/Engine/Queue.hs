@@ -9,6 +9,7 @@ module Engine.Queue
   , insertChoice
   , actionSpeedOf
   , monActionSpeed
+  , monSpeedNow
   , resolveAction
   , cancelAction
   ) where
@@ -47,9 +48,14 @@ comparePriority a b =
 sortQueue :: MonadChance m => SV.Vector Action -> m (SV.Vector Action)
 sortQueue q = SV.fromList <$> speedSortWith comparePriority (SV.toList q)
 
--- | @pokemon.getActionSpeed()@ for the Pokemon of an actor (no boosts or modifiers in slice 0).
+-- | @pokemon.getActionSpeed()@ of a Pokemon right now: its Spe stat with its current stage.
+monSpeedNow :: Format -> Mon -> Int
+monSpeedNow fmt m = actionSpeed fmt (stSpe (monStats m)) (bsSpe (monBoosts m))
+{-# INLINE monSpeedNow #-}
+
+-- | @pokemon.getActionSpeed()@ for the Pokemon of an actor.
 monActionSpeed :: Format -> Battle -> Actor -> Int
-monActionSpeed fmt b a = actionSpeed fmt (stSpe (monStats (monOf b a)))
+monActionSpeed fmt b a = monSpeedNow fmt (monOf b a)
 
 -- | @battle.getActionSpeed(action)@: refresh priority (moves) and speed (anything with a Pokemon).
 actionSpeedOf :: Format -> Dex -> Battle -> Action -> Action

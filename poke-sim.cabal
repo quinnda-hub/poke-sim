@@ -107,6 +107,7 @@ library
                       Engine.Dex,
                       Engine.Format,
                       Engine.Queue,
+                      Engine.Rule,
                       Engine.State,
                       Engine.Stats,
                       Engine.Team,
@@ -169,32 +170,27 @@ executable poke-sim
     ghc-options: -O2
                  -threaded
 
+-- Property suite (hedgehog): engine invariants and agreement with JavaScript arithmetic.
+-- POKESIM_TIER=fast|long selects the number of tests (default long).
 test-suite poke-sim-test
-    -- Import common warning flags.
     import:           warnings
-
-    -- Base language which the package is written in.
     default-language: Haskell2010
-
-    -- Modules included in this executable, other than Main.
-    -- other-modules:
-
-    -- LANGUAGE extensions used by modules in this package.
-    -- other-extensions:
-
-    -- The interface type and version of the test suite.
     type:             exitcode-stdio-1.0
-
-    -- Directories containing source files.
-    hs-source-dirs:   test
-
-    -- The entrypoint to the test suite.
+    hs-source-dirs:   test/props
     main-is:          Main.hs
-
-    -- Test dependencies.
+    other-modules:    Playout
+    ghc-options:      -O1
     build-depends:
         base ^>=4.17.2.1,
-        poke-sim
+        poke-sim,
+        aeson >= 2.2.3 && < 2.3,
+        containers >= 0.6.7 && < 0.7,
+        filepath >= 1.4 && < 1.6,
+        hedgehog >= 1.4 && < 1.8,
+        splitmix >= 0.1.0.4 && < 0.2,
+        text >= 2.0.2 && < 2.1,
+        transformers >= 0.5.6 && <= 0.6,
+        vector >= 0.13.2 && < 0.14
 
 -- Replays recorded Showdown battles (traces) against the engine: draws and state must match.
 test-suite parity
@@ -245,5 +241,20 @@ executable whitelist-report
         aeson >= 2.2.3 && < 2.3,
         containers >= 0.6.7 && < 0.7,
         scientific >= 0.3.7 && < 0.4,
+        text >= 2.0.2 && < 2.1,
+        vector >= 0.13.2 && < 0.14
+
+-- Prints the move and species pools the engine accepts, as the input of tools/oracle/gen-slice1.js.
+executable engine-pool
+    import:           warnings
+    default-language: Haskell2010
+    main-is:          Main.hs
+    hs-source-dirs:   tools/engine-pool
+    build-depends:
+        base ^>=4.17.2.1,
+        poke-sim,
+        aeson >= 2.2.3 && < 2.3,
+        bytestring >= 0.11.5 && < 0.12,
+        containers >= 0.6.7 && < 0.7,
         text >= 2.0.2 && < 2.1,
         vector >= 0.13.2 && < 0.14

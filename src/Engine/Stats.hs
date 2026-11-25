@@ -2,6 +2,7 @@
 module Engine.Stats
   ( hpStat
   , otherStat
+  , boostedStat
   , actionSpeed
   ) where
 
@@ -22,13 +23,22 @@ otherStat f base iv ev level nature =
         LT -> trunc f (truncBits f 16 (raw * 90) `quot` 100)
         EQ -> raw
 
--- | @pokemon.getActionSpeed()@ with no boosts or modifiers (pokemon.ts): @getStat('spe')@ capped at 10000
+-- | @getStat@ / @calculateStat@'s stage step: @floor(stat * [1, 1.5, .. 4][stage])@ for a stage in [-6, 6]
+-- (a negative stage divides). Exact in integers: @stat * (2 + s) / 2@ and @stat * 2 / (2 - s)@.
+boostedStat :: Int -> Int -> Int
+boostedStat stat stage
+  | stage >= 0 = stat * (2 + min 6 stage) `quot` 2
+  | otherwise = stat * 2 `quot` (2 + min 6 (negate stage))
+
+-- | @pokemon.getActionSpeed()@ (pokemon.ts) from the Spe stat and its stage: @getStat('spe')@ capped at 10000
 -- unless the format overrides @trunc@ (pokemon.ts ~658), then @tr(speed, 13)@.
--- The cap cannot be reached at levels <= 100 (the largest Spe stat is under 700); it is kept for fidelity.
--- LATENT: Showdown runs the @ModifySpe@ event inside getStat, and the team-preview and action speeds
--- here do not go through it (items, abilities, Trick Room, paralysis, Tailwind).
-actionSpeed :: Format -> Int -> Int
-actionSpeed f speed = truncBits f 13 (case fmtTrunc f of
-  TruncUnsigned32 -> min 10000 speed
-  TruncPlain -> speed)
+-- The cap cannot be reached at levels <= 100 (the largest boosted Spe is under 3000); it is kept for fidelity.
+-- LATENT: Showdown runs the @ModifySpe@ event inside getStat (items, abilities, paralysis, Tailwind) and
+-- Trick Room inverts the result; neither exists yet, so only the stage applies.
+actionSpeed :: Format -> Int -> Int -> Int
+actionSpeed f speed stage = truncBits f 13 (case fmtTrunc f of
+  TruncUnsigned32 -> min 10000 boosted
+  TruncPlain -> boosted)
+  where
+    boosted = boostedStat speed stage
 {-# INLINE actionSpeed #-}

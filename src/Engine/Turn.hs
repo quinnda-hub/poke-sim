@@ -9,6 +9,8 @@
 module Engine.Turn
   ( newBattle
   , step
+  , stagedAccuracy
+  , roundDiv
   ) where
 
 import Control.Monad (forM_, unless, void, when)
@@ -21,10 +23,11 @@ import Engine.Chance
 import Engine.Choice
 import Engine.Damage
 import Engine.Dex
-import Engine.Format (Format)
+import Engine.Format (Format, trunc)
 import Engine.Queue
+import Engine.Rule
 import Engine.State
-import Engine.Stats (actionSpeed)
+import Engine.Stats (boostedStat)
 import Engine.Team
 
 -- | The engine monad: battle state over the chance monad.
@@ -282,7 +285,7 @@ updateSpeedAll = do
   fmt <- gets bFormat
   b <- get
   forM_ (getAllActive False b) $ \a ->
-    modify' (modifyMon a (\m -> m {monSpeed = actionSpeed fmt (stSpe (monStats m))}))
+    modify' (modifyMon a (\m -> m {monSpeed = monSpeedNow fmt m}))
 
 -- | @battle.eachEvent@ (battle.ts), used for @Update@ and @BeforeTurn@: speed-sort the active Pokemon
 -- by their cached @speed@ (ties are shuffled) and dispatch to each. No handlers exist in slice 0,
@@ -347,9 +350,10 @@ resolveFaints checkWinIfNoFaints checkWin' = do
           m <- gets (\bb -> monOf bb a)
           unless (monFainted m) $ do
             modify' (modifySide p (\s -> if sLeft s > 0 then s {sLeft = sLeft s - 1} else s))
-            -- pokemon.clearVolatile(false) resets the cached speed (setSpecies)
+            -- pokemon.clearVolatile(false) resets the stat stages and the cached speed (setSpecies)
             modify' (modifyMon a (\mm -> mm
               { monSpeed = stSpe (monStats mm)
+              , monBoosts = noBoosts
               , monFainted = True
               , monActive = False
               }))
@@ -398,8 +402,8 @@ switchIn fmt dx p target = do
       Just o | monHp (monOf b0 o) > 0 -> do
         -- runPursuitActivation(oldActive): eachEvent('Update') (the BeforeSwitchOut event has no handlers)
         eachEvent
-        -- queue.cancelAction(oldActive); oldActive.clearVolatile() (resets the cached speed)
-        modify' (\b -> modifyMon o (\m -> m {monSpeed = stSpe (monStats m)}) b {bQueue = cancelAction o (bQueue b)})
+        -- queue.cancelAction(oldActive); oldActive.clearVolatile() (resets the stat stages and the cached speed)
+        modify' (\b -> modifyMon o (\m -> m {monSpeed = stSpe (monStats m), monBoosts = noBoosts}) b {bQueue = cancelAction o (bQueue b)})
       _ -> pure ()
     case old of
       Just o -> do
@@ -410,7 +414,7 @@ switchIn fmt dx p target = do
       Nothing -> pure ()
     modify' (modifyMon tgt (\m -> m {monActive = True}) . modifySide p (\s -> s {sHasActive = True}))
     -- queue.insertChoice({ choice: 'runSwitch', pokemon }): updateSpeed first, then a tie-aware insert
-    modify' (modifyMon tgt (\m -> m {monSpeed = actionSpeed fmt (stSpe (monStats m))}))
+    modify' (modifyMon tgt (\m -> m {monSpeed = monSpeedNow fmt m}))
     new <- resolveAction fmt dx Action
       { acKind = KRunSwitch, acOrder = 0, acPriority = 0, acSpeed = 0, acActor = Just tgt, acArg = 0 }
     q <- gets bQueue
@@ -439,7 +443,7 @@ runSwitch _ _first = do
 -- ---------------------------------------------------------------------------
 -- Moves
 
--- | @actions.runMove@ + @useMove@ + @trySpreadMoveHit@ (battle-actions.ts) for a plain single-target move or
+-- | @actions.runMove@ + @useMove@ + @trySpreadMoveHit@ (battle-actions.ts) for a supported move or
 -- Struggle (slot -1: no PP is deducted and the move is typeless with recoil).
 {-# INLINABLE runMove #-}
 runMove :: MonadChance m => Format -> Dex -> Actor -> Int -> Eng m ()
@@ -464,24 +468,157 @@ runMove fmt dx user@(Actor p _) slot = do
       resolveFaints False True
       void (checkWin Nothing)
 
--- | The hit steps of @trySpreadMoveHit@: target check, type immunity, accuracy, then the (single) hit.
+-- | The hit steps of @trySpreadMoveHit@ (battle-actions.ts): target check, type immunity, accuracy, then the
+-- hit loop. Spread targets and @randomNormal@ reach the one foe in singles ('TargetFoe'); a move on the
+-- user ('TargetSelf') skips immunity and accuracy (@hitStepAccuracy@: a self-targeted status move).
 {-# INLINABLE useMove #-}
 useMove :: MonadChance m => Format -> Dex -> Actor -> Actor -> MoveData -> Eng m ()
-useMove fmt dx user target mv = do
-  b <- get
-  let tm = monOf b target
-  -- getMoveTargets (battle-actions.ts ~842-859): a fainted target leaves no targets, so the move fails
-  -- before any draw. getRandomTarget in singles returns foe.active[0] even when it has fainted.
-  unless (monFainted tm) $
-    -- hitStepTypeImmunity (before accuracy: an immune target consumes no draws)
-    unless (isImmune dx (mvType mv) tm) $ do
-      -- hitStepAccuracy
-      hits <- if mvAccuracy mv == neverMisses then pure True else randomChance (mvAccuracy mv) 100
-      when hits (hitMove fmt dx user target mv)
+useMove fmt dx user target mv = case mrTarget rule of
+  TargetSelf -> statusMove user user mv
+  TargetFoe -> do
+    b <- get
+    let tm = monOf b target
+        um = monOf b user
+    -- getMoveTargets (battle-actions.ts ~842-859, pokemon.ts getMoveTargets): a fainted target leaves no
+    -- targets, so the move fails before any draw. getRandomTarget in singles returns foe.active[0] even when
+    -- it has fainted; the spread targets (allAdjacentFoes, allAdjacent) use side.foes(), which skips it.
+    unless (monFainted tm) $
+      -- hitStepTypeImmunity (before accuracy: an immune target consumes no draws); a move with
+      -- ignoreImmunity (every status move but a few) skips it
+      unless (not (mrIgnoreImmunity rule) && isImmune dx (mvType mv) tm) $ do
+        -- hitStepAccuracy
+        hits <- if mvAccuracy mv == neverMisses then pure True
+          else randomChance (stagedAccuracy fmt (mvAccuracy mv) (monBoosts um) (monBoosts tm)) 100
+        when hits $
+          if mrDamaging rule then hitLoop fmt dx user target mv else statusMove user target mv
+  where
+    rule = mvRule mv
 
--- | @hitStepMoveHitLoop@ for one hit: damage, the @Update@ events around fainting, Struggle recoil.
+-- | @hitStepAccuracy@'s stage step (battle-actions.ts): the user's accuracy stage minus the target's evasion
+-- stage, each clamped to [-6, 6], scales the accuracy by @(3 + s) / 3@ or @3 / (3 - s)@, truncated.
+stagedAccuracy :: Format -> Int -> Boosts -> Boosts -> Int
+stagedAccuracy fmt acc user tgt
+  | stage > 0 = trunc fmt (acc * (3 + stage) `quot` 3)
+  | stage < 0 = trunc fmt (acc * 3 `quot` (3 - stage))
+  | otherwise = acc
+  where
+    stage = clampStage (clampStage (bsAccuracy user) - bsEvasion tgt)
+
+clampStage :: Int -> Int
+clampStage = max (-6) . min 6
+
+-- | @battle.boost@ (battle.ts) of one target: each stage moves by its change clamped to [-6, 6]
+-- (@getCappedBoost@). Returns whether any stage changed. It fails for a target with no HP or off the field,
+-- and when the foe side has no Pokemon left. The order of the stats is unobservable (independent stages;
+-- the boost events have no handlers).
+{-# INLINABLE boostMon #-}
+boostMon :: Monad m => Actor -> [(BoostStat, Int)] -> Eng m Bool
+boostMon a@(Actor p _) changes = do
+  b <- get
+  let m = monOf b a
+  if monHp m <= 0 || not (monActive m) || sLeft (sideOf (other p) b) == 0
+    then pure False
+    else do
+      let step' bs (s, d) = setBoostOf s (clampStage (boostOf s bs + d)) bs
+          new = foldl step' (monBoosts m) changes
+      modify' (modifyMon a (\x -> x {monBoosts = new}))
+      pure (new /= monBoosts m)
+
+-- | A status move's single hit (@trySpreadMoveHit@ -> @runMoveEffects@): a self-targeted heal or a stat
+-- change on the target. When the effect does nothing (heal at full HP, a stage already at its limit) the move
+-- fails with no draw and no @Update@: @runMoveEffects@ marks the damage false, @spreadMoveHit@ reports it, and
+-- @hitStepMoveHitLoop@ stops before its first @Update@. On success the one hit runs the same two @Update@
+-- events as a damaging hit, with no damage dealt.
+{-# INLINABLE statusMove #-}
+statusMove :: MonadChance m => Actor -> Actor -> MoveData -> Eng m ()
+statusMove user tgt mv = do
+  b <- get
+  let tm = monOf b tgt
+  done <- case mrOnHit (mvRule mv) of
+    [EHeal n d]
+      | monHp tm >= monMaxHp tm -> pure False
+      -- amount = baseMaxhp * n / d; battle.heal(Math.round(amount), ...) (gen >= 5)
+      | otherwise -> modify' (healMon tgt (roundDiv (monMaxHp tm * n) d)) >> pure True
+    [EBoost bs] -> boostMon tgt bs
+    _ -> pure False -- not executable ('Engine.Rule.executable' admits one effect)
+  when done $ do
+    eachEvent -- eachEvent('Update') after the hit
+    -- resolveFaints({ checkWin: !pokemon.hp }); the user is alive
+    userDown <- gets (\bb -> monHp (monOf bb user) <= 0)
+    resolveFaints False userDown
+    eachEvent -- second eachEvent('Update')
+
+-- | @hitStepMoveHitLoop@ (battle-actions.ts): the hit count, then one @spreadMoveHit@ per hit with an
+-- @Update@ event after each, then the faint resolution, recoil and the closing @Update@.
+{-# INLINABLE hitLoop #-}
+hitLoop :: MonadChance m => Format -> Dex -> Actor -> Actor -> MoveData -> Eng m ()
+hitLoop fmt dx user target mv = do
+  let rule = mvRule mv
+  -- targetHits: multihit n is fixed; [2, 5] is battle.sample([2 x7, 3 x7, 4 x3, 5 x3]), one random(20) draw
+  targetHits <- case mrHits rule of
+    OneHit -> pure 1
+    FixedHits n -> pure n
+    TwoToFive -> (\i -> if i < 7 then 2 else if i < 14 then 3 else if i < 17 then 4 else 5) <$> roll 0 20
+  total <- hits targetHits (1 :: Int) 0
+  b <- get
+  let userDown = monHp (monOf b user) <= 0
+  -- gen >= 5: resolveFaints({ checkWin: !pokemon.hp })
+  resolveFaints False userDown
+  -- applyRecoilDamage (after the loop, from move.totalDamage; battle-actions.ts ~1439)
+  let um = monOf b user
+  case (mvStruggleRecoil mv, mrRecoil rule) of
+    -- struggleRecoil: round(baseMaxhp / 4), at least 1, as directDamage
+    (True, _) -> modify' (applyDamage user (max 1 (roundDiv (monMaxHp um) 4)))
+    -- recoil: round(totalDamage * n / d), at least 1, as damage(.., 'recoil')
+    (_, Just (n, d)) | total > 0 -> modify' (applyDamage user (max 1 (roundDiv (total * n) d)))
+    _ -> pure ()
+  -- `if (!damage.some(val => !!val || val === 0)) return damage;` guards the next Update: a hit always
+  -- yields a numeric damage here (0 counts), so the guard always passes
+  eachEvent -- second eachEvent('Update')
+  where
+    -- the loop `for (hit = 1; hit <= targetHits; hit++)`; returns move.totalDamage
+    hits n hit acc
+      | hit > n = pure acc
+      | otherwise = do
+          b <- get
+          -- `if (targets.every(target => !target?.hp)) break;`
+          if monHp (monOf b target) <= 0
+            then pure acc
+            else do
+              dealt <- hitMove fmt dx user target mv
+              hitEffects user target (mvRule mv)
+              eachEvent -- eachEvent('Update') after each hit
+              -- `if (!pokemon.hp && targets.length === 1) break;`
+              userDown <- gets (\bb -> monHp (monOf bb user) <= 0)
+              if userDown then pure (acc + dealt) else hits n (hit + 1) (acc + dealt)
+
+-- | The steps of @spreadMoveHit@ after the damage, run once per hit: @selfDrops@ (4) then @secondaries@ (5).
+-- They run even when the hit fainted the target (its faint is only queued).
+{-# INLINABLE hitEffects #-}
+hitEffects :: MonadChance m => Actor -> Actor -> MoveRule -> Eng m ()
+hitEffects user target rule = do
+  -- selfDrops: `self.boosts` always draws random(100) (the chance, when absent, always passes) and applies
+  -- to the user. move.selfDropped stops a repeat only for a single hit (`if (!move.multihit)`), so a
+  -- multi-hit move draws every hit.
+  forM_ (mrSelf rule) $ \e -> case e of
+    EBoost bs -> roll 0 100 >> void (boostMon user bs)
+    _ -> pure ()
+  -- secondaries: for each, random(100); below the chance it hits the target (moveHit with isSecondary), then
+  -- its `self` effects (selfDrops with isSecondary draws nothing)
+  forM_ (mrSecondaries rule) $ \sec -> do
+    r <- roll 0 100
+    when (r < secChance sec) $ do
+      forM_ (secTarget sec) $ \e -> case e of
+        EBoost bs -> void (boostMon target bs)
+        _ -> pure ()
+      forM_ (secSelf sec) $ \e -> case e of
+        EBoost bs -> void (boostMon user bs)
+        _ -> pure ()
+
+-- | One @spreadMoveHit@ of a damaging move: crit roll, random factor, damage, drain. Returns the damage
+-- actually dealt (@move.totalDamage@ accumulates it).
 {-# INLINABLE hitMove #-}
-hitMove :: MonadChance m => Format -> Dex -> Actor -> Actor -> MoveData -> Eng m ()
+hitMove :: MonadChance m => Format -> Dex -> Actor -> Actor -> MoveData -> Eng m Int
 hitMove fmt dx user target mv = do
   b <- get
   let um = monOf b user
@@ -493,32 +630,40 @@ hitMove fmt dx user target mv = do
   -- getDamage: `basePower = this.battle.clampIntRange(basePower, 1)` (also after the BasePower event)
   let power = max 1 (mvPower mv)
       st = monStats
-      (atkStat, defStat)
-        | mvPhysical mv = (stAtk (st um), stDef (st tm))
-        | otherwise = (stSpa (st um), stSpd (st tm))
-      -- no boosts exist in slice 0; stage 0 is the identity
-      -- LATENT: on a critical hit getDamage ignores the attacker's negative offensive stages and the
-      -- defender's positive defensive stages (battle-actions.ts getDamage); apply that when stages exist.
-      attack = boostedStat atkStat 0
-      defense = boostedStat defStat 0
+      (atkStat, defStat, atkStage0, defStage0)
+        | mvPhysical mv = (stAtk (st um), stDef (st tm), bsAtk (monBoosts um), bsDef (monBoosts tm))
+        | otherwise = (stSpa (st um), stSpd (st tm), bsSpa (monBoosts um), bsSpd (monBoosts tm))
+      -- getDamage: a critical hit sets ignoreNegativeOffensive / ignorePositiveDefensive, which zero the
+      -- attacker's negative offensive stage and the defender's positive defensive stage
+      atkStage = if crit && atkStage0 < 0 then 0 else atkStage0
+      defStage = if crit && defStage0 > 0 then 0 else defStage0
+      attack = boostedStat atkStat atkStage
+      defense = boostedStat defStat defStage
       base = baseDamage fmt (monLevel um) power attack defense
   r <- roll 0 16
   let dmg = modifyDamage fmt dx um tm mv crit r base
-      -- spreadDamage: clamp to at least 1 unless 0, then Pokemon.damage; `dealt` is move.totalDamage
+      -- spreadDamage: clamp to at least 1 unless 0, then Pokemon.damage; `dealt` is the damage returned
       requested = if dmg == 0 then 0 else max 1 dmg
       dealt = min requested (monHp tm)
   modify' (applyDamage target requested)
-  eachEvent -- eachEvent('Update') after the hit
-  -- resolveFaints({ checkWin: !pokemon.hp })
-  userDown <- gets (\bb -> monHp (monOf bb user) <= 0)
-  resolveFaints False userDown
-  -- applyRecoilDamage for struggleRecoil (battle-actions.ts ~1439): round(baseMaxhp / 4), at least 1, as directDamage
-  when (mvStruggleRecoil mv) $ do
-    let recoil = max 1 ((monMaxHp um + 2) `quot` 4)
-    modify' (applyDamage user recoil)
-  -- `if (!damage.some(val => !!val || val === 0)) return damage;` guards the next Update: a hit always
-  -- yields a numeric damage here (0 counts), so the guard always passes
-  when (dealt >= 0) eachEvent -- second eachEvent('Update')
+  -- spreadDamage, effect.drain (battle.ts ~2187): heal the user round(dealt * n / d); battle.heal turns a
+  -- positive amount below 1 into 1 and does nothing for 0, at full HP or when the user is down
+  case mrDrain (mvRule mv) of
+    Just (n, d) | dealt > 0 -> modify' (healMon user (roundDiv (dealt * n) d))
+    _ -> pure ()
+  pure dealt
+
+-- | @Math.round(n / d)@ for non-negative @n@ and positive @d@ (exact: ties round up, as in JavaScript).
+roundDiv :: Int -> Int -> Int
+roundDiv n d = (2 * n + d) `quot` (2 * d)
+
+-- | @battle.heal@ + @Pokemon.heal@: restore up to max HP; nothing for 0, or at full HP, or when fainted.
+healMon :: Actor -> Int -> Battle -> Battle
+healMon a amount b
+  | amount <= 0 || monHp m <= 0 || monHp m >= monMaxHp m = b
+  | otherwise = modifyMon a (\x -> x {monHp = min (monMaxHp x) (monHp x + amount)}) b
+  where
+    m = monOf b a
 
 -- | @Pokemon.damage@ / @faint@: reduce HP and queue the faint when it reaches zero.
 applyDamage :: Actor -> Int -> Battle -> Battle

@@ -9,6 +9,10 @@ module Engine.State
   , playerIx
   , Gender (..)
   , Stats (..)
+  , Boosts (..)
+  , noBoosts
+  , boostOf
+  , setBoostOf
   , MoveSlot (..)
   , MonStatus (..)
   , Mon (..)
@@ -33,6 +37,7 @@ import qualified Data.Vector.Strict as SV
 import qualified Data.Vector.Unboxed as U
 
 import Engine.Format (Format)
+import Engine.Rule (BoostStat (..))
 
 -- | The two players (Showdown @p1@, @p2@).
 data Player = P1 | P2
@@ -62,6 +67,46 @@ data Stats = Stats
   }
   deriving (Eq, Show)
 
+-- | Stat stages (Showdown @pokemon.boosts@), each in [-6, 6]. Reset to 0 by @clearVolatile@: on switching
+-- out and on fainting.
+data Boosts = Boosts
+  { bsAtk :: !Int
+  , bsDef :: !Int
+  , bsSpa :: !Int
+  , bsSpd :: !Int
+  , bsSpe :: !Int
+  , bsAccuracy :: !Int
+  , bsEvasion :: !Int
+  }
+  deriving (Eq, Show)
+
+-- | All stages 0.
+noBoosts :: Boosts
+noBoosts = Boosts 0 0 0 0 0 0 0
+
+-- | The stage of one stat.
+boostOf :: BoostStat -> Boosts -> Int
+boostOf s b = case s of
+  BAtk -> bsAtk b
+  BDef -> bsDef b
+  BSpa -> bsSpa b
+  BSpd -> bsSpd b
+  BSpe -> bsSpe b
+  BAccuracy -> bsAccuracy b
+  BEvasion -> bsEvasion b
+{-# INLINE boostOf #-}
+
+-- | Set the stage of one stat.
+setBoostOf :: BoostStat -> Int -> Boosts -> Boosts
+setBoostOf s v b = case s of
+  BAtk -> b {bsAtk = v}
+  BDef -> b {bsDef = v}
+  BSpa -> b {bsSpa = v}
+  BSpd -> b {bsSpd = v}
+  BSpe -> b {bsSpe = v}
+  BAccuracy -> b {bsAccuracy = v}
+  BEvasion -> b {bsEvasion = v}
+
 -- | A move slot (Showdown @moveSlots@ entry).
 data MoveSlot = MoveSlot
   { msMove :: !Int
@@ -82,6 +127,7 @@ data Mon = Mon
   , monMaxHp :: !Int
   , monHp :: !Int
   , monStats :: !Stats
+  , monBoosts :: !Boosts
   , monType1 :: !Int
   , monType2 :: !Int
   -- ^ -1 when single-typed.

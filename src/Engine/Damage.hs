@@ -4,7 +4,6 @@ module Engine.Damage
   ( critDenominator
   , isImmune
   , typeMod
-  , boostedStat
   , baseDamage
   , modifyDamage
   ) where
@@ -42,12 +41,6 @@ typeMod dx atkType m
       1 -> 1
       2 -> -1
       _ -> 0
-
--- | @calculateStat@ with a stage in [-6, 6] (the boost table @[1, 1.5, .. 4]@) and no extra modifier.
-boostedStat :: Int -> Int -> Int
-boostedStat stat stage
-  | stage >= 0 = stat * (2 + min 6 stage) `quot` 2
-  | otherwise = stat * 2 `quot` (2 + min 6 (negate stage))
 
 -- | @tr(tr(tr(tr(2L/5 + 2) * BP * A) / D) / 50)@.
 baseDamage :: Format -> Int -> Int -> Int -> Int -> Int
