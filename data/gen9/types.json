@@ -420,5 +420,38 @@
    0,
    2
   ]
+ },
+ "otherDamageTaken": {
+  "Dark": {
+   "prankster": 3
+  },
+  "Electric": {
+   "par": 3
+  },
+  "Fire": {
+   "brn": 3
+  },
+  "Grass": {
+   "powder": 3
+  },
+  "Ground": {
+   "sandstorm": 3
+  },
+  "Ice": {
+   "frz": 3,
+   "hail": 3
+  },
+  "Poison": {
+   "psn": 3,
+   "tox": 3
+  },
+  "Rock": {
+   "sandstorm": 3
+  },
+  "Steel": {
+   "psn": 3,
+   "sandstorm": 3,
+   "tox": 3
+  }
  }
 }

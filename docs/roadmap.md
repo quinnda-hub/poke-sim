@@ -58,8 +58,44 @@ Last updated 2026-11-25.
   engine, and together the sets must cover everything it accepts. 600 slice-1
   battles are recorded. Parity checks 1,400 traces, 85,053 decision points and
   223,786 draws.
+- **Slice 2a: the event dispatcher.** A generic `runEvent`, `singleEvent`,
+  `fieldEvent` and `eachEvent` follow Showdown's handler collection, priority
+  keys and speed sort (docs/handlers.md). Statuses and flinch moved onto it
+  as conditions, with scaled priority and speed keys and `bSpeedOrder`. No
+  behaviour changed: all 1,400 traces replay with no re-recording.
+- **Slice 2b: the first abilities and items.**
+  - Items: the 18 plain type-boosting items, Wise Glasses, Expert Belt, Life
+    Orb, Leftovers, Black Sludge, Rocky Helmet, Flame Orb, Toxic Orb and
+    Assault Vest.
+  - Abilities: Blaze, Overgrow, Torrent, Swarm, Technician, Huge Power, Pure
+    Power, Filter, Solid Rock and Prism Armor.
+  - Events: `BasePower`, the four stat events, `ModifyDamage` with its
+    `onSource` handlers, `AfterMoveSecondarySelf`, `DisableMove` at the end of
+    the turn, and `DamagingHit` for Rocky Helmet.
+  - Damage modifiers now chain with Showdown's 4096-unit rounding. The `contact`
+    flag is translated, Struggle's included.
+  - The handler rule vocabulary has one rule kind (`chainModify`) and two
+    condition kinds (move type, holder HP at or below a fraction), each with at
+    least three whitelisted users. The justifying table is in
+    `src/Engine/Effects.hs`. Everything else is one of 11 native handlers.
+  - Some supported effects are off the whitelist: Swarm, Pure Power, Filter,
+    Solid Rock, Prism Armor, and six of the type items. They reuse existing
+    rules and natives and count toward no rule kind.
+  - 900 slice-2 battles are recorded: 600 random and 300 Struggle battles,
+    with abilities and items drawn from the engine's pool. Parity checks
+    2,300 traces, 135,341 decision points and 354,664 draws. Every accepted
+    ability and item appears in some trace's teams.
+  - Whitelist coverage: 21 of 71 items (37.1% by weight) and 5 of 85
+    abilities (2.4%).
+  - The independent review found one blocking defect. Struggle lost its
+    contact flag, so Rocky Helmet never triggered on it, and no trace had
+    Struggle with items. It is fixed, and the Struggle profile was added to
+    cover it.
+  - The parity test's long tier had been keeping every decoded trace alive,
+    about 10 GB for 2,000 traces, and was killed by the OOM killer on the
+    15 GB laptop. It now peaks at about 80 MB.
 - **Test tiers.** The fast tier (`POKESIM_TIER=fast`) replays every 10th trace
-  and runs the hedgehog properties at 100 tests each, in about 5 s. The long
+  and runs the hedgehog properties at 100 tests each, in about 7 s. The long
   tier, which gates merges into main, replays everything and runs the
   properties at 2000 tests each.
 
@@ -84,6 +120,26 @@ was too thermally noisy to read: the same binary ranged from 1,700 to 2,800
 battles/s. Two things are open: a run on the workstation, and benchmark teams
 that use the slice-1 pool.
 
+Slice 2a measured about 5% slower than slice 1 (3,377 against 3,552 battles/s,
+alternated runs).
+
+**Slice 2b costs about 38% on the plain path.** On 2026-11-25 the laptop was
+throttling: one binary ranged from 476 to 787 battles/s. So 2a (`5799461`) and
+2b ran concurrently on two pinned cores, swapping cores between runs, on
+slice-0 teams. Over four runs, 2b's throughput was 0.616-0.626 of 2a's. On
+slice-2 teams 2b played about 250 battles/s in the same throttled state.
+
+The likely cause is the new event points: `BasePower`, `ModifyAtk`/`SpA`/`Def`/`SpD`,
+`ModifyDamage`, `AfterMoveSecondarySelf` and `DisableMove`. They collect and
+sort handlers on every hit and every turn, even when nothing is attached. Every
+Pokémon now also has an ability, so the early exit in handler collection is
+gone.
+
+The event points must stay, since Showdown runs them. The owner decided to
+optimise later, as its own step: draws and state unchanged, numbers before and
+after, measured on the workstation. The per-Pokémon bitmask of handled events
+(docs/handlers.md section 4) is the first candidate.
+
 ## Known gaps in slice 0
 
 - **The 1000-turn tie is implemented but never exercised.** No recorded battle
@@ -105,16 +161,18 @@ will be wrong once later mechanics arrive. Each is marked in the code with a
 
 | Difference | Becomes live with |
 |---|---|
-| The switch-in speed order is computed and discarded; Showdown keeps it to order switch-in effects. Priority and speed keys are integers, and Showdown uses fractional values. This is a change of representation, not a local fix. Toxic's switch-in reset needs no ordering, because it touches only its own Pokémon. | The first switch-in ability or item; Quick Claw |
 | Showdown breaks ties between `SwitchIn` and `RedirectTarget` handlers by `effectOrder`, the order in which their effects were created (`battle.ts` `resolvePriority`). The engine has no `effectOrder`. Residual handlers do not use it. | Entry hazards (several on one side tie), Lightning Rod |
-| Speeds do not pass through item, ability, Tailwind or Trick Room modifiers. Stages and paralysis are applied. | Choice Scarf, speed abilities, Tailwind, Trick Room |
-| The residual event has only status and flinch handlers. The field, sides and abilities have none yet. | Weather, terrain, screens, Leftovers, any end-of-turn ability |
+| Speeds pass through the `ModifySpe` event, but no supported item or ability handles it, and Trick Room needs pseudo-weather state. | Choice Scarf, speed abilities, Tailwind, Trick Room |
+| The residual event has status, flinch and item handlers. The field and sides have none yet. | Weather, terrain, screens, any end-of-turn ability |
 | `BeforeMove` has only freeze, flinch and paralysis handlers. | Sleep, confusion, Taunt, Disable, Protect |
 | Status immunity is by type only. It ignores abilities, Misty Terrain and Safeguard. | Status-blocking abilities, Misty Terrain, Safeguard |
 | Multi-accuracy moves check accuracy per hit with a floating-point table, which differs from exact division (accuracy 35 at stage -4 gives 14, not 15). | Triple Axel, Population Bomb |
 | Type checks use the species' types; Showdown uses the current types. Ground immunity ignores grounding. | Terastallization, type-changing moves, Levitate, Air Balloon |
 | Move priority is the base priority only. | Prankster, Gale Wings, Grassy Glide |
-| Damage modifiers are applied singly; Showdown chains several with its own rounding. | Abilities and items that modify damage |
+| A move's own callbacks (`onEffect`, such as its `BasePower` callback) are not run. Moves with handler code are rejected. | The first move with handler code |
+| An ability's or item's `onStart` is not run as its `SwitchIn` handler (`battle.ts` `getCallback`). | Intimidate, weather-setting abilities |
+| An ability's `End` handler on an inactive holder would be skipped; `singleEvent` exempts `End`. | The first `End` event |
+| `fieldEvent` checks that an effect is still in place by its id, where Showdown compares the state object. | An effect removed and re-added within one residual |
 | Forced switches by the opponent skip a step that voluntary switches run. | Roar, Whirlwind, Dragon Tail |
 | A faint that causes another faint while faints are being resolved is not handled. | Destiny Bond and similar |
 | The battle state has no ordering or hash, which search will want for a table of seen positions. | The first search code |
@@ -124,14 +182,14 @@ will be wrong once later mechanics arrive. Each is marked in the code with a
 Each step is gated by the parity test. See
 [oracle-testing.md](oracle-testing.md).
 
-1. **A handler system for abilities and items.** Showdown dispatches them
-   through prioritised, sorted events. This design decides how the rule type
-   grows triggers beyond the move pipeline, and it makes several latent
-   differences live: chained damage modifiers, fractional priority, the
-   switch-in order and `effectOrder`.
-2. **Field state:** weather, terrain, hazards, screens.
-3. **Abilities and items** as rules, in usage order. Each one is a small task
-   with an objective pass or fail, which suits delegation.
+1. **Field state:** weather, terrain, hazards, screens. This makes
+   `effectOrder` live for hazards. Choice items wait for the choice-lock
+   volatile, and Heavy-Duty Boots waits for hazards.
+2. **Cheaper event points.** Slice 2b costs about 38% on the plain path (see
+   the benchmark log). Optimise with draws and state unchanged, measured on
+   the workstation.
+3. **More abilities and items** on the handler system, in usage order. Each
+   one is a small task with an objective pass or fail, which suits delegation.
 4. **Terastallization.**
 5. **Escape hatches** for the mechanics that resist the rule vocabulary, such
    as Substitute and Transform.
@@ -148,7 +206,7 @@ Alongside:
 - **Scenario generation from rules.** For each rule, generate battles that
   exercise it with each random outcome forced both ways, and report coverage
   per rule.
-- **Trace size.** 800 battles take about 280 MB. Snapshots should become
+- **Trace size.** 2,300 battles take about 930 MB. Snapshots should become
   deltas.
 - **Benchmark tracking.** Record throughput at each slice so slowdowns are
   measured when they appear.

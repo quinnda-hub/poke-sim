@@ -102,6 +102,8 @@ data MoveRule = MoveRule
   -- ^ @flags.defrost@: the user thaws when it uses the move (conditions.ts @frz@ @onBeforeMove@). Phase 3.
   , mrIgnoreImmunity :: !Bool
   -- ^ @move.ignoreImmunity === true@: the type-immunity step is skipped (pokemon.ts @runImmunity@).
+  , mrContact :: !Bool
+  -- ^ @flags.contact@: read by @checkMoveMakesContact@ (Rocky Helmet).
   }
   deriving (Eq, Show)
 
@@ -119,6 +121,7 @@ plainRule = MoveRule
   , mrThawsTarget = False
   , mrDefrost = False
   , mrIgnoreImmunity = False
+  , mrContact = False
   }
 
 -- | The part of the vocabulary the engine can run in the current phase (phases 1 to 3: HP effects, stat stages
@@ -177,8 +180,7 @@ inertKeys =
 -- REVISIT each entry when the mechanic in its reason is added.
 inertFlags :: [(T.Text, T.Text)]
 inertFlags =
-  [ ("contact", "read by contact abilities and items only")
-  , ("protect", "blocked by Protect-like moves, which have handlers and are rejected")
+  [ ("protect", "blocked by Protect-like moves, which have handlers and are rejected")
   , ("mirror", "read by Mirror Move, which is rejected")
   , ("metronome", "read by Metronome, which is rejected")
   , ("slicing", "read by Sharpness only")
@@ -270,6 +272,7 @@ moveRule (Object o) = do
     , mrThawsTarget = maybe False truthy (look "thawsTarget")
     , mrDefrost = "defrost" `elem` flags
     , mrIgnoreImmunity = ignoreImm
+    , mrContact = "contact" `elem` flags
     }
   where
     look k = case KM.lookup (K.fromText k) o of
@@ -292,6 +295,7 @@ checkKey (k, _)
 checkFlag :: T.Text -> Either Reason ()
 checkFlag f
   | f == "defrost" = Right () -- translated: 'mrDefrost'
+  | f == "contact" = Right () -- translated: 'mrContact'
   | Just _ <- lookup f inertFlags = Right ()
   | otherwise = Left ("not modelled: flag " <> f)
 

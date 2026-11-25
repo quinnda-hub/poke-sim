@@ -8,20 +8,18 @@ module Engine.Queue
   , sortQueue
   , insertChoice
   , actionSpeedOf
-  , monActionSpeed
-  , monSpeedNow
   , resolveAction
   , cancelAction
   ) where
 
-import Control.Monad.Trans.State.Strict (StateT, gets, modify')
+import Control.Monad.Trans.State.Strict (get, modify')
 import qualified Data.Vector.Strict as SV
 
 import Engine.Chance (MonadChance (..), speedSortWith)
 import Engine.Dex
-import Engine.Format (Format)
+import Engine.Dispatch (Eng, getActionSpeed)
+import Engine.Event (SortKey (..), compareKey, priorityScale, speedScale)
 import Engine.State
-import Engine.Stats (actionSpeed)
 
 -- | Showdown's @orders@ table (battle-queue.ts @resolveAction@).
 orderOf :: ActionKind -> Int
@@ -35,41 +33,35 @@ orderOf k = case k of
   KMove -> 200
   KResidual -> 300
 
--- | @battle.comparePriority@: order ascending, priority descending, speed descending
--- (subOrder and effectOrder are always 0 in slice 0). 'LT' means the first goes first.
+-- | @battle.comparePriority@ of two actions: order ascending, priority descending, speed descending (subOrder and
+-- effectOrder are always 0). 'LT' means the first goes first.
 comparePriority :: Action -> Action -> Ordering
-comparePriority a b =
-  compare (acOrder a) (acOrder b)
-    <> compare (acPriority b) (acPriority a)
-    <> compare (acSpeed b) (acSpeed a)
+comparePriority a b = compareKey (key a) (key b)
+  where
+    key x = SortKey (acOrder x) (acPriority x) (acSpeed x) 0 0
 
 -- | @queue.sort()@ / @battle.speedSort(queue.list)@.
 {-# INLINABLE sortQueue #-}
 sortQueue :: MonadChance m => SV.Vector Action -> m (SV.Vector Action)
 sortQueue q = SV.fromList <$> speedSortWith comparePriority (SV.toList q)
 
--- | @pokemon.getActionSpeed()@ of a Pokemon right now: its Spe stat with its current stage and paralysis.
-monSpeedNow :: Format -> Mon -> Int
-monSpeedNow fmt m = actionSpeed fmt (stSpe (monStats m)) (bsSpe (monBoosts m)) (monStatus m == StatusPar)
-{-# INLINE monSpeedNow #-}
-
--- | @pokemon.getActionSpeed()@ for the Pokemon of an actor.
-monActionSpeed :: Format -> Battle -> Actor -> Int
-monActionSpeed fmt b a = monSpeedNow fmt (monOf b a)
-
--- | @battle.getActionSpeed(action)@: refresh priority (moves) and speed (anything with a Pokemon).
-actionSpeedOf :: Format -> Dex -> Battle -> Action -> Action
-actionSpeedOf fmt dx b ac =
+-- | @battle.getActionSpeed(action)@: refresh priority (moves) and speed (anything with a Pokemon). Priority is
+-- scaled by 'priorityScale' and speed by 'speedScale'.
+actionSpeedOf :: MonadChance m => Dex -> Action -> Eng m Action
+actionSpeedOf dx ac = do
+  b <- get
   let withPriority = case (acKind ac, acActor ac) of
-        (KMove, Just a) -> ac {acPriority = movePriority dx (monOf b a) (acArg ac)}
+        (KMove, Just a) -> ac {acPriority = movePriority dx (monOf b a) (acArg ac) * priorityScale}
         _ -> ac
-   in case acActor ac of
-        Nothing -> withPriority {acSpeed = 1}
-        Just a -> withPriority {acSpeed = monActionSpeed fmt b a}
+  case acActor ac of
+    Nothing -> pure withPriority {acSpeed = 1 * speedScale}
+    Just a -> do
+      s <- getActionSpeed dx a
+      pure withPriority {acSpeed = s * speedScale}
 
 -- | Base priority of the move in a slot; Struggle is slot -1.
--- LATENT: Showdown's getActionSpeed also runs ModifyPriority and adds fractionalPriority (battle.ts ~2701);
--- integer priority/speed keys are enough only while no ability, item or move changes either.
+-- LATENT: Showdown's getActionSpeed also runs ModifyPriority and adds fractionalPriority (battle.ts ~2701); the
+-- scaled keys have room for the fraction, but nothing sets one yet.
 movePriority :: Dex -> Mon -> Int -> Int
 movePriority dx m slot
   | slot < 0 = mvPriority (dxStruggle dx)
@@ -80,13 +72,13 @@ movePriority dx m slot
 -- | @queue.resolveAction@ for a freshly built action: fill in order, priority and speed,
 -- and clear the switch flag of a switching Pokemon.
 {-# INLINABLE resolveAction #-}
-resolveAction :: Monad m => Format -> Dex -> Action -> StateT Battle m Action
-resolveAction fmt dx ac0 = do
+resolveAction :: MonadChance m => Dex -> Action -> Eng m Action
+resolveAction dx ac0 = do
   let ac = ac0 {acOrder = orderOf (acKind ac0)}
   case (acKind ac, acActor ac) of
     (k, Just a) | k == KSwitch || k == KInstaSwitch -> modify' (modifyMon a (\m -> m {monSwitchFlag = False}))
     _ -> pure ()
-  gets (\b -> actionSpeedOf fmt dx b ac)
+  actionSpeedOf dx ac
 
 -- | @queue.insertChoice@: place a new action where it would have sorted among the existing
 -- ones without re-sorting them; a tie draws the position uniformly.

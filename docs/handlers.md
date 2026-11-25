@@ -9,7 +9,9 @@ Status: **accepted**, 2026-11-25. These were decided with the owner:
 - a new rule kind needs at least three whitelisted users;
 - slice 2 starts with a port that changes no behaviour (2a).
 
-Not built yet. Line numbers are in the pinned Showdown under `local/showdown/`.
+Built: 2a (the dispatcher, with statuses and flinch ported onto it) and 2b
+(the first abilities and items). Line numbers are in the pinned Showdown under
+`local/showdown/`.
 
 ## Why it matters for parity
 
@@ -250,14 +252,23 @@ per effect, which would be more typed but would grow with every effect.
 
 1. **2a, the dispatcher with no change in behaviour.** Build the dispatcher,
    then port slice 1's statuses and flinch onto it, plus the scaled priority
-   and speed keys, `bSpeedOrder` and `bEffectOrder`. Parity must stay at
-   1400/1400 with no re-recording. That makes it a strong check of the
-   dispatcher itself.
+   and speed keys and `bSpeedOrder`. Parity must stay at 1400/1400 with no
+   re-recording. That makes it a strong check of the dispatcher itself.
+   `bEffectOrder` waits for the field-state slice. Before entry hazards no
+   trace can observe it, and untested ordering code is worse than none.
 2. **2b, the first data rules.** Add the modifier and residual items and
    abilities that need no field state: the type-boosting items, Life Orb,
    Expert Belt, Leftovers, Black Sludge, Rocky Helmet, the status orbs,
    Assault Vest, the pinch abilities, Technician and Huge Power. Record new
    traces with abilities and items.
+
+   As built, 2b also covers these:
+   - Wise Glasses, Pure Power, Swarm, Filter, Solid Rock and Prism Armor;
+   - the six type items that are off the whitelist.
+
+   Those that are off the whitelist reuse existing rules and natives and
+   count toward no rule kind. The rule-bar table is in
+   `src/Engine/Effects.hs`.
 3. **Then the field-state slice** (weather, terrain, hazards, screens), which
    makes `effectOrder` live for hazards. Choice items wait for the choice-lock
    volatile, and Heavy-Duty Boots waits for hazards.

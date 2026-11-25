@@ -9,16 +9,23 @@ level. The simulator comes first.
 
 ## Status
 
-Early. The reference tooling works and the first slice of the engine matches
-Showdown exactly.
+Early. The reference tooling works, and the engine core matches Showdown
+exactly on everything it accepts.
 
 - **Working:** recording battles on a pinned Showdown build with every random
   draw captured, and exporting game data from that build.
-- **Working:** the first slice of the new engine core (team preview, plain
-  damaging moves, Struggle, switching, fainting, forced replacement). It
-  replays 800 recorded battles with identical random draws and identical state.
-- **Not started:** status conditions, abilities, items, field effects,
-  Terastallization, and everything about the bot.
+- **Working:** the new engine core, through slice 2b. It covers:
+  - team preview, damaging moves, Struggle, switching, fainting and forced
+    replacement;
+  - 313 moves described as data;
+  - stat stages, status conditions and flinch;
+  - an event dispatcher that mirrors Showdown's;
+  - the first 28 items and 10 abilities.
+
+  It replays 2,300 recorded battles with identical random draws and identical
+  state.
+- **Not started:** field effects (weather, terrain, hazards, screens), most
+  abilities and items, Terastallization, and everything about the bot.
 
 See [docs/roadmap.md](docs/roadmap.md).
 
@@ -48,6 +55,9 @@ node tools/oracle/gen-slice0.js local/traces/slice0 500
 node tools/oracle/gen-slice0.js local/traces/slice0 300 1 gen9ou struggle
 cabal run -v0 engine-pool > local/traces/slice1-pool.json
 node tools/oracle/gen-slice1.js local/traces/slice1 600 local/traces/slice1-pool.json
+cabal run -v0 engine-pool > local/traces/slice2-pool.json
+node tools/oracle/gen-slice2.js local/traces/slice2 600 local/traces/slice2-pool.json
+node tools/oracle/gen-slice2.js local/traces/slice2 300 local/traces/slice2-pool.json 1 struggle
 cabal test parity --test-show-details=direct
 ```
 

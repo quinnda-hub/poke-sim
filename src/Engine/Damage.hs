@@ -10,6 +10,7 @@ module Engine.Damage
   , typeMod
   , baseDamage
   , modifyDamage
+  , finalDamage
   ) where
 
 import qualified Data.Text as T
@@ -17,6 +18,7 @@ import qualified Data.Vector as V
 
 import Engine.Dex
 import Engine.Format (Format, trunc, truncBits)
+import Engine.Modifier (modify)
 import Engine.Rule (StatusId (..))
 import Engine.State (Mon (..), MonStatus (..))
 
@@ -47,23 +49,21 @@ hasTypeNamed dx name m = typeIsNamed dx (monType1 m) name || typeIsNamed dx (mon
 typeIsNamed :: Dex -> Int -> T.Text -> Bool
 typeIsNamed dx t name = t >= 0 && t < V.length (dxTypeNames dx) && dxTypeNames dx V.! t == name
 
--- | The natural status immunity of @pokemon.runStatusImmunity@ / @dex.getImmunity@ (pokemon.ts @setStatus@;
--- @tox@ is checked as @psn@): data/typechart.ts gives @brn@ to Fire, @par@ to Electric, @psn@ to Poison and
--- Steel, @frz@ to Ice.
--- REVISIT: this table is hand-copied from data/typechart.ts (the status keys of @damageTaken@), because
--- tools/oracle/export-dex.js does not export them; a re-pin would not regenerate it. Export them and load
--- them from data/gen9/types.json when the export is next changed (slice 2a).
+-- | The natural status immunity of @pokemon.runStatusImmunity@ / @dex.getImmunity@ (pokemon.ts @setStatus@:
+-- @tox@ is checked as @psn@): a type is immune when its typechart @damageTaken@ entry for the status key is 3
+-- (loaded from @types.json@ @otherDamageTaken@).
 -- LATENT: abilities (Limber, Immunity, Water Veil, ...), Misty Terrain, Safeguard and the @Immunity@ event
 -- are not modelled; nothing in the engine can attach to them yet.
 statusImmune :: Dex -> StatusId -> Mon -> Bool
-statusImmune dx st m = any (\t -> hasTypeNamed dx t m) types
+statusImmune dx st m = any immune [monType1 m, monType2 m]
   where
-    types = case st of
-      Brn -> ["Fire"]
-      Par -> ["Electric"]
-      Psn -> ["Poison", "Steel"]
-      Tox -> ["Poison", "Steel"]
-      Frz -> ["Ice"]
+    key = case st of
+      Brn -> "brn"
+      Par -> "par"
+      Psn -> "psn"
+      Tox -> "psn"
+      Frz -> "frz"
+    immune t = t /= noType && key `elem` (dxTypeImmune dx V.! t)
 
 -- | Total type effectiveness exponent (@runEffectiveness@): +1 per super-effective type, -1 per resisted, clamped to [-6, 6].
 typeMod :: Dex -> Int -> Mon -> Int
@@ -86,17 +86,18 @@ baseDamage f level power atk def =
     -- JS division by zero yields Infinity, which truncates to 0.
     quotZ a b = if b == 0 then 0 else a `quot` b
 
--- | @modifyDamage@ for a plain move: crit, random factor, STAB, type effectiveness, minimum 1, 16-bit truncation.
--- @roll16@ is the already drawn value of @random(16)@.
+-- | @modifyDamage@ (battle-actions.ts ~1790-1890) up to the @ModifyDamage@ event: crit, random factor, STAB, type
+-- effectiveness and the burn. 'finalDamage' is the rest. @roll16@ is the already drawn value of @random(16)@.
 modifyDamage :: Format -> Dex -> Mon -> Mon -> MoveData -> Bool -> Int -> Int -> Int
 modifyDamage f dx attacker defender mv crit roll16 base0 =
   let base1 = base0 + 2
       base2 = if crit then trunc f (base1 * 3 `quot` 2) else base1
       base3 = trunc f (trunc f (base2 * (100 - roll16)) `quot` 100)
-      -- "???" never gets STAB (modifyDamage: `if (type !== '???')`)
+      -- "???" never gets STAB (modifyDamage: `if (type !== '???')`); `baseDamage = this.battle.modify(baseDamage, stab)`
+      -- with stab 1.5, a modify() of its own (battle-actions.ts ~1850), not a chainModify
       -- LATENT: Showdown uses hasType()/getTypes() and runs ModifySTAB (Adaptability, Terastallization).
       stab = mvType mv /= noType && (mvType mv == monType1 attacker || mvType mv == monType2 attacker)
-      base4 = if stab then modifyBy 6144 base3 else base3
+      base4 = if stab then modify f base3 6144 else base3
       tm = typeMod dx (mvType mv) defender
       base5
         | tm > 0 = base4 * 2 ^ tm
@@ -104,11 +105,12 @@ modifyDamage f dx attacker defender mv crit roll16 base0 =
         | otherwise = base4
       -- battle-actions.ts modifyDamage ~1874: `if (pokemon.status === 'brn' && move.category === 'Physical' &&
       -- !pokemon.hasAbility('guts'))` and (gen >= 6) the move is not Facade (which has a handler, so is not
-      -- supported): `modify(baseDamage, 0.5)`, after the type step and before the final ModifyDamage event
-      base6 = if monStatus attacker == StatusBrn && mvPhysical mv then modifyBy 2048 base5 else base5
-   in if base6 == 0 then 1 else truncBits f 16 base6
-  where
-    -- battle.modify(value, m) with the modifier already scaled by 4096.
-    -- LATENT: Showdown accumulates ability/item modifiers with chainModify (battle.ts ~2337) before one modify();
-    -- here STAB and burn are separate modify() calls in Showdown too, so modifyBy per step is equivalent.
-    modifyBy m v = trunc f ((trunc f (v * m) + 2048 - 1) `quot` 4096)
+      -- supported): `modify(baseDamage, 0.5)` (a modify() of its own, not a chainModify), after the type step and
+      -- before the final ModifyDamage event
+      base6 = if monStatus attacker == StatusBrn && mvPhysical mv then modify f base5 2048 else base5
+   in base6
+
+-- | The end of @modifyDamage@ after @runEvent('ModifyDamage')@: `if (this.battle.gen !== 5 && !baseDamage) return 1`,
+-- then 16-bit truncation, which can truncate to 0 (battle-actions.ts 1895-1899).
+finalDamage :: Format -> Int -> Int
+finalDamage f d = if d == 0 then 1 else truncBits f 16 d

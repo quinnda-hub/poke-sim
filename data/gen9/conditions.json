@@ -1,0 +1,587 @@
+{
+ "arceus": {
+  "name": "Arceus",
+  "id": "arceus",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "onTypePriority": 1,
+  "handlers": [
+   "onType"
+  ],
+  "effectType": "Condition"
+ },
+ "brn": {
+  "name": "brn",
+  "id": "brn",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "onResidualOrder": 10,
+  "handlers": [
+   "onResidual",
+   "onStart"
+  ],
+  "effectType": "Status"
+ },
+ "choicelock": {
+  "name": "choicelock",
+  "id": "choicelock",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": null,
+  "noCopy": true,
+  "affectsFainted": false,
+  "handlers": [
+   "onBeforeMove",
+   "onDisableMove",
+   "onStart"
+  ],
+  "effectType": "Condition"
+ },
+ "commanded": {
+  "name": "Commanded",
+  "id": "commanded",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": null,
+  "noCopy": true,
+  "affectsFainted": false,
+  "onDragOutPriority": 2,
+  "onTrapPokemonPriority": -11,
+  "handlers": [
+   "onDragOut",
+   "onStart",
+   "onTrapPokemon"
+  ],
+  "effectType": "Condition"
+ },
+ "commanding": {
+  "name": "Commanding",
+  "id": "commanding",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": null,
+  "noCopy": true,
+  "affectsFainted": false,
+  "onDragOutPriority": 2,
+  "onTrapPokemonPriority": -11,
+  "onInvulnerability": false,
+  "handlers": [
+   "onBeforeTurn",
+   "onDragOut",
+   "onTrapPokemon"
+  ],
+  "effectType": "Condition"
+ },
+ "confusion": {
+  "name": "confusion",
+  "id": "confusion",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "onBeforeMovePriority": 3,
+  "handlers": [
+   "onBeforeMove",
+   "onEnd",
+   "onStart"
+  ],
+  "effectType": "Condition"
+ },
+ "deltastream": {
+  "name": "DeltaStream",
+  "id": "deltastream",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": null,
+  "duration": 0,
+  "noCopy": false,
+  "affectsFainted": false,
+  "onEffectivenessPriority": -1,
+  "onFieldResidualOrder": 1,
+  "handlers": [
+   "onEffectiveness",
+   "onFieldEnd",
+   "onFieldResidual",
+   "onFieldStart"
+  ],
+  "effectType": "Weather"
+ },
+ "desolateland": {
+  "name": "DesolateLand",
+  "id": "desolateland",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": null,
+  "duration": 0,
+  "noCopy": false,
+  "affectsFainted": false,
+  "onTryMovePriority": 1,
+  "onFieldResidualOrder": 1,
+  "handlers": [
+   "onFieldEnd",
+   "onFieldResidual",
+   "onFieldStart",
+   "onImmunity",
+   "onTryMove",
+   "onWeatherModifyDamage"
+  ],
+  "effectType": "Weather"
+ },
+ "dynamax": {
+  "name": "Dynamax",
+  "id": "dynamax",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": null,
+  "noCopy": true,
+  "affectsFainted": false,
+  "onBeforeSwitchOutPriority": -1,
+  "onDragOutPriority": 2,
+  "onResidualPriority": -100,
+  "handlers": [
+   "onBeforeSwitchOut",
+   "onDragOut",
+   "onEnd",
+   "onResidual",
+   "onSourceModifyDamage",
+   "onStart",
+   "onTryAddVolatile"
+  ],
+  "effectType": "Condition"
+ },
+ "flinch": {
+  "name": "flinch",
+  "id": "flinch",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": null,
+  "duration": 1,
+  "noCopy": false,
+  "affectsFainted": false,
+  "onBeforeMovePriority": 8,
+  "handlers": [
+   "onBeforeMove"
+  ],
+  "effectType": "Condition"
+ },
+ "frz": {
+  "name": "frz",
+  "id": "frz",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "onBeforeMovePriority": 10,
+  "handlers": [
+   "onAfterMoveSecondary",
+   "onBeforeMove",
+   "onDamagingHit",
+   "onModifyMove",
+   "onStart"
+  ],
+  "effectType": "Status"
+ },
+ "futuremove": {
+  "name": "futuremove",
+  "id": "futuremove",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "onResidualOrder": 3,
+  "handlers": [
+   "onEnd",
+   "onResidual",
+   "onRestart",
+   "onStart"
+  ],
+  "effectType": "Condition"
+ },
+ "gem": {
+  "name": "gem",
+  "id": "gem",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": null,
+  "duration": 1,
+  "noCopy": false,
+  "affectsFainted": true,
+  "onBasePowerPriority": 14,
+  "handlers": [
+   "onBasePower"
+  ],
+  "effectType": "Condition"
+ },
+ "hail": {
+  "name": "Hail",
+  "id": "hail",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": null,
+  "duration": 5,
+  "noCopy": false,
+  "affectsFainted": false,
+  "onFieldResidualOrder": 1,
+  "handlers": [
+   "durationCallback",
+   "onFieldEnd",
+   "onFieldResidual",
+   "onFieldStart",
+   "onWeather"
+  ],
+  "effectType": "Weather"
+ },
+ "healreplacement": {
+  "name": "healreplacement",
+  "id": "healreplacement",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "handlers": [
+   "onStart",
+   "onSwitchIn"
+  ],
+  "effectType": "Condition"
+ },
+ "lockedmove": {
+  "name": "lockedmove",
+  "id": "lockedmove",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": null,
+  "duration": 2,
+  "noCopy": false,
+  "affectsFainted": false,
+  "handlers": [
+   "onAfterMove",
+   "onEnd",
+   "onLockMove",
+   "onResidual",
+   "onRestart",
+   "onStart"
+  ],
+  "effectType": "Condition"
+ },
+ "mustrecharge": {
+  "name": "mustrecharge",
+  "id": "mustrecharge",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": null,
+  "duration": 2,
+  "noCopy": false,
+  "affectsFainted": false,
+  "onBeforeMovePriority": 11,
+  "onLockMove": "recharge",
+  "handlers": [
+   "onBeforeMove",
+   "onStart"
+  ],
+  "effectType": "Condition"
+ },
+ "par": {
+  "name": "par",
+  "id": "par",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "onModifySpePriority": -101,
+  "onBeforeMovePriority": 1,
+  "handlers": [
+   "onBeforeMove",
+   "onModifySpe",
+   "onStart"
+  ],
+  "effectType": "Status"
+ },
+ "partiallytrapped": {
+  "name": "partiallytrapped",
+  "id": "partiallytrapped",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": null,
+  "duration": 5,
+  "noCopy": false,
+  "affectsFainted": false,
+  "onResidualOrder": 13,
+  "handlers": [
+   "durationCallback",
+   "onEnd",
+   "onResidual",
+   "onStart",
+   "onTrapPokemon"
+  ],
+  "effectType": "Condition"
+ },
+ "primordialsea": {
+  "name": "PrimordialSea",
+  "id": "primordialsea",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": null,
+  "duration": 0,
+  "noCopy": false,
+  "affectsFainted": false,
+  "onTryMovePriority": 1,
+  "onFieldResidualOrder": 1,
+  "handlers": [
+   "onFieldEnd",
+   "onFieldResidual",
+   "onFieldStart",
+   "onTryMove",
+   "onWeatherModifyDamage"
+  ],
+  "effectType": "Weather"
+ },
+ "psn": {
+  "name": "psn",
+  "id": "psn",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "onResidualOrder": 9,
+  "handlers": [
+   "onResidual",
+   "onStart"
+  ],
+  "effectType": "Status"
+ },
+ "raindance": {
+  "name": "RainDance",
+  "id": "raindance",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": null,
+  "duration": 5,
+  "noCopy": false,
+  "affectsFainted": false,
+  "onFieldResidualOrder": 1,
+  "handlers": [
+   "durationCallback",
+   "onFieldEnd",
+   "onFieldResidual",
+   "onFieldStart",
+   "onWeatherModifyDamage"
+  ],
+  "effectType": "Weather"
+ },
+ "rolloutstorage": {
+  "name": "rolloutstorage",
+  "id": "rolloutstorage",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": null,
+  "duration": 2,
+  "noCopy": false,
+  "affectsFainted": false,
+  "handlers": [
+   "onBasePower"
+  ],
+  "effectType": "Condition"
+ },
+ "sandstorm": {
+  "name": "Sandstorm",
+  "id": "sandstorm",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": null,
+  "duration": 5,
+  "noCopy": false,
+  "affectsFainted": false,
+  "onModifySpDPriority": 10,
+  "onFieldResidualOrder": 1,
+  "handlers": [
+   "durationCallback",
+   "onFieldEnd",
+   "onFieldResidual",
+   "onFieldStart",
+   "onModifySpD",
+   "onWeather"
+  ],
+  "effectType": "Weather"
+ },
+ "silvally": {
+  "name": "Silvally",
+  "id": "silvally",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "onTypePriority": 1,
+  "handlers": [
+   "onType"
+  ],
+  "effectType": "Condition"
+ },
+ "slp": {
+  "name": "slp",
+  "id": "slp",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "onBeforeMovePriority": 10,
+  "handlers": [
+   "onBeforeMove",
+   "onStart"
+  ],
+  "effectType": "Status"
+ },
+ "snowscape": {
+  "name": "Snowscape",
+  "id": "snowscape",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": null,
+  "duration": 5,
+  "noCopy": false,
+  "affectsFainted": false,
+  "onModifyDefPriority": 10,
+  "onFieldResidualOrder": 1,
+  "handlers": [
+   "durationCallback",
+   "onFieldEnd",
+   "onFieldResidual",
+   "onFieldStart",
+   "onModifyDef"
+  ],
+  "effectType": "Weather"
+ },
+ "stall": {
+  "name": "stall",
+  "id": "stall",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": null,
+  "duration": 2,
+  "noCopy": false,
+  "affectsFainted": false,
+  "counterMax": 729,
+  "handlers": [
+   "onRestart",
+   "onStallMove",
+   "onStart"
+  ],
+  "effectType": "Condition"
+ },
+ "sunnyday": {
+  "name": "SunnyDay",
+  "id": "sunnyday",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": null,
+  "duration": 5,
+  "noCopy": false,
+  "affectsFainted": false,
+  "onFieldResidualOrder": 1,
+  "handlers": [
+   "durationCallback",
+   "onFieldEnd",
+   "onFieldResidual",
+   "onFieldStart",
+   "onImmunity",
+   "onWeatherModifyDamage"
+  ],
+  "effectType": "Weather"
+ },
+ "tox": {
+  "name": "tox",
+  "id": "tox",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "onResidualOrder": 9,
+  "handlers": [
+   "onResidual",
+   "onStart",
+   "onSwitchIn"
+  ],
+  "effectType": "Status"
+ },
+ "trapped": {
+  "name": "trapped",
+  "id": "trapped",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": null,
+  "noCopy": true,
+  "affectsFainted": false,
+  "handlers": [
+   "onStart",
+   "onTrapPokemon"
+  ],
+  "effectType": "Condition"
+ },
+ "trapper": {
+  "name": "trapper",
+  "id": "trapper",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": null,
+  "noCopy": true,
+  "affectsFainted": false,
+  "effectType": "Condition"
+ },
+ "twoturnmove": {
+  "name": "twoturnmove",
+  "id": "twoturnmove",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": null,
+  "duration": 2,
+  "noCopy": false,
+  "affectsFainted": false,
+  "handlers": [
+   "onEnd",
+   "onLockMove",
+   "onMoveAborted",
+   "onStart"
+  ],
+  "effectType": "Condition"
+ },
+ "zacian": {
+  "name": "Zacian",
+  "id": "zacian",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "handlers": [
+   "onBattleStart"
+  ],
+  "effectType": "Condition"
+ },
+ "zamazenta": {
+  "name": "Zamazenta",
+  "id": "zamazenta",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "handlers": [
+   "onBattleStart"
+  ],
+  "effectType": "Condition"
+ }
+}

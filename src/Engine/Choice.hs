@@ -78,10 +78,11 @@ request b = case bResult b of
       Just m -> monSwitchFlag m
       Nothing -> False
 
--- | Whether the active Pokemon has no usable move and must use Struggle.
+-- | Whether the active Pokemon has no usable move and must use Struggle (@getMoves@ returns no move when every
+-- slot is disabled, or out of PP, which counts as disabled).
 mustStruggle :: Battle -> Player -> Bool
 mustStruggle b p = not (any usable (monMoves (activeMon p b)))
-  where usable ms = msPP ms > 0
+  where usable ms = msPP ms > 0 && not (msDisabled ms)
 
 -- | Whether a choice is legal for a side now: in 'legalChoices', or, at team preview, any permutation of
 -- 1..n (Showdown accepts any order; 'legalChoices' lists only the n lead choices).
@@ -104,7 +105,7 @@ legalChoices b p = case request b of
     asked a1 a2 = if p == P1 then a1 else a2
     moves
       | mustStruggle b p = [Move 1]
-      | otherwise = [Move i | (i, ms) <- zip [1 ..] (SV.toList (monMoves (activeMon p b))), msPP ms > 0]
+      | otherwise = [Move i | (i, ms) <- zip [1 ..] (SV.toList (monMoves (activeMon p b))), msPP ms > 0, not (msDisabled ms)]
     switches =
       [ Switch (i + 1)
       | i <- [1 .. U.length (sSlots s) - 1]

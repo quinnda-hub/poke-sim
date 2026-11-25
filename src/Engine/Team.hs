@@ -38,6 +38,10 @@ data SetSpec = SetSpec
   , ssIvs :: !(U.Vector Int)
   -- ^ hp, atk, def, spa, spd, spe.
   , ssLevel :: !Int
+  , ssAbility :: !Int
+  -- ^ An index into the ability table ('Engine.Dex.dxAbilities').
+  , ssItem :: !Int
+  -- ^ An index into the item table, or 'noItem'.
   , ssGender :: !(Maybe Gender)
   -- ^ 'Nothing' lets the engine draw it, as Showdown does.
   }
@@ -86,14 +90,16 @@ parseSet dx (Object o) = do
     Just _ -> Left "level must be an integer in 1..100"
   evs <- statTable "evs" 0 252
   ivs <- statTable "ivs" 31 31
-  case KM.lookup "ability" o of
-    Nothing -> Right ()
-    Just (String t) | toId t `elem` ["", "noability"] -> Right ()
-    Just _ -> Left "ability must be \"No Ability\" or empty"
-  case KM.lookup "item" o of
-    Nothing -> Right ()
-    Just (String "") -> Right ()
-    Just _ -> Left "items are not supported"
+  -- an absent or empty ability is "No Ability"
+  ability <- case KM.lookup "ability" o of
+    Nothing -> effectIx "ability" (dxAbilityIx dx) (dxAbilities dx) "noability"
+    Just (String t) -> effectIx "ability" (dxAbilityIx dx) (dxAbilities dx) (if T.null (toId t) then "noability" else toId t)
+    Just _ -> Left "ability must be a string"
+  item <- case KM.lookup "item" o of
+    Nothing -> Right noItem
+    Just (String t) | T.null (toId t) -> Right noItem
+    Just (String t) -> effectIx "item" (dxItemIx dx) (dxItems dx) (toId t)
+    Just _ -> Left "item must be a string"
   gender <- case KM.lookup "gender" o of
     Nothing -> Right Nothing
     Just (String "") -> Right Nothing
@@ -101,7 +107,7 @@ parseSet dx (Object o) = do
     Just (String "F") -> Right (Just GenderF)
     Just (String "N") -> Right (Just GenderNone)
     Just _ -> Left "gender must be M, F, N or empty"
-  pure (SetSpec species moves nature evs ivs level gender)
+  pure (SetSpec species moves nature evs ivs level ability item gender)
   where
     str k = case KM.lookup k o of
       Just (String t) -> Right t
@@ -119,6 +125,15 @@ parseSet dx (Object o) = do
           Just _ -> Left (K.toString k ++ "." ++ T.unpack s ++ " must be an integer in 0.." ++ show (hi :: Int))) statKeys
       Just _ -> Left (K.toString k ++ " must be an object")
 parseSet _ _ = Left "set is not an object"
+
+-- | An ability or item by id; it must be supported ('Engine.Dex.cnSupported').
+effectIx :: String -> M.Map T.Text Int -> V.Vector Condition -> T.Text -> Either String Int
+effectIx what ix table k = do
+  i <- lookupIx what ix k
+  case table V.!? i of
+    Just c | cnSupported c -> Right i
+    Just c -> Left ("unsupported " ++ what ++ " " ++ T.unpack k ++ ": " ++ maybe "" T.unpack (cnReject c))
+    Nothing -> Left ("unknown " ++ what ++ " " ++ T.unpack k)
 
 lookupIx :: String -> M.Map T.Text Int -> T.Text -> Either String Int
 lookupIx what m k = maybe (Left ("unknown " ++ what ++ " " ++ T.unpack k)) Right (M.lookup k m)
@@ -160,7 +175,7 @@ buildMon fmt dx s = do
       slot m =
         let md = moveData dx m
             pp = if mvNoPPBoosts md || mvId md == "trumpcard" then mvPP md else mvPP md * 8 `quot` 5
-         in MoveSlot m pp pp
+         in MoveSlot m pp pp False
   pure Mon
     { monSpecies = ssSpecies s
     , monLevel = level
@@ -178,6 +193,10 @@ buildMon fmt dx s = do
     , monActive = False
     , monSwitchFlag = False
     , monStatus = StatusNone
-    , monStatusStage = -1
-    , monFlinch = False
+    , monAbility = ssAbility s
+    , monAbilityState = noEffectState
+    , monItem = ssItem s
+    , monItemState = noEffectState
+    , monStatusState = noEffectState
+    , monVolatiles = SV.empty
     }

@@ -15,6 +15,10 @@ module Engine.State
   , setBoostOf
   , MoveSlot (..)
   , MonStatus (..)
+  , noItem
+  , EffectState (..)
+  , noEffectState
+  , Volatile (..)
   , Mon (..)
   , Side (..)
   , RequestState (..)
@@ -112,6 +116,10 @@ data MoveSlot = MoveSlot
   { msMove :: !Int
   , msPP :: !Int
   , msMaxPP :: !Int
+  , msDisabled :: !Bool
+  -- ^ @moveSlot.disabled@ (true; never @'hidden'@). Set by @DisableMove@ handlers at @endTurn@. The slot object is
+  -- shared with @baseMoveSlots@, so @clearVolatile@ does not reset it: a benched Pokemon keeps its flags until it
+  -- is active at an @endTurn@.
   }
   deriving (Eq, Show)
 
@@ -119,6 +127,32 @@ data MoveSlot = MoveSlot
 -- marker Showdown sets in @checkFainted@.
 data MonStatus = StatusNone | StatusFainted | StatusBrn | StatusPar | StatusPsn | StatusTox | StatusFrz
   deriving (Eq, Show)
+
+-- | Showdown's @EffectState@ (the object an effect keeps its data in), as one generic record.
+-- A slot that Showdown's object does not have holds -1 ("key absent"); the meaning of 'esA' and 'esB' belongs
+-- to the effect (toxic's @stage@ is the status state's 'esA').
+data EffectState = EffectState
+  { esOrder :: !Int
+  -- ^ @effectOrder@ (@battle.initEffectState@). Always 0 until @bEffectOrder@ exists (field-state slice).
+  , esDuration :: !Int
+  -- ^ @duration@; 0 = none.
+  , esA :: !Int
+  , esB :: !Int
+  }
+  deriving (Eq, Show)
+
+-- | A fresh @initEffectState({})@: no duration, no keys.
+noEffectState :: EffectState
+noEffectState = EffectState 0 0 (-1) (-1)
+
+-- | An entry of @pokemon.volatiles@: the condition id (a 'Engine.Event.CondId' index) and its state. The vector
+-- keeps insertion order, as a JavaScript object does.
+data Volatile = Volatile !Int !EffectState
+  deriving (Eq, Show)
+
+-- | @pokemon.item === ''@.
+noItem :: Int
+noItem = -1
 
 -- | One Pokemon.
 data Mon = Mon
@@ -143,14 +177,20 @@ data Mon = Mon
   , monStatus :: !MonStatus
   -- ^ @pokemon.status@: 'StatusFainted' (@fnt@) from @checkFainted@ until the Pokemon is replaced. A Pokemon
   -- that faints keeps its status until then (@faint@ does not touch it).
-  , monStatusStage :: !Int
-  -- ^ @statusState.stage@ (toxic's counter), or -1 when the key is absent. @setStatus@ builds a fresh
-  -- @statusState@ (absent), toxic's @onStart@ sets it to 0, its @onSwitchIn@ resets it to 0 and each
+  , monStatusState :: !EffectState
+  -- ^ @pokemon.statusState@. Its 'esA' is @stage@ (toxic's counter), or -1 when the key is absent. @setStatus@
+  -- builds a fresh state (absent), toxic's @onStart@ sets the stage to 0, its @onSwitchIn@ resets it to 0 and each
   -- residual increments it. @fnt@ and the @status = ''@ of a replaced faint are plain assignments that leave
   -- @statusState@ alone, so a Pokemon that fainted badly poisoned keeps its stage.
-  , monFlinch :: !Bool
-  -- ^ The @flinch@ volatile (duration 1): set by a flinch secondary, removed by the next @Residual@ and by
-  -- @clearVolatile@.
+  , monAbility :: !Int
+  -- ^ An index into the @Dex@ ability table (@pokemon.ability@).
+  , monAbilityState :: !EffectState
+  , monItem :: !Int
+  -- ^ An index into the @Dex@ item table, or 'noItem'.
+  , monItemState :: !EffectState
+  , monVolatiles :: !(SV.Vector Volatile)
+  -- ^ @pokemon.volatiles@ in insertion order (flinch, duration 1: set by a flinch secondary, removed by the next
+  -- @Residual@ and by @clearVolatile@).
   }
   deriving (Eq, Show)
 
@@ -191,12 +231,15 @@ data ActionKind
   | KResidual
   deriving (Eq, Show)
 
--- | A queued action with Showdown's sort key (order, priority, speed; subOrder and effectOrder are 0).
+-- | A queued action with Showdown's sort key (order, priority, speed; subOrder and effectOrder are 0). Priority is
+-- scaled by 10 and speed by 2, so that fractional values stay exact integers.
 data Action = Action
   { acKind :: !ActionKind
   , acOrder :: !Int
   , acPriority :: !Int
+  -- ^ Scaled by 10 (fractional priority is +-0.1).
   , acSpeed :: !Int
+  -- ^ Scaled by 2 (see 'Engine.Event.speedScale').
   , acActor :: !(Maybe Actor)
   -- ^ @action.pokemon@.
   , acArg :: !Int
@@ -213,6 +256,9 @@ data Battle = Battle
   , bMidTurn :: !Bool
   , bQueue :: !(SV.Vector Action)
   , bFaintQueue :: !(SV.Vector Actor)
+  , bSpeedOrder :: !(U.Vector Int)
+  -- ^ @battle.speedOrder@: the field position values of the Pokemon in play, in speed order, as of the last
+  -- @runSwitch@ (battle-actions.ts 236). Empty before the first one (Showdown's is @[]@ too).
   , bP1 :: !Side
   , bP2 :: !Side
   }
