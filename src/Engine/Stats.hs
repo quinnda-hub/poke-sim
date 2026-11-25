@@ -3,10 +3,12 @@ module Engine.Stats
   ( hpStat
   , otherStat
   , boostedStat
-  , actionSpeed
+  , parSpe
+  , finalSpeed
   ) where
 
 import Engine.Format (Format (..), TruncRule (..), trunc, truncBits)
+import Engine.Modifier (finalModify)
 
 -- | Max HP: @tr(tr(2B + IV + tr(EV/4) + 100) * L / 100 + 10)@.
 hpStat :: Format -> Int -> Int -> Int -> Int -> Int
@@ -30,18 +32,19 @@ boostedStat stat stage
   | stage >= 0 = stat * (2 + min 6 stage) `quot` 2
   | otherwise = stat * 2 `quot` (2 + min 6 (negate stage))
 
--- | @pokemon.getActionSpeed()@ (pokemon.ts) from the Spe stat, its stage and whether the Pokemon is
--- paralysed: @getStat('spe')@ (stage, then the @ModifySpe@ event) capped at 10000 unless the format overrides
--- @trunc@ (pokemon.ts ~658), then @tr(speed, 13)@.
--- Paralysis is conditions.ts @par.onModifySpe@: @floor(finalModify(spe) * 50 / 100)@, the last speed modifier
--- (priority -101); with no other modifier @finalModify@ is the identity.
+-- | conditions.ts @par.onModifySpe@: @spe = finalModify(spe); floor(spe * 50 / 100)@ ("Paralysis occurs after all
+-- other Speed modifiers, so evaluate all modifiers up to this point first"), with the event's accumulated modifier
+-- (scaled by 4096). With none, @finalModify@ is the identity. Returns the speed and the reset modifier.
+-- (The Quick Feet exception needs abilities, which the state does not hold yet.)
+parSpe :: Format -> Int -> Int -> (Int, Int)
+parSpe f modifier spe = let (v, m) = finalModify f spe modifier in (v * 50 `quot` 100, m)
+
+-- | The end of @pokemon.getStat('spe')@ and @getActionSpeed()@ (pokemon.ts 655, 662-670), after the
+-- @ModifySpe@ event: the stat is capped at 10000 unless the format overrides @trunc@, then @tr(speed, 13)@.
 -- The cap cannot be reached at levels <= 100 (the largest boosted Spe is under 3000); it is kept for fidelity.
--- LATENT: items, abilities and Tailwind also run @ModifySpe@, and Trick Room inverts the result; none exists yet.
-actionSpeed :: Format -> Int -> Int -> Bool -> Int
-actionSpeed f speed stage paralysed = truncBits f 13 (case fmtTrunc f of
+-- LATENT: Trick Room (@10000 - speed@) needs pseudo-weather state.
+finalSpeed :: Format -> Int -> Int
+finalSpeed f modified = truncBits f 13 (case fmtTrunc f of
   TruncUnsigned32 -> min 10000 modified
   TruncPlain -> modified)
-  where
-    boosted = boostedStat speed stage
-    modified = if paralysed then boosted * 50 `quot` 100 else boosted
-{-# INLINE actionSpeed #-}
+{-# INLINE finalSpeed #-}

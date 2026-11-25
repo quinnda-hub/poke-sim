@@ -6,8 +6,8 @@
 // Usage:
 //   node export-dex.js [outDir=<repo>/data/gen9] [mod=gen9]
 //
-// Writes species.json, moves.json, abilities.json, items.json, types.json,
-// natures.json and meta.json. Every entry keeps Showdown's declarative fields.
+// Writes species.json, moves.json, abilities.json, items.json, conditions.json,
+// types.json, natures.json and meta.json. Every entry keeps Showdown's declarative fields.
 // Behaviour that Showdown implements as handler code cannot be exported as
 // data; for those entries the names of the handlers are listed under
 // "handlers", which is the to-do list for hand-written rules.
@@ -77,6 +77,26 @@ function main() {
 		chart[def] = typeNames.map(atk => taken[atk] ?? 0);
 	}
 
+	// The non-type keys of typechart `damageTaken` (brn, par, psn, tox, frz, powder, prankster, ...), by type:
+	// the immunities `runStatusImmunity` / `getImmunity` read (value 3 = immune).
+	const otherDamageTaken = {};
+	for (const def of typeNames) {
+		const taken = dex.types.get(def).damageTaken;
+		const extra = {};
+		for (const k of Object.keys(taken).sort()) if (!typeNames.includes(k)) extra[k] = taken[k];
+		if (Object.keys(extra).length) otherDamageTaken[def] = extra;
+	}
+
+	// Conditions (data/conditions.ts, plus the conditions that moves, abilities and items define): the
+	// statuses and volatiles whose handlers the dispatcher runs. `effectType` is kept here (it picks the
+	// default subOrder in `resolvePriority`).
+	const conditions = {};
+	for (const id of Object.keys(dex.data.Conditions).sort()) {
+		const c = dex.conditions.getByID(id);
+		if (!c.exists) continue;
+		conditions[id] = { ...exportEntry(c), effectType: c.effectType };
+	}
+
 	const natures = {};
 	for (const n of dex.natures.all()) natures[n.id] = { name: n.name, plus: n.plus || null, minus: n.minus || null };
 
@@ -84,7 +104,8 @@ function main() {
 	write('moves.json', byId(dex.moves.all().filter(m => m.exists)));
 	write('abilities.json', byId(dex.abilities.all().filter(a => a.exists)));
 	write('items.json', byId(dex.items.all().filter(i => i.exists)));
-	write('types.json', { names: typeNames, damageTaken: chart });
+	write('conditions.json', conditions);
+	write('types.json', { names: typeNames, damageTaken: chart, otherDamageTaken });
 	write('natures.json', natures);
 	write('meta.json', {
 		source: 'pokemon-showdown',

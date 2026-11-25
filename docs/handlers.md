@@ -250,9 +250,10 @@ per effect, which would be more typed but would grow with every effect.
 
 1. **2a, the dispatcher with no change in behaviour.** Build the dispatcher,
    then port slice 1's statuses and flinch onto it, plus the scaled priority
-   and speed keys, `bSpeedOrder` and `bEffectOrder`. Parity must stay at
-   1400/1400 with no re-recording. That makes it a strong check of the
-   dispatcher itself.
+   and speed keys and `bSpeedOrder`. Parity must stay at 1400/1400 with no
+   re-recording. That makes it a strong check of the dispatcher itself.
+   `bEffectOrder` waits for the field-state slice. Before entry hazards no
+   trace can observe it, and untested ordering code is worse than none.
 2. **2b, the first data rules.** Add the modifier and residual items and
    abilities that need no field state: the type-boosting items, Life Orb,
    Expert Belt, Leftovers, Black Sludge, Rocky Helmet, the status orbs,

@@ -9,6 +9,9 @@ module Engine.Dex
   , SpeciesData (..)
   , MoveData (..)
   , NatureData (..)
+  , Condition (..)
+  , conditionOf
+  , condSpec
   , FixedGender (..)
   , supportedMoves
   , supportedSpecies
@@ -34,6 +37,7 @@ import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as U
 import System.FilePath ((</>))
 
+import Engine.Event
 import Engine.Rule
 
 -- | A species' fixed gender, if any (Showdown @species.gender@).
@@ -86,6 +90,17 @@ data NatureData = NatureData
   }
   deriving (Show)
 
+-- | Static data of a condition the engine supports (conditions.json, data/conditions.ts).
+data Condition = Condition
+  { cnDuration :: !Int
+  -- ^ @condition.duration@; 0 when it has none.
+  , cnHandlers :: ![(Prefix, EventId, HandlerSpec)]
+  -- ^ The handlers the engine runs, with their metadata from the export.
+  , cnSupported :: !Bool
+  -- ^ Every handler the export lists for the condition has a body ('nativeBody').
+  }
+  deriving (Show)
+
 -- | The static tables.
 data Dex = Dex
   { dxSpecies :: !(V.Vector SpeciesData)
@@ -95,6 +110,11 @@ data Dex = Dex
   , dxNatures :: !(V.Vector NatureData)
   , dxTypeNames :: !(V.Vector T.Text)
   , dxTypeChart :: !(U.Vector Int)
+  , dxTypeImmune :: !(V.Vector [T.Text])
+  -- ^ By type id: the non-type keys of typechart @damageTaken@ that are 3 (immune): @brn@, @par@, @psn@, @tox@,
+  -- @frz@, @powder@, @prankster@, @sandstorm@, @hail@. @runStatusImmunity@ reads them.
+  , dxConditions :: !(V.Vector Condition)
+  -- ^ Indexed by 'CondId'.
   -- ^ @defendingType * typeCount + attackingType@, Showdown codes: 0 neutral, 1 super effective, 2 resisted, 3 immune.
   , dxSpeciesIx :: !(M.Map T.Text Int)
   , dxMoveIx :: !(M.Map T.Text Int)
@@ -127,22 +147,41 @@ moveData :: Dex -> Int -> MoveData
 moveData dx i = dxMoves dx V.! i
 {-# INLINE moveData #-}
 
+-- | A supported condition by id.
+conditionOf :: Dex -> CondId -> Condition
+conditionOf dx c = dxConditions dx V.! fromEnum c
+{-# INLINE conditionOf #-}
+
+-- | The handler of a condition for a prefix and event (@on<Prefix><Event>@), if the engine has one.
+condSpec :: Condition -> Prefix -> EventId -> Maybe HandlerSpec
+condSpec cn p e = go (cnHandlers cn)
+  where
+    go [] = Nothing
+    go ((p', e', h) : rest)
+      | p' == p && e' == e = Just h
+      | otherwise = go rest
+{-# INLINE condSpec #-}
+
 -- | Showdown's effectiveness code of an attacking type against a defending type.
 typeEffect :: Dex -> Int -> Int -> Int
 typeEffect dx def atk = dxTypeChart dx U.! (def * typeCount dx + atk)
 {-# INLINE typeEffect #-}
 
--- | Load the dex from a directory holding @species.json@, @moves.json@, @types.json@, @natures.json@.
+-- | Load the dex from a directory holding @species.json@, @moves.json@, @types.json@, @natures.json@ and
+-- @conditions.json@.
 loadDex :: FilePath -> IO Dex
 loadDex dir = do
   speciesV <- load "species.json"
   movesV <- load "moves.json"
   typesV <- load "types.json"
   naturesV <- load "natures.json"
+  conditionsV <- load "conditions.json"
   either (ioError . userError) pure $ do
     tnames <- typeNamesOf typesV
     let tix = M.fromList (zip (V.toList tnames) [0 ..])
     chart <- chartOf tnames typesV
+    immune <- immunityOf tnames typesV
+    conds <- traverse (conditionFor conditionsV) [minBound .. maxBound]
     speciesL <- objectEntries speciesV >>= traverse (speciesOf tix . snd)
     moveEntries <- objectEntries movesV
     movesL <- traverse (moveOf tix . snd) moveEntries
@@ -157,6 +196,8 @@ loadDex dir = do
       , dxNatures = V.fromList natureL
       , dxTypeNames = tnames
       , dxTypeChart = chart
+      , dxTypeImmune = immune
+      , dxConditions = V.fromList conds
       , dxSpeciesIx = M.fromList (zip (map spId speciesL) [0 ..])
       , dxMoveIx = M.fromList (zip (map mvId movesL) [0 ..])
       , dxNatureIx = M.fromList (zip (map fst natureEntries) [0 ..])
@@ -199,6 +240,58 @@ chartOf names v = do
   pure (U.fromList (concat rows))
   where
     row r = asArray r >>= traverse asInt
+
+-- | The immune (3) non-type keys of @otherDamageTaken@, by type id.
+immunityOf :: V.Vector T.Text -> Value -> Either String (V.Vector [T.Text])
+immunityOf names v = do
+  other <- field "otherDamageTaken" v
+  traverse (\n -> case other of
+    Object o | Just (Object ks) <- KM.lookup (K.fromText n) o ->
+      Right [K.toText k | (k, Number x) <- KM.toList ks, x == 3]
+    _ -> Right []) names
+
+-- | A condition from @conditions.json@. Its handlers are the exported handler names that the engine knows
+-- ('parseHandlerName') and has a body for ('nativeBody'); order, priority and subOrder come from the entry's
+-- @on<Prefix><Event>Order|Priority|SubOrder@ fields, and subOrder otherwise from the @effectType@
+-- (battle.ts @resolvePriority@ 973-1011: @Condition@ 2; the statuses, @effectType@ @Status@, 0). A condition with
+-- a duration also gets a @Residual@ entry without a body when it has no @onResidual@: Showdown collects it
+-- (@getKey = 'duration'@) to count the duration down.
+conditionFor :: Value -> CondId -> Either String Condition
+conditionFor conditionsV c = do
+  v <- field (condName c) conditionsV
+  effectType <- field "effectType" v >>= asText
+  names <- case v of
+    Object o | Just hs <- KM.lookup "handlers" o -> asArray hs >>= traverse asText
+    _ -> Right []
+  duration <- case v of
+    Object o | Just d <- KM.lookup "duration" o -> asInt d
+    _ -> Right 0
+  let typeOrder = case effectType of
+        "Condition" -> 2
+        "Weather" -> 5
+        "Format" -> 5
+        "Rule" -> 5
+        "Ruleset" -> 5
+        "Ability" -> 7
+        "Item" -> 8
+        _ -> 0 :: Int
+      parsed = [(n, parseHandlerName n) | n <- names]
+      bodies = [(n, pe, nativeBody c p e) | (n, Just pe@(p, e)) <- parsed]
+      supported = all (\(_, mpe) -> maybe False (\(p, e) -> nativeBody c p e /= Nothing) mpe) parsed
+      spec (p, e) body = do
+        let key suffix = "on" <> prefixName p <> eventName e <> suffix
+            num suffix = case v of
+              Object o | Just (Number x) <- KM.lookup (K.fromText (key suffix)) o -> Just x
+              _ -> Nothing
+        order <- maybe (Right 0) (maybe (Left (T.unpack (key "Order") ++ " is not an integer")) Right . toBoundedInteger) (num "Order")
+        prio <- maybe (Right 0) (maybe (Left (T.unpack (key "Priority") ++ " times 10 is not an integer")) Right . toBoundedInteger . (* 10)) (num "Priority")
+        sub <- maybe (Right 0) (maybe (Left (T.unpack (key "SubOrder") ++ " is not an integer")) Right . toBoundedInteger) (num "SubOrder")
+        pure (p, e, HandlerSpec order prio (if sub /= 0 then sub else typeOrder) body)
+  specs <- traverse (\(pe, b) -> spec pe (Just b)) [(pe, b) | (_, pe, Just b) <- bodies]
+  residual <- if duration /= 0 && null [() | (POwn, EvResidual, _) <- specs]
+    then (: []) <$> spec (POwn, EvResidual) Nothing
+    else Right []
+  pure (Condition duration (specs ++ residual) supported)
 
 speciesOf :: M.Map T.Text Int -> Value -> Either String SpeciesData
 speciesOf tix v = do

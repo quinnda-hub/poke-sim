@@ -4,9 +4,9 @@
 -- Showdown's control flow is reproduced function by function: @start@ ('newBattle'),
 -- @commitChoices@, @turnLoop@, @runAction@ (with its post-action tail), @runMove@ /
 -- @useMove@ / @trySpreadMoveHit@, @switchIn@ / @runSwitch@, @resolveFaints@,
--- @checkFainted@, @checkWin@ and @endTurn@. Event points (@eachEvent@, @fieldEvent@) perform
--- Showdown's speed sorts even though no handler is attached to them in slice 0, because
--- those sorts consume random draws on speed ties.
+-- @checkFainted@, @checkWin@ and @endTurn@. The event points (@eachEvent@, @fieldEvent@, @runEvent@) are
+-- "Engine.Dispatch"'s; they perform Showdown's speed sorts, which consume random draws on speed ties, whatever
+-- is attached to them.
 module Engine.Turn
   ( newBattle
   , step
@@ -15,7 +15,7 @@ module Engine.Turn
   ) where
 
 import Control.Monad (forM_, unless, void, when)
-import Control.Monad.Trans.State.Strict (StateT, execStateT, get, gets, modify', put)
+import Control.Monad.Trans.State.Strict (execStateT, get, gets, modify')
 import Data.Maybe (isNothing)
 import qualified Data.Vector.Strict as SV
 import qualified Data.Vector.Unboxed as U
@@ -24,15 +24,14 @@ import Engine.Chance
 import Engine.Choice
 import Engine.Damage
 import Engine.Dex
+import Engine.Dispatch
+import Engine.Event
 import Engine.Format (Format, trunc)
 import Engine.Queue
 import Engine.Rule
 import Engine.State
 import Engine.Stats (boostedStat)
 import Engine.Team
-
--- | The engine monad: battle state over the chance monad.
-type Eng m = StateT Battle m
 
 -- ---------------------------------------------------------------------------
 -- Construction and the public step
@@ -48,7 +47,7 @@ newBattle dx fmt t1 t2 = do
         { acKind = KStart
         , acOrder = orderOf KStart
         , acPriority = 0
-        , acSpeed = 1
+        , acSpeed = 1 * speedScale
         , acActor = Nothing
         , acArg = 0
         }
@@ -60,6 +59,7 @@ newBattle dx fmt t1 t2 = do
     , bMidTurn = True
     , bQueue = SV.singleton start
     , bFaintQueue = SV.empty
+    , bSpeedOrder = U.empty
     , bP1 = s1
     , bP2 = s2
     }
@@ -112,10 +112,9 @@ choiceActions b kind p c = case (kind, c) of
 -- saved mid-turn queue, then run the turn loop.
 commitChoices :: MonadChance m => Dex -> [Action] -> Eng m ()
 commitChoices dx choices = do
-  updateSpeedAll
-  fmt <- gets bFormat
+  updateSpeedAll dx
   old <- gets bQueue
-  resolved <- mapM (resolveAction fmt dx) choices
+  resolved <- mapM (resolveAction dx) choices
   sorted <- sortQueue (SV.fromList resolved)
   modify' (\b -> b {bQueue = sorted SV.++ old, bRequest = ReqNone})
   turnLoop dx
@@ -125,12 +124,11 @@ commitChoices dx choices = do
 -- queue empties (then @endTurn@).
 turnLoop :: MonadChance m => Dex -> Eng m ()
 turnLoop dx = do
-  fmt <- gets bFormat
   mid <- gets bMidTurn
   unless mid $ do
     -- queue.insertChoice({choice: 'beforeTurn'}); queue.addChoice({choice: 'residual'})
-    before <- resolveAction fmt dx (plain KBeforeTurn)
-    residual <- resolveAction fmt dx (plain KResidual)
+    before <- resolveAction dx (plain KBeforeTurn)
+    residual <- resolveAction dx (plain KResidual)
     q <- gets bQueue
     q' <- insertChoice before q
     modify' (\b -> b {bQueue = SV.snoc q' residual, bMidTurn = True})
@@ -172,27 +170,27 @@ runAction dx ac = do
   case acKind ac of
     KTeam -> teamAction ac
     KStart -> do
-      startAction fmt dx
-      afterAction fmt dx ac
+      startAction dx
+      afterAction dx ac
     KMove -> do
       b <- get
       case acActor ac of
         Just a | monActive (monOf b a), not (monFainted (monOf b a)) -> do
           runMove fmt dx a (acArg ac)
-          afterAction fmt dx ac
+          afterAction dx ac
         _ -> pure () -- the Pokemon left the field or fainted: no tail (battle.ts 'move' case returns false)
-    KInstaSwitch -> switchAction fmt dx ac >> afterAction fmt dx ac
-    KSwitch -> switchAction fmt dx ac >> afterAction fmt dx ac
+    KInstaSwitch -> switchAction dx ac >> afterAction dx ac
+    KSwitch -> switchAction dx ac >> afterAction dx ac
     KRunSwitch -> do
-      forM_ (acActor ac) runSwitch
-      afterAction fmt dx ac
+      forM_ (acActor ac) (runSwitch dx)
+      afterAction dx ac
     KBeforeTurn -> do
-      eachEvent -- eachEvent('BeforeTurn')
-      afterAction fmt dx ac
+      eachEvent dx EvBeforeTurn -- eachEvent('BeforeTurn')
+      afterAction dx ac
     KResidual -> do
-      updateSpeedAll
-      fieldEvent -- fieldEvent('Residual')
-      afterAction fmt dx ac
+      updateSpeedAll dx
+      fieldEvent dx EvResidual Nothing -- fieldEvent('Residual')
+      afterAction dx ac
 {-# INLINABLE runAction #-}
 
 -- | @case 'team'@: rebuild the side's Pokemon order one action at a time. No tail.
@@ -204,26 +202,26 @@ teamAction ac = case acActor ac of
 
 -- | @case 'start'@: set @pokemonLeft@ and switch in each side's lead.
 {-# INLINABLE startAction #-}
-startAction :: MonadChance m => Format -> Dex -> Eng m ()
-startAction fmt dx = do
+startAction :: MonadChance m => Dex -> Eng m ()
+startAction dx = do
   forM_ [P1, P2] $ \p ->
     modify' (modifySide p (\s -> if sLeft s > 0 then s {sLeft = SV.length (sMons s)} else s))
   forM_ [P1, P2] $ \p -> do
     s <- gets (sideOf p)
-    switchIn fmt dx p (activeOrig s)
+    switchIn dx p (activeOrig s)
   modify' (\b -> b {bMidTurn = True})
 
 -- | @case 'switch'@ / @'instaswitch'@: switch the target in at the actor's position.
 {-# INLINABLE switchAction #-}
-switchAction :: MonadChance m => Format -> Dex -> Action -> Eng m ()
-switchAction fmt dx ac = case acActor ac of
-  Just (Actor p _) -> switchIn fmt dx p (acArg ac)
+switchAction :: MonadChance m => Dex -> Action -> Eng m ()
+switchAction dx ac = case acActor ac of
+  Just (Actor p _) -> switchIn dx p (acArg ac)
   Nothing -> pure ()
 
 -- | The part of @runAction@ after the action's own work.
 {-# INLINABLE afterAction #-}
-afterAction :: MonadChance m => Format -> Dex -> Action -> Eng m ()
-afterAction fmt dx ac = do
+afterAction :: MonadChance m => Dex -> Action -> Eng m ()
+afterAction dx ac = do
   -- fainting: resolveFaints({ checkWinIfNoFaints: true, checkWin: true })
   resolveFaints True True
   ended <- gets ((/= Ongoing) . bResult)
@@ -232,7 +230,7 @@ afterAction fmt dx ac = do
     -- switching (fainted pokemon): only when the queue is exhausted
     when (isNothing next) checkFainted
     -- gen >= 5: eachEvent('Update') unless the next action is an instaswitch
-    when (acKind ac /= KStart && fmap acKind next /= Just KInstaSwitch) eachEvent
+    when (acKind ac /= KStart && fmap acKind next /= Just KInstaSwitch) (eachEvent dx EvUpdate)
     flagged <- switchRequests
     if or flagged
       then modify' (\b -> b {bRequest = ReqSwitch})
@@ -240,9 +238,9 @@ afterAction fmt dx ac = do
         -- gen >= 8: speeds are refreshed and the queue re-sorted before the next move
         next' <- gets (peekQueue . bQueue)
         when (fmap acKind next' == Just KMove) $ do
-          updateSpeedAll
-          b <- get
-          let refreshed = SV.map (\a -> if isNothing (acActor a) then a else actionSpeedOf fmt dx b a) (bQueue b)
+          updateSpeedAll dx
+          q <- gets bQueue
+          refreshed <- SV.mapM (\a -> if isNothing (acActor a) then pure a else actionSpeedOf dx a) q
           sorted <- sortQueue refreshed
           modify' (\b' -> b' {bQueue = sorted})
   where
@@ -266,106 +264,7 @@ switchRequests = do
         else pure flagged
 
 -- ---------------------------------------------------------------------------
--- Event points
-
--- | @battle.getAllActive@: the Pokemon in play, p1 first.
-getAllActive :: Bool -> Battle -> [Actor]
-getAllActive includeFainted b =
-  [ a
-  | p <- [P1, P2]
-  , let s = sideOf p b
-  , sHasActive s
-  , let a = activeActor p b
-  , includeFainted || not (monFainted (monOf b a))
-  ]
-
--- | @pokemon.updateSpeed()@ for every active Pokemon (battle.ts @updateSpeed@).
-{-# INLINABLE updateSpeedAll #-}
-updateSpeedAll :: Monad m => Eng m ()
-updateSpeedAll = do
-  fmt <- gets bFormat
-  b <- get
-  forM_ (getAllActive False b) $ \a ->
-    modify' (modifyMon a (\m -> m {monSpeed = monSpeedNow fmt m}))
-
--- | @battle.eachEvent@ (battle.ts), used for @Update@ and @BeforeTurn@: speed-sort the active Pokemon
--- by their cached @speed@ (ties are shuffled) and dispatch to each. No handlers exist in slice 0,
--- but the sort still draws on ties.
-{-# INLINABLE eachEvent #-}
-eachEvent :: MonadChance m => Eng m ()
-eachEvent = do
-  b <- get
-  let speedOf a = monSpeed (monOf b a)
-  void (speedSortWith (\x y -> compare (speedOf y) (speedOf x)) (getAllActive False b))
-
--- | The residual handlers of one Pokemon (battle.ts @findPokemonEventHandlers@ with @getKey = 'duration'@):
--- its status when it has an @onResidual@ (conditions.ts), and each volatile with a duration. Their sort key
--- is @onResidualOrder@: brn 10, psn and tox 9; flinch has a duration but no @onResidual@, so no order (last).
-data Residual = ResBrn | ResPsn | ResTox | ResFlinch
-  deriving (Eq, Show)
-
-residualOrder :: Residual -> Int
-residualOrder r = case r of
-  ResBrn -> 10
-  ResPsn -> 9
-  ResTox -> 9
-  ResFlinch -> maxBound -- `order || 4294967296`: no order sorts after every order
-
--- | @battle.fieldEvent('Residual')@ (battle.ts): the handlers of the field, sides and active Pokemon are
--- collected (the field and sides have none yet), sorted by @comparePriority@ (order ascending, speed
--- descending; the speed ties it breaks draw) and run one at a time, each followed by @resolveFaints()@.
---
--- Handlers are collected side by side, p1 first, status before volatiles, so a speed tie is shuffled from the
--- same starting order as Showdown's. @effectOrder@ never enters this sort: @resolvePriority@ copies it into a
--- handler only for @SwitchIn@ and @RedirectTarget@ callbacks (battle.ts ~1005), so two residual handlers that tie
--- on order, priority, speed and subOrder are shuffled, whatever order their effects were created in.
--- A handler of a fainted Pokemon is skipped; a volatile with a duration counts it down first and ends at 0
--- (flinch, duration 1, is removed here), skipping the faint resolution of that handler. When a faint ends the
--- battle the remaining handlers do not run.
--- LATENT: no field, side or ability handlers exist yet (weather, terrain, screens, hazards, Leftovers, ...);
--- add them to the collection here, with their order, priority and subOrder.
-{-# INLINABLE fieldEvent #-}
-fieldEvent :: MonadChance m => Eng m ()
-fieldEvent = do
-  b <- get
-  let handlers =
-        [ (a, k)
-        | a <- getAllActive True b
-        , let m = monOf b a
-        , k <- [ResBrn | monStatus m == StatusBrn] ++ [ResPsn | monStatus m == StatusPsn]
-                 ++ [ResTox | monStatus m == StatusTox] ++ [ResFlinch | monFlinch m]
-        ]
-      speedOf a = monSpeed (monOf b a)
-      cmp (a, k) (a', k') = compare (residualOrder k) (residualOrder k') <> compare (speedOf a') (speedOf a)
-  sorted <- speedSortWith cmp handlers
-  run sorted
-  where
-    run [] = pure ()
-    run ((a, k) : rest) = do
-      m <- gets (`monOf` a)
-      if monFainted m
-        then run rest
-        else case k of
-          ResFlinch -> do
-            -- handler.state.duration-- reaches 0: removeVolatile('flinch'), then `continue`
-            modify' (modifyMon a (\x -> x {monFlinch = False}))
-            run rest
-          _ -> do
-            -- singleEvent('Residual', status): skipped if the status changed; the damage is
-            -- battle.damage(...), whose amounts are clampIntRange(baseMaxhp / n, 1) (floor, at least 1)
-            let hp16 = max 1 (monMaxHp m `quot` 16)
-            case k of
-              ResBrn | monStatus m == StatusBrn -> modify' (applyDamage a hp16)
-              ResPsn | monStatus m == StatusPsn -> modify' (applyDamage a (max 1 (monMaxHp m `quot` 8)))
-              ResTox | monStatus m == StatusTox -> do
-                -- `if (stage < 15) stage++`; damage(clampIntRange(baseMaxhp / 16, 1) * stage)
-                let stage = if monStatusStage m < 15 then monStatusStage m + 1 else monStatusStage m
-                modify' (modifyMon a (\x -> x {monStatusStage = stage}))
-                modify' (applyDamage a (hp16 * stage))
-              _ -> pure ()
-            resolveFaints False True -- this.resolveFaints() (checkWin defaults to true)
-            ended <- gets ((/= Ongoing) . bResult)
-            unless ended (run rest)
+-- Faints and the winner
 
 -- | @battle.canSwitch(side)@: number of unfainted Pokemon in the back slots not already queued to switch in.
 canSwitch :: Battle -> Player -> Int
@@ -398,55 +297,6 @@ checkFainted = forM_ [P1, P2] $ \p -> do
     -- pokemon.status = 'fnt'; pokemon.switchFlag = true
     modify' (modifyMon a (\m -> m {monSwitchFlag = True, monStatus = StatusFainted}))
 
--- | @battle.resolveFaints@ (battle.ts), gen 5+ path without events: faint everything in the faint
--- queue, then optionally check for a winner. Arguments: @checkWinIfNoFaints@, @checkWin@.
-{-# INLINABLE resolveFaints #-}
-resolveFaints :: Monad m => Bool -> Bool -> Eng m ()
-resolveFaints checkWinIfNoFaints checkWin' = do
-  b <- get
-  when (bResult b == Ongoing) $
-    case SV.toList (bFaintQueue b) of
-      [] -> when checkWinIfNoFaints (void (checkWin Nothing))
-      q -> do
-        -- LATENT: faints queued while this loop runs (battle.ts ~2626, which forces checkWin) need a Faint
-        -- event handler (Destiny Bond, ...); nothing in slice 0 queues a faint here.
-        forM_ q $ \a@(Actor p _) -> do
-          m <- gets (\bb -> monOf bb a)
-          unless (monFainted m) $ do
-            modify' (modifySide p (\s -> if sLeft s > 0 then s {sLeft = sLeft s - 1} else s))
-            -- pokemon.clearVolatile(false) resets the stat stages, the volatiles (flinch) and the cached speed (setSpecies)
-            modify' (modifyMon a (\mm -> mm
-              { monSpeed = stSpe (monStats mm)
-              , monBoosts = noBoosts
-              , monFlinch = False
-              , monFainted = True
-              , monActive = False
-              }))
-        modify' (\bb -> bb {bFaintQueue = SV.empty})
-        case reverse q of
-          (lastFaint : _) | checkWin' -> void (checkWin (Just lastFaint))
-          _ -> pure ()
-
--- | @battle.checkWin@: end the battle if a side has no Pokemon left. Returns whether it ended.
-{-# INLINABLE checkWin #-}
-checkWin :: Monad m => Maybe Actor -> Eng m Bool
-checkWin faint = do
-  b <- get
-  let left p = sLeft (sideOf p b)
-  if left P1 == 0 && left P2 == 0
-    then win (fmap (\(Actor p _) -> p) faint) >> pure True
-    else case [p | p <- [P1, P2], left (other p) == 0] of
-      (p : _) -> win (Just p) >> pure True
-      [] -> pure False
-
--- | @battle.win@: end the battle with a winner, or a tie when 'Nothing'.
-{-# INLINABLE win #-}
-win :: Monad m => Maybe Player -> Eng m ()
-win w = do
-  b <- get
-  when (bResult b == Ongoing) $
-    put b {bResult = maybe Tied Won w, bRequest = ReqNone}
-
 -- ---------------------------------------------------------------------------
 -- Switching
 
@@ -456,8 +306,8 @@ win w = do
 -- (battle-actions.ts ~97, ~208), and @isStarted@ (battle-actions.ts ~241) is not modelled; both matter
 -- once forced switches and switch-in effects exist.
 {-# INLINABLE switchIn #-}
-switchIn :: MonadChance m => Format -> Dex -> Player -> Int -> Eng m ()
-switchIn fmt dx p target = do
+switchIn :: MonadChance m => Dex -> Player -> Int -> Eng m ()
+switchIn dx p target = do
   b0 <- get
   let s0 = sideOf p b0
       tgt = Actor p target
@@ -466,9 +316,9 @@ switchIn fmt dx p target = do
     case old of
       Just o | monHp (monOf b0 o) > 0 -> do
         -- runPursuitActivation(oldActive): eachEvent('Update') (the BeforeSwitchOut event has no handlers)
-        eachEvent
+        eachEvent dx EvUpdate
         -- queue.cancelAction(oldActive); oldActive.clearVolatile() (resets the stat stages, the volatiles and the cached speed; the status, and toxic's stage, stay)
-        modify' (\b -> modifyMon o (\m -> m {monSpeed = stSpe (monStats m), monBoosts = noBoosts, monFlinch = False}) b {bQueue = cancelAction o (bQueue b)})
+        modify' (\b -> modifyMon o (\m -> m {monSpeed = stSpe (monStats m), monBoosts = noBoosts, monVolatiles = SV.empty}) b {bQueue = cancelAction o (bQueue b)})
       _ -> pure ()
     case old of
       Just o -> do
@@ -479,8 +329,8 @@ switchIn fmt dx p target = do
       Nothing -> pure ()
     modify' (modifyMon tgt (\m -> m {monActive = True}) . modifySide p (\s -> s {sHasActive = True}))
     -- queue.insertChoice({ choice: 'runSwitch', pokemon }): updateSpeed first, then a tie-aware insert
-    modify' (modifyMon tgt (\m -> m {monSpeed = monSpeedNow fmt m}))
-    new <- resolveAction fmt dx Action
+    getActionSpeed dx tgt >>= \sp -> modify' (modifyMon tgt (\m -> m {monSpeed = sp}))
+    new <- resolveAction dx Action
       { acKind = KRunSwitch, acOrder = 0, acPriority = 0, acSpeed = 0, acActor = Just tgt, acArg = 0 }
     q <- gets bQueue
     q' <- insertChoice new q
@@ -490,19 +340,17 @@ switchIn fmt dx p target = do
       Just i | i /= 0 -> slots U.// [(0, slots U.! i), (i, slots U.! 0)]
       _ -> slots
 
--- | @actions.runSwitch@ (battle-actions.ts): gather consecutive @runSwitch@ actions, speed-sort every
--- Pokemon on the field (including fainted ones) and run @fieldEvent('SwitchIn')@ for the switchers.
+-- | @actions.runSwitch@ (battle-actions.ts 225-250): gather consecutive @runSwitch@ actions, speed-sort every
+-- Pokemon on the field (including fainted ones), record the result as @battle.speedOrder@ and run
+-- @fieldEvent('SwitchIn', switchersIn)@ for the switchers.
 --
--- The only @onSwitchIn@ handler is toxic's (conditions.ts: @effectState.stage = 0@). Its order never matters:
--- @resolvePriority@ gives each SwitchIn handler the speed @pokemon.speed - speedOrder.indexOf(position) / 2@, so no
--- two Pokemon tie and the handlers' sort draws nothing, and the handlers touch only their own Pokemon. This
--- is also why the sorted list of the pre-sort below is discarded.
--- LATENT: abilities and items (Intimidate, Sticky Web, hazards, ...) add SwitchIn handlers whose order does
--- matter (@battle.speedOrder@, battle-actions.ts ~236, reused for event ordering at battle.ts ~1019); store the
--- sorted order then. @effectOrder@ (creation order of effect states) ties only same-Pokemon handlers.
+-- The @SwitchIn@ handlers' keys use @speedOrder@: @resolvePriority@ gives each the speed
+-- @pokemon.speed - speedOrder.indexOf(position) / 2@, so no two Pokemon tie and the sort draws nothing.
+-- LATENT: @effectOrder@ (creation order of effect states, @bEffectOrder@) ties only handlers of one Pokemon or
+-- hazards on one side; it joins with the field-state slice, which makes it observable.
 {-# INLINABLE runSwitch #-}
-runSwitch :: MonadChance m => Actor -> Eng m ()
-runSwitch first = do
+runSwitch :: MonadChance m => Dex -> Actor -> Eng m ()
+runSwitch dx first = do
   -- while (queue.peek()?.choice === 'runSwitch') switchersIn.push(queue.shift().pokemon)
   q <- gets bQueue
   let following = SV.takeWhile ((== KRunSwitch) . acKind) q
@@ -511,13 +359,10 @@ runSwitch first = do
   b <- get
   let speedOf a = monSpeed (monOf b a)
   -- battle.speedSort(allActive): comparePriority on Pokemon objects reduces to cached speed
-  void (speedSortWith (\x y -> compare (speedOf y) (speedOf x)) (getAllActive True b))
-  -- fieldEvent('SwitchIn', switchersIn): each handler is followed by resolveFaints()
-  forM_ switchersIn $ \a -> do
-    m <- gets (`monOf` a)
-    when (monActive m && not (monFainted m) && monStatus m == StatusTox) $ do
-      modify' (modifyMon a (\x -> x {monStatusStage = 0}))
-      resolveFaints False True
+  allActive <- speedSortWith (\x y -> compare (speedOf y) (speedOf x)) (getAllActive True b)
+  -- this.battle.speedOrder = allActive.map(a => a.getFieldPositionValue()); singles: side.n + 2 * position
+  modify' (\bb -> bb {bSpeedOrder = U.fromList [playerIx p | Actor p _ <- allActive]})
+  fieldEvent dx EvSwitchIn (Just switchersIn)
 
 -- ---------------------------------------------------------------------------
 -- Moves
@@ -547,47 +392,17 @@ runMove fmt dx user@(Actor p _) slot = do
     go target mv deductPP = do
       -- runEvent('BeforeMove'): before PP is deducted; a move stopped here costs no PP and returns from
       -- runMove without the closing resolveFaints / checkWin (there is nothing to resolve)
-      proceed <- beforeMove user (mvRule mv)
+      -- (a move on the user targets the user: battle.getRandomTarget returns the Pokemon for 'self')
+      let eventTarget = if mrTarget (mvRule mv) == TargetSelf then user else target
+      proceed <- relayTruthy <$> runEvent dx EvBeforeMove user (Just eventTarget) (Just mv) RNone
       when proceed $ do
         void deductPP
         -- useMove's ModifyMove event: a frozen user of a defrost move thaws (conditions.ts frz.onModifyMove)
-        let rule = mvRule mv
-        um <- gets (`monOf` user)
-        when (mrDefrost rule && monStatus um == StatusFrz) (modify' (modifyMon user clearStatus))
+        void (runEvent dx EvModifyMove user (Just eventTarget) (Just mv) RNone)
         useMove fmt dx user target mv
         -- resolveFaints(); checkWin()
         resolveFaints False True
         void (checkWin Nothing)
-
--- | @runEvent('BeforeMove', pokemon, target, move)@ (battle-actions.ts runMove): the handlers are the user's
--- own: frz (@onBeforeMovePriority@ 10), flinch (8) and par (1). Sorted by priority they never tie (the
--- statuses are exclusive), so the sort draws nothing; the first to return false stops the event and the move.
--- No other handler exists (@onFoeBeforeMove@, @onAnyBeforeMove@, @onSourceBeforeMove@, side, field).
--- Returns whether the move goes ahead.
--- LATENT: sleep, confusion, taunt, disable, Protect-like volatiles, items and abilities add BeforeMove handlers.
-{-# INLINABLE beforeMove #-}
-beforeMove :: MonadChance m => Actor -> MoveRule -> Eng m Bool
-beforeMove user rule = do
-  m <- gets (`monOf` user)
-  -- frz.onBeforeMove: a defrost move passes without a draw (it thaws in ModifyMove); otherwise
-  -- randomChance(1, 5) cures the status and lets the move go on, and failing it is `cant`
-  thawed <- case monStatus m of
-    StatusFrz
-      | mrDefrost rule -> pure True
-      | otherwise -> do
-          t <- randomChance 1 5
-          when t (modify' (modifyMon user clearStatus))
-          pure t
-    _ -> pure True
-  if not thawed then pure False
-    else if monFlinch m then pure False -- flinch.onBeforeMove: `cant`, runEvent('Flinch') has no handlers
-    else case monStatus m of
-      StatusPar -> not <$> randomChance 1 4 -- par.onBeforeMove: full paralysis
-      _ -> pure True
-
--- | @setStatus('')@ (@cureStatus@, @clearStatus@): the status goes, and with it its fresh @statusState@.
-clearStatus :: Mon -> Mon
-clearStatus m = m {monStatus = StatusNone, monStatusStage = -1}
 
 -- | The hit steps of @trySpreadMoveHit@ (battle-actions.ts): target check, type immunity, accuracy, then the
 -- hit loop. Spread targets and @randomNormal@ reach the one foe in singles ('TargetFoe'); a move on the
@@ -668,11 +483,11 @@ statusMove dx user tgt mv = do
     [EStatus st] -> trySetStatus dx tgt st
     _ -> pure False -- not executable ('Engine.Rule.executable' admits one effect)
   when done $ do
-    eachEvent -- eachEvent('Update') after the hit
+    eachEvent dx EvUpdate -- eachEvent('Update') after the hit
     -- resolveFaints({ checkWin: !pokemon.hp }); the user is alive
     userDown <- gets (\bb -> monHp (monOf bb user) <= 0)
     resolveFaints False userDown
-    eachEvent -- second eachEvent('Update')
+    eachEvent dx EvUpdate -- second eachEvent('Update')
 
 -- | @hitStepMoveHitLoop@ (battle-actions.ts): the hit count, then one @spreadMoveHit@ per hit with an
 -- @Update@ event after each, then the faint resolution, recoil and the closing @Update@.
@@ -700,10 +515,10 @@ hitLoop fmt dx user target mv = do
     _ -> pure ()
   -- `if (!damage.some(val => !!val || val === 0)) return damage;` guards the next Update: a hit always
   -- yields a numeric damage here (0 counts), so the guard always passes
-  eachEvent -- second eachEvent('Update')
+  eachEvent dx EvUpdate -- second eachEvent('Update')
   -- afterMoveSecondaryEvent: runEvent('AfterMoveSecondary'); frz.onAfterMoveSecondary cures a frozen target of
-  -- a thawsTarget move (conditions.ts). cureStatus does nothing for a target with no HP.
-  when (mrThawsTarget rule) (thawTarget target)
+  -- a thawsTarget move (conditions.ts). The target is passed as a one-element array in Showdown.
+  void (runEvent dx EvAfterMoveSecondary target (Just user) (Just mv) RNone)
   where
     -- the loop `for (hit = 1; hit <= targetHits; hit++)`; returns move.totalDamage
     hits n hit acc
@@ -716,7 +531,7 @@ hitLoop fmt dx user target mv = do
             else do
               dealt <- hitMove fmt dx user target mv
               hitEffects dx user target mv
-              eachEvent -- eachEvent('Update') after each hit
+              eachEvent dx EvUpdate -- eachEvent('Update') after each hit
               -- `if (!pokemon.hp && targets.length === 1) break;`
               userDown <- gets (\bb -> monHp (monOf bb user) <= 0)
               if userDown then pure (acc + dealt) else hits n (hit + 1) (acc + dealt)
@@ -742,29 +557,24 @@ hitEffects dx user target mv = do
       forM_ (secTarget sec) (applyEffect dx target)
       forM_ (secSelf sec) (applyEffect dx user)
   -- runEvent('DamagingHit') (after the secondaries, per hit): frz.onDamagingHit cures a frozen target hit by
-  -- a damaging Fire move (conditions.ts; `move.id !== 'polarflare'`, which has handlers and is not supported)
-  tgtM <- gets (`monOf` target)
-  when (monStatus tgtM == StatusFrz && typeIsNamed dx (mvType mv) "Fire") (thawTarget target)
+  -- a damaging Fire move. The target and the damage are one-element arrays in Showdown.
+  void (runEvent dx EvDamagingHit target (Just user) (Just mv) RNone)
 
 -- | One effect of a secondary on a Pokemon (@moveHit@ with @isSecondary@ -> @runMoveEffects@).
-applyEffect :: Monad m => Dex -> Actor -> Effect -> Eng m ()
+applyEffect :: MonadChance m => Dex -> Actor -> Effect -> Eng m ()
 applyEffect dx a e = case e of
   EBoost bs -> void (boostMon a bs)
   EStatus st -> void (trySetStatus dx a st)
-  EFlinch -> modify' (modifyMon a (\x -> if monHp x > 0 && not (monFlinch x) then x {monFlinch = True} else x))
-    -- addVolatile('flinch'): needs HP (no affectsFainted), fails if it is already there; no immunity, no
-    -- TryAddVolatile handler, duration 1
+  -- addVolatile('flinch'): needs HP (no affectsFainted), fails if it is already there; no immunity, no
+  -- TryAddVolatile handler, duration 1
+  EFlinch -> void (addVolatile dx a CFlinch)
   EHeal _ _ -> pure () -- not executable as a secondary
-
--- | @pokemon.cureStatus()@: needs HP and a status.
-thawTarget :: Monad m => Actor -> Eng m ()
-thawTarget a = modify' (modifyMon a (\x -> if monHp x > 0 && monStatus x == StatusFrz then clearStatus x else x))
 
 -- | @pokemon.trySetStatus(status)@ -> @setStatus(this.status || status)@ (pokemon.ts) of a Pokemon, with no
 -- ability, item or field effect: fails with no HP, off the field, with any status already (including the same
 -- one) or when the type is immune; otherwise sets the status and its fresh @statusState@ (toxic's @onStart@
 -- sets the stage to 0). @runStatusImmunity@, @SetStatus@ and @AfterSetStatus@ draw nothing.
-trySetStatus :: Monad m => Dex -> Actor -> StatusId -> Eng m Bool
+trySetStatus :: MonadChance m => Dex -> Actor -> StatusId -> Eng m Bool
 trySetStatus dx a st = do
   b <- get
   let m = monOf b a
@@ -772,8 +582,10 @@ trySetStatus dx a st = do
   if monHp m <= 0 || not (monActive m) || has || statusImmune dx st m
     then pure False
     else do
-      modify' (modifyMon a (\x -> x {monStatus = monStatusOf st, monStatusStage = if st == Tox then 0 else -1}))
-      pure True
+      -- this.status = status.id; this.statusState = initEffectState({id}); `if (status.duration) duration`
+      modify' (modifyMon a (\x -> x {monStatus = monStatusOf st, monStatusState = noEffectState {esDuration = cnDuration (conditionOf dx (condOf st))}}))
+      -- singleEvent('Start', status, statusState, this, source, sourceEffect): toxic's onStart sets the stage to 0
+      relayTruthy <$> singleEvent dx EvStart (EffectKey EffStatus (fromEnum (condOf st))) a Nothing Nothing RNone
   where
     monStatusOf s = case s of
       Brn -> StatusBrn
@@ -781,6 +593,12 @@ trySetStatus dx a st = do
       Psn -> StatusPsn
       Tox -> StatusTox
       Frz -> StatusFrz
+    condOf s = case s of
+      Brn -> CBrn
+      Par -> CPar
+      Psn -> CPsn
+      Tox -> CTox
+      Frz -> CFrz
 
 -- | One @spreadMoveHit@ of a damaging move: crit roll, random factor, damage, drain. Returns the damage
 -- actually dealt (@move.totalDamage@ accumulates it).
@@ -823,22 +641,3 @@ hitMove fmt dx user target mv = do
 -- | @Math.round(n / d)@ for non-negative @n@ and positive @d@ (exact: ties round up, as in JavaScript).
 roundDiv :: Int -> Int -> Int
 roundDiv n d = (2 * n + d) `quot` (2 * d)
-
--- | @battle.heal@ + @Pokemon.heal@: restore up to max HP; nothing for 0, or at full HP, or when fainted.
-healMon :: Actor -> Int -> Battle -> Battle
-healMon a amount b
-  | amount <= 0 || monHp m <= 0 || monHp m >= monMaxHp m = b
-  | otherwise = modifyMon a (\x -> x {monHp = min (monMaxHp x) (monHp x + amount)}) b
-  where
-    m = monOf b a
-
--- | @Pokemon.damage@ / @faint@: reduce HP and queue the faint when it reaches zero.
-applyDamage :: Actor -> Int -> Battle -> Battle
-applyDamage a d b
-  | monHp m <= 0 || d <= 0 = b
-  | monHp m - d <= 0 =
-      (modifyMon a (\x -> x {monHp = 0, monSwitchFlag = False, monFaintQueued = True}) b)
-        {bFaintQueue = if monFainted m || monFaintQueued m then bFaintQueue b else SV.snoc (bFaintQueue b) a}
-  | otherwise = modifyMon a (\x -> x {monHp = monHp x - d}) b
-  where
-    m = monOf b a

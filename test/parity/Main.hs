@@ -29,6 +29,7 @@ import System.IO (hFlush, hPutStrLn, stderr)
 import Engine
 import Engine.Chance
 import Engine.Dex
+import Engine.Event (condName)
 import Engine.State
 
 -- | A parity failure: where it happened, turn, draw index, message.
@@ -386,11 +387,18 @@ diffMon dex path orig m ev =
     ++ cmp (path ++ ".maxhp") (int (ev .: "maxhp")) (Just (monMaxHp m))
     ++ cmp (path ++ ".status") (txt (ev .: "status")) (statusName (monStatus m))
     -- statusState.stage (toxic's counter): present with the value, or absent
-    ++ cmp (path ++ ".statusState.stage") (int (ev .: "statusState" .: "stage")) (if monStatusStage m < 0 then Nothing else Just (monStatusStage m))
+    ++ cmp (path ++ ".statusState.stage") (int (ev .: "statusState" .: "stage")) (if esA (monStatusState m) < 0 then Nothing else Just (esA (monStatusState m)))
     -- volatiles: the engine models only flinch (duration 1), which a battle that ends mid-residual leaves in the
     -- final snapshot; every other volatile must be absent
     ++ cmp (path ++ ".volatiles") (ev .: "volatiles")
-         (Object (if monFlinch m then KM.singleton "flinch" (Object (KM.singleton "duration" (Number 1))) else KM.empty))
+         (Object (KM.fromList
+           [ (K.fromText name, Object (KM.singleton "duration" (Number (fromIntegral (esDuration vs)))))
+           | Volatile i vs <- SV.toList (monVolatiles m)
+             -- an id with no condition name still shows up (as "<volatile i>"), so it cannot hide from the compare
+           , let name = case [condName c | c <- [minBound .. maxBound], fromEnum c == i] of
+                   (n : _) -> n
+                   [] -> T.pack ("<volatile " ++ show i ++ ">")
+           ]))
     ++ cmp (path ++ ".fainted") (ev .: "fainted") (Bool (monFainted m))
     ++ cmp (path ++ ".active") (ev .: "active") (Bool (monActive m))
     ++ concat
