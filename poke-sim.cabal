@@ -99,7 +99,18 @@ library
                       Pokemon.Data.Pokedex,
                       Pokemon.Mechanics.PType,
                       Pokemon.Mechanics.Weather,
-                      Pokemon.Parse.PokePaste
+                      Pokemon.Parse.PokePaste,
+                      Engine,
+                      Engine.Chance,
+                      Engine.Choice,
+                      Engine.Damage,
+                      Engine.Dex,
+                      Engine.Format,
+                      Engine.Queue,
+                      Engine.State,
+                      Engine.Stats,
+                      Engine.Team,
+                      Engine.Turn
 
     -- Modules included in this library but not exported.
     other-modules:
@@ -117,7 +128,10 @@ library
                       text >= 2.0.2 && < 2.1,
                       transformers >= 0.5.6 && <= 0.6,
                       random >= 1.2.1 && < 1.3,
-                      vector >= 0.13.2 && < 0.14
+                      vector >= 0.13.2 && < 0.14,
+                      scientific >= 0.3.7 && < 0.4,
+                      splitmix >= 0.1.0.4 && < 0.2,
+                      filepath >= 1.4 && < 1.6
 
     -- Directories containing source files.
     hs-source-dirs:   src
@@ -181,3 +195,40 @@ test-suite poke-sim-test
     build-depends:
         base ^>=4.17.2.1,
         poke-sim
+
+-- Replays recorded Showdown battles (traces) against the engine: draws and state must match.
+test-suite parity
+    import:           warnings
+    default-language: Haskell2010
+    type:             exitcode-stdio-1.0
+    hs-source-dirs:   test/parity
+    main-is:          Main.hs
+    ghc-options:      -O1
+    build-depends:
+        base ^>=4.17.2.1,
+        poke-sim,
+        aeson >= 2.2.3 && < 2.3,
+        bytestring >= 0.11.5 && < 0.12,
+        containers >= 0.6.7 && < 0.7,
+        directory >= 1.3 && < 1.4,
+        filepath >= 1.4 && < 1.6,
+        scientific >= 0.3.7 && < 0.4,
+        text >= 2.0.2 && < 2.1,
+        vector >= 0.13.2 && < 0.14
+
+-- Random-playout throughput of the engine on one core.
+benchmark playouts
+    import:           warnings
+    default-language: Haskell2010
+    type:             exitcode-stdio-1.0
+    hs-source-dirs:   bench
+    main-is:          Main.hs
+    ghc-options:      -O2
+    build-depends:
+        base ^>=4.17.2.1,
+        poke-sim,
+        aeson >= 2.2.3 && < 2.3,
+        directory >= 1.3 && < 1.4,
+        filepath >= 1.4 && < 1.6,
+        splitmix >= 0.1.0.4 && < 0.2,
+        vector >= 0.13.2 && < 0.14
