@@ -9,6 +9,10 @@ module Engine.State
   , playerIx
   , Gender (..)
   , Stats (..)
+  , Boosts (..)
+  , noBoosts
+  , boostOf
+  , setBoostOf
   , MoveSlot (..)
   , MonStatus (..)
   , Mon (..)
@@ -33,6 +37,7 @@ import qualified Data.Vector.Strict as SV
 import qualified Data.Vector.Unboxed as U
 
 import Engine.Format (Format)
+import Engine.Rule (BoostStat (..))
 
 -- | The two players (Showdown @p1@, @p2@).
 data Player = P1 | P2
@@ -62,6 +67,46 @@ data Stats = Stats
   }
   deriving (Eq, Show)
 
+-- | Stat stages (Showdown @pokemon.boosts@), each in [-6, 6]. Reset to 0 by @clearVolatile@: on switching
+-- out and on fainting.
+data Boosts = Boosts
+  { bsAtk :: !Int
+  , bsDef :: !Int
+  , bsSpa :: !Int
+  , bsSpd :: !Int
+  , bsSpe :: !Int
+  , bsAccuracy :: !Int
+  , bsEvasion :: !Int
+  }
+  deriving (Eq, Show)
+
+-- | All stages 0.
+noBoosts :: Boosts
+noBoosts = Boosts 0 0 0 0 0 0 0
+
+-- | The stage of one stat.
+boostOf :: BoostStat -> Boosts -> Int
+boostOf s b = case s of
+  BAtk -> bsAtk b
+  BDef -> bsDef b
+  BSpa -> bsSpa b
+  BSpd -> bsSpd b
+  BSpe -> bsSpe b
+  BAccuracy -> bsAccuracy b
+  BEvasion -> bsEvasion b
+{-# INLINE boostOf #-}
+
+-- | Set the stage of one stat.
+setBoostOf :: BoostStat -> Int -> Boosts -> Boosts
+setBoostOf s v b = case s of
+  BAtk -> b {bsAtk = v}
+  BDef -> b {bsDef = v}
+  BSpa -> b {bsSpa = v}
+  BSpd -> b {bsSpd = v}
+  BSpe -> b {bsSpe = v}
+  BAccuracy -> b {bsAccuracy = v}
+  BEvasion -> b {bsEvasion = v}
+
 -- | A move slot (Showdown @moveSlots@ entry).
 data MoveSlot = MoveSlot
   { msMove :: !Int
@@ -70,8 +115,9 @@ data MoveSlot = MoveSlot
   }
   deriving (Eq, Show)
 
--- | Pokemon status. Slice 0 has only the @fnt@ marker Showdown sets in @checkFainted@.
-data MonStatus = StatusNone | StatusFainted
+-- | @pokemon.status@: none, the five major statuses of slice 1 (sleep is not in the slice), and the @fnt@
+-- marker Showdown sets in @checkFainted@.
+data MonStatus = StatusNone | StatusFainted | StatusBrn | StatusPar | StatusPsn | StatusTox | StatusFrz
   deriving (Eq, Show)
 
 -- | One Pokemon.
@@ -82,6 +128,7 @@ data Mon = Mon
   , monMaxHp :: !Int
   , monHp :: !Int
   , monStats :: !Stats
+  , monBoosts :: !Boosts
   , monType1 :: !Int
   , monType2 :: !Int
   -- ^ -1 when single-typed.
@@ -94,7 +141,16 @@ data Mon = Mon
   -- ^ @isActive@.
   , monSwitchFlag :: !Bool
   , monStatus :: !MonStatus
-  -- ^ @pokemon.status@: 'StatusFainted' (@fnt@) from @checkFainted@ until the Pokemon is replaced.
+  -- ^ @pokemon.status@: 'StatusFainted' (@fnt@) from @checkFainted@ until the Pokemon is replaced. A Pokemon
+  -- that faints keeps its status until then (@faint@ does not touch it).
+  , monStatusStage :: !Int
+  -- ^ @statusState.stage@ (toxic's counter), or -1 when the key is absent. @setStatus@ builds a fresh
+  -- @statusState@ (absent), toxic's @onStart@ sets it to 0, its @onSwitchIn@ resets it to 0 and each
+  -- residual increments it. @fnt@ and the @status = ''@ of a replaced faint are plain assignments that leave
+  -- @statusState@ alone, so a Pokemon that fainted badly poisoned keeps its stage.
+  , monFlinch :: !Bool
+  -- ^ The @flinch@ volatile (duration 1): set by a flinch secondary, removed by the next @Residual@ and by
+  -- @clearVolatile@.
   }
   deriving (Eq, Show)
 

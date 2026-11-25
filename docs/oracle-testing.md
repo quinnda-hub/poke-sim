@@ -68,6 +68,7 @@ back to `local/showdown`.
 |---|---|
 | `record.js <scenario.json> [out.json]` | Play one battle on Showdown and write its trace. |
 | `gen-slice0.js <outDir> <count> [firstSeed] [format] [profile]` | Generate random slice-0 battles and record each. Deterministic per seed. |
+| `gen-slice1.js <outDir> <count> <poolFile> [firstSeed]` | Generate random slice-1 battles from the engine's own pool and record each, then print a coverage tally from Showdown's log. Deterministic per seed and pool. |
 | `export-dex.js [outDir] [mod]` | Export species, moves, abilities, items, types and natures to `data/gen9/`. |
 
 ### Recording traces
@@ -85,8 +86,26 @@ in-scope behaviour:
 | `random` (default) | Six random Pokémon with four random plain moves | Speed ties, priority, never-miss and high-crit moves, immunities, varied levels and spreads |
 | `struggle` | One to three Ghost types with one low-PP Normal or Fighting move | PP running out, Struggle and its recoil, both sides fainting at once, both sides replacing at once, Shedinja's fixed 1 HP |
 
-The 800 battles take about 280 MB, so traces live under `local/` and are not
-committed. They are reproducible from the seeds.
+Slice 1 takes its pool from the engine instead of computing one:
+
+```sh
+cabal run -v0 engine-pool > local/traces/slice1-pool.json
+node tools/oracle/gen-slice1.js local/traces/slice1 600 local/traces/slice1-pool.json
+```
+
+`engine-pool` prints the moves and species the engine accepts. Only the
+choice of battles comes from the engine. The expected draws and states still
+come from Showdown, so a wrong rule cannot agree with itself. When the engine
+accepts more moves, this set must be recorded again. Until then the parity
+test fails, because some accepted move is in no set's pool list. The long tier
+also requires every accepted move and species to appear in some trace's teams. A third of the move slots are drawn from
+moves with the slice's mechanics, so that rare cases are reached. The coverage
+tally (multi-hit counts, drain at full HP, recoil knockouts, a failed heal,
+spread moves into an immunity, every pool move used) should show none at zero.
+
+Traces live under `local/` and are not committed: slice 0's 800 battles take
+about 280 MB and slice 1's 600 about 320 MB. They are reproducible from the
+seeds.
 
 To isolate one behaviour, write a scenario by hand and give it explicit choices:
 
@@ -149,8 +168,16 @@ That list is the to-do list for hand-written rules. At the pinned commit:
 cabal test parity --test-show-details=direct
 ```
 
-The test reads traces from `$POKESIM_TRACES`, defaulting to
-`local/traces/slice0`. It fails if the directory is missing or empty.
+`POKESIM_TIER=fast` replays a fixed sample of each set, the traces at every
+10th position in its sorted list. Each sampled trace is checked in full, and
+the pool checks always cover every set. `long`, the default when the variable
+is unset, replays every trace. The summary line names the tier and the sampled
+and total counts for each set.
+
+The test reads trace sets from `$POKESIM_TRACES`, defaulting to `local/traces`.
+Each subdirectory is one set, such as `slice0` or `slice1`. Plain files there,
+such as the pool file, are ignored. It fails if there are no sets or a set has
+no traces.
 
 Besides replaying each trace, it checks that:
 
@@ -158,9 +185,10 @@ Besides replaying each trace, it checks that:
 - the trace is version 1, format `gen9ou`, with two sides in every snapshot;
 - every snapshot field the engine does not model holds its default value, so a
   trace that uses a mechanic outside the current slice fails loudly;
-- the moves and species the engine accepts equal `slice0-moves.json` and
-  `slice0-species.json` in the trace directory, which the generator writes, so
-  the engine accepts exactly what it has been tested on;
+- each set's `<set>-moves.json` and `<set>-species.json`, written by its
+  generator, list only moves and species the engine accepts, and together the
+  sets list everything it accepts, so the engine accepts exactly what it has
+  been tested on;
 - `step` returns the right error for each kind of bad input.
 
 ## Debugging a divergence

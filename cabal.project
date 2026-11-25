@@ -1,0 +1,4 @@
+packages: .
+
+-- The solver only finds a plan that includes the test suites (hedgehog needs a newer aeson) when asked.
+tests: True

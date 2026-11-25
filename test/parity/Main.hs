@@ -2,11 +2,11 @@
 -- | Parity test: replay recorded Pokemon Showdown battles (traces) through the engine and require the
 -- same random draws (count, ranges, order) and the same state at every decision point.
 --
--- Environment: @POKESIM_TRACES@ (default @local/traces/slice0@), @POKESIM_DEX@ (default @data/gen9@).
+-- Environment: @POKESIM_TRACES@ (default @local/traces@, a directory of trace-set directories), @POKESIM_DEX@ (default @data/gen9@).
 module Main (main) where
 
 import Control.Exception (SomeException, evaluate, try)
-import Control.Monad (forM, when)
+import Control.Monad (filterM, forM, forM_, when)
 import Data.Aeson (Value (..), eitherDecodeFileStrict')
 import qualified Data.Aeson.Key as K
 import qualified Data.Aeson.KeyMap as KM
@@ -23,7 +23,7 @@ import qualified Data.Vector.Unboxed as U
 import System.Directory (doesDirectoryExist, doesFileExist, listDirectory)
 import System.Environment (lookupEnv)
 import System.Exit (exitFailure)
-import System.FilePath (takeFileName, (</>))
+import System.FilePath (takeDirectory, takeFileName, (</>))
 import System.IO (hFlush, hPutStrLn, stderr)
 
 import Engine
@@ -39,36 +39,87 @@ type Diff = (String, String, String)
 
 main :: IO ()
 main = do
-  dir <- fromMaybe "local/traces/slice0" <$> lookupEnv "POKESIM_TRACES"
+  root <- fromMaybe "local/traces" <$> lookupEnv "POKESIM_TRACES"
   dexDir <- fromMaybe "data/gen9" <$> lookupEnv "POKESIM_DEX"
-  exists <- doesDirectoryExist dir
-  names <- if exists then listDirectory dir else pure []
-  let files = sort [dir </> n | n <- names, isTraceName n]
-  when (null files) $ do
+  exists <- doesDirectoryExist root
+  entries <- if exists then sort <$> listDirectory root else pure []
+  sets <- filterM (doesDirectoryExist . (root </>)) entries
+  when (null sets) $ do
     hPutStrLn stderr $
-      "parity: no traces found in " ++ show dir ++ ".\n"
+      "parity: no trace sets found in " ++ show root ++ " (one directory per set).\n"
         ++ "Generate them with:  node tools/oracle/gen-slice0.js local/traces/slice0 500\n"
-        ++ "or point POKESIM_TRACES at a directory of slice0-<n>.json files."
+        ++ "and:  cabal run -v0 engine-pool > local/traces/slice1-pool.json\n"
+        ++ "      node tools/oracle/gen-slice1.js local/traces/slice1 600 local/traces/slice1-pool.json"
     exitFailure
+  tier <- lookupEnv "POKESIM_TIER" >>= \t -> case t of
+    Nothing -> pure "long"
+    Just "long" -> pure "long"
+    Just "fast" -> pure "fast"
+    Just o -> hPutStrLn stderr ("parity: POKESIM_TIER must be fast or long, got " ++ show o) >> exitFailure
   dex <- loadDex dexDir
-  checkSupported "move" (supportedMoves dex) (dir </> "slice0-moves.json")
-  checkSupported "species" (supportedSpecies dex) (dir </> "slice0-species.json")
-  results <- forM files $ \f -> do
-    r <- runFile dex f
-    case r of
-      Left e -> do
-        hPutStrLn stderr (render f e)
-        hFlush stderr
-      Right _ -> pure ()
-    pure r
-  let oks = [x | Right x <- results]
-      bad = length [() | Left _ <- results]
+  -- Every set lists the moves and species it draws from (<set>-moves.json, <set>-species.json). Each list
+  -- must be accepted by the engine, and together the lists must cover everything the engine accepts, so
+  -- that every accepted move and species has been tested.
+  lists <- forM sets $ \set -> do
+    ms <- readIdList (root </> set </> (set ++ "-moves.json"))
+    ss <- readIdList (root </> set </> (set ++ "-species.json"))
+    pure (set, ms, ss)
+  checkPool "move" (supportedMoves dex) [(set, ms) | (set, ms, _) <- lists]
+  checkPool "species" (supportedSpecies dex) [(set, ss) | (set, _, ss) <- lists]
+  counts <- newIORef []
+  results <- fmap concat $ forM sets $ \set -> do
+    names <- listDirectory (root </> set)
+    let files = sort [root </> set </> n | n <- names, isTraceName n]
+    when (null files) $ do
+      hPutStrLn stderr ("parity: trace set " ++ show set ++ " has no traces")
+      exitFailure
+    -- fast tier: the traces at index i with i mod 10 == 0 of the sorted list; long: all of them
+    let sampled = if tier == "fast" then [f | (i, f) <- zip [0 :: Int ..] files, i `mod` 10 == 0] else files
+    modifyIORef' counts ((set, (length sampled, length files)) :)
+    forM sampled $ \f -> do
+      (r, used) <- runFile dex f
+      case r of
+        Left e -> do
+          hPutStrLn stderr (render f e)
+          hFlush stderr
+        Right _ -> pure ()
+      pure (set, r, used)
+  -- Long tier: every move and species the engine accepts must appear in some trace's teams, not only in a
+  -- pool list. This is a check over the whole corpus, so the fast tier, which reads a sample, cannot make it.
+  coverageOk <- if tier == "fast"
+    then putStrLn "parity: trace coverage of the pool is checked in the long tier only" >> pure True
+    else do
+      let usedMoves = Set.unions [ms | (_, _, (ms, _)) <- results]
+          usedSpecies = Set.unions [ss | (_, _, (_, ss)) <- results]
+          unusedMoves = Set.toList (Set.fromList (supportedMoves dex) `Set.difference` usedMoves)
+          unusedSpecies = Set.toList (Set.fromList (supportedSpecies dex) `Set.difference` usedSpecies)
+      when (not (null unusedMoves)) $
+        hPutStrLn stderr ("parity: the engine accepts moves no trace's teams use (untested): " ++ show unusedMoves)
+      when (not (null unusedSpecies)) $
+        hPutStrLn stderr ("parity: the engine accepts species no trace's teams use (untested): " ++ show unusedSpecies)
+      putStrLn ("parity: trace coverage: " ++ show (Set.size usedMoves) ++ " moves and " ++ show (Set.size usedSpecies)
+        ++ " species used by the traces' teams")
+      pure (null unusedMoves && null unusedSpecies)
+  forM_ sets $ \set -> do
+    let rs = [r | (s, r, _) <- results, s == set]
+        oks = [x | Right x <- rs]
+    putStrLn $
+      "parity: set " ++ set ++ ": " ++ show (length oks) ++ "/" ++ show (length rs) ++ " traces passed, "
+        ++ show (sum (map fst oks)) ++ " decision points, " ++ show (sum (map snd oks)) ++ " draws checked"
+  cs <- reverse <$> readIORef counts
+  let oks = [x | (_, Right x, _) <- results]
+      bad = length [() | (_, Left _, _) <- results]
   putStrLn $
-    "parity: " ++ show (length oks) ++ "/" ++ show (length files) ++ " traces passed, "
+    "parity: tier " ++ tier ++ ", sampled/total per set: "
+      ++ unwords [set ++ " " ++ show a ++ "/" ++ show t | (set, (a, t)) <- cs] ++ "; "
+      ++ show (length oks) ++ "/" ++ show (length results) ++ " traces passed, "
       ++ show (sum (map fst oks)) ++ " decision points, "
       ++ show (sum (map snd oks)) ++ " draws checked"
   when (bad > 0) $ do
     putStrLn ("parity: " ++ show bad ++ " trace(s) FAILED")
+    exitFailure
+  when (not coverageOk) $ do
+    putStrLn "parity: trace coverage FAILED"
     exitFailure
   where
     -- traces are named <profile>-<seed>.json; the list files (slice0-moves.json, ...) are not traces
@@ -76,40 +127,51 @@ main = do
       ('n' : 'o' : 's' : 'j' : '.' : c : _) -> isDigit c
       _ -> False
     render f (Failure w t d m) =
-      "FAIL " ++ takeFileName f ++ " | " ++ w ++ maybe "" (\x -> " | turn " ++ show x) t
+      "FAIL " ++ takeFileName (takeDirectory f) ++ "/" ++ takeFileName f ++ " | " ++ w ++ maybe "" (\x -> " | turn " ++ show x) t
         ++ " | draw #" ++ show d ++ "\n    " ++ m
 
--- | What the engine accepts (moves, species) must equal the pool the generator draws from, so that
--- every set the engine accepts is one it has been tested on.
-checkSupported :: String -> [T.Text] -> FilePath -> IO ()
-checkSupported what actual f = do
+-- | Read a trace set's list of ids.
+readIdList :: FilePath -> IO [T.Text]
+readIdList f = do
   ok <- doesFileExist f
   when (not ok) $ do
-    hPutStrLn stderr ("parity: " ++ f ++ " is missing (node tools/oracle/gen-slice0.js writes it)")
+    hPutStrLn stderr ("parity: " ++ f ++ " is missing (the generator writes it)")
     exitFailure
   r <- eitherDecodeFileStrict' f
   case r of
-    Right (Array xs) | Just expected <- traverse str (V.toList xs) ->
-      when (sort expected /= sort actual) $ do
-        let expectedSet = Set.fromList expected
-            actualSet = Set.fromList actual
-        hPutStrLn stderr $
-          "parity: supported " ++ what ++ " set differs from " ++ f ++ ": only in trace list "
-            ++ show (Set.toList (expectedSet `Set.difference` actualSet)) ++ ", only in engine "
-            ++ show (Set.toList (actualSet `Set.difference` expectedSet))
-        exitFailure
+    Right (Array xs) | Just ids <- traverse str (V.toList xs) -> pure ids
     _ -> hPutStrLn stderr ("parity: cannot read " ++ f) >> exitFailure
   where
     str (String t) = Just t
     str _ = Nothing
 
--- | Load and check one trace; on success returns (decision points, draws).
-runFile :: Dex -> FilePath -> IO (Either Failure (Int, Int))
+-- | The engine's accepted ids against the sets' lists: every list is a subset of what the engine accepts,
+-- and the union of the lists is all of it.
+checkPool :: String -> [T.Text] -> [(String, [T.Text])] -> IO ()
+checkPool what actual sets = do
+  let actualSet = Set.fromList actual
+      unions = Set.unions [Set.fromList l | (_, l) <- sets]
+      outside = [(set, Set.toList (Set.fromList l `Set.difference` actualSet)) | (set, l) <- sets, not (Set.null (Set.fromList l `Set.difference` actualSet))]
+      untested = Set.toList (actualSet `Set.difference` unions)
+  when (not (null outside) || not (null untested)) $ do
+    mapM_ (\(set, xs) -> hPutStrLn stderr ("parity: trace set " ++ set ++ " lists " ++ what ++ "s the engine does not accept: " ++ show xs)) outside
+    when (not (null untested)) $
+      hPutStrLn stderr ("parity: the engine accepts " ++ what ++ "s no trace set lists (untested): " ++ show untested)
+    exitFailure
+
+-- | Load and check one trace; on success returns (decision points, draws). Also returns the move and
+-- species ids its teams use (as ids, whatever the trace's spelling), for the coverage check.
+runFile :: Dex -> FilePath -> IO (Either Failure (Int, Int), (Set.Set T.Text, Set.Set T.Text))
 runFile dex f = do
   r <- eitherDecodeFileStrict' f
   case r of
-    Left e -> pure (Left (Failure "load" Nothing 0 e))
-    Right v -> checkTrace dex v
+    Left e -> pure (Left (Failure "load" Nothing 0 e), (Set.empty, Set.empty))
+    Right v -> do
+      res <- checkTrace dex v
+      let sets' = concatMap arr (arr (v .: "teams"))
+          ids k = Set.fromList [toId t | s <- sets', String t <- [s .: k]]
+          moveIds = Set.fromList [toId t | s <- sets', String t <- arr (s .: "moves")]
+      pure (res, (moveIds, ids "species"))
 
 -- ---------------------------------------------------------------------------
 -- JSON helpers (missing data yields Null, which then shows up as a mismatch)
@@ -322,7 +384,13 @@ diffMon dex path orig m ev =
     ++ cmp (path ++ ".gender") (txt (ev .: "gender")) (genderName (monGender m))
     ++ cmp (path ++ ".hp") (int (ev .: "hp")) (Just (monHp m))
     ++ cmp (path ++ ".maxhp") (int (ev .: "maxhp")) (Just (monMaxHp m))
-    ++ cmp (path ++ ".status") (txt (ev .: "status")) (case monStatus m of StatusNone -> ""; StatusFainted -> "fnt")
+    ++ cmp (path ++ ".status") (txt (ev .: "status")) (statusName (monStatus m))
+    -- statusState.stage (toxic's counter): present with the value, or absent
+    ++ cmp (path ++ ".statusState.stage") (int (ev .: "statusState" .: "stage")) (if monStatusStage m < 0 then Nothing else Just (monStatusStage m))
+    -- volatiles: the engine models only flinch (duration 1), which a battle that ends mid-residual leaves in the
+    -- final snapshot; every other volatile must be absent
+    ++ cmp (path ++ ".volatiles") (ev .: "volatiles")
+         (Object (if monFlinch m then KM.singleton "flinch" (Object (KM.singleton "duration" (Number 1))) else KM.empty))
     ++ cmp (path ++ ".fainted") (ev .: "fainted") (Bool (monFainted m))
     ++ cmp (path ++ ".active") (ev .: "active") (Bool (monActive m))
     ++ concat
@@ -330,6 +398,11 @@ diffMon dex path orig m ev =
       | (k, v) <- [("atk", stAtk st), ("def", stDef st), ("spa", stSpa st), ("spd", stSpd st), ("spe", stSpe st)]
       ]
     ++ cmp (path ++ ".speed") (int (ev .: "speed")) (Just (monSpeed m))
+    ++ concat
+      [ cmp (path ++ ".boosts." ++ T.unpack k) (int (ev .: "boosts" .: k)) (Just v)
+      | (k, v) <- [("atk", bsAtk bs), ("def", bsDef bs), ("spa", bsSpa bs), ("spd", bsSpd bs), ("spe", bsSpe bs), ("accuracy", bsAccuracy bs), ("evasion", bsEvasion bs)]
+      ]
+    ++ cmp (path ++ ".boosts key count") (length (objEntries (ev .: "boosts"))) 7
     ++ cmp (path ++ ".types") (map txt (arr (ev .: "types"))) types
     ++ cmp (path ++ ".moves.count") (length (arr (ev .: "moves"))) (SV.length (monMoves m))
     ++ concat
@@ -341,9 +414,18 @@ diffMon dex path orig m ev =
       ]
   where
     st = monStats m
+    bs = monBoosts m
     typeName t = T.unpack (dxTypeNames dex V.! t)
     types = typeName (monType1 m) : [typeName (monType2 m) | monType2 m /= noType]
     genderName g = case g of GenderM -> "M"; GenderF -> "F"; GenderNone -> ""
+    statusName s = case s of
+      StatusNone -> ""
+      StatusFainted -> "fnt"
+      StatusBrn -> "brn"
+      StatusPar -> "par"
+      StatusPsn -> "psn"
+      StatusTox -> "tox"
+      StatusFrz -> "frz"
 
 -- | Fields of a snapshot that the engine does not model must hold their defaults, so a trace that uses an
 -- out-of-slice mechanic fails loudly instead of going unchecked.
@@ -356,16 +438,10 @@ unmodelled st =
       [ isEmptyObj (sp ++ ".sideConditions") (sd .: "sideConditions")
           ++ concat
             [ let pp = sp ++ ".pokemon[" ++ show j ++ "]"
-               in isEmptyObj (pp ++ ".volatiles") (pk .: "volatiles")
-                    ++ isEmptyObj (pp ++ ".statusState") (pk .: "statusState")
+               in isEmptyObj (pp ++ ".statusState (keys other than stage)") (dropKey "stage" (pk .: "statusState"))
                     ++ isEmptyStr (pp ++ ".terastallized") (pk .: "terastallized")
                     ++ cmp (pp ++ ".ability") (txt (pk .: "ability")) "noability"
                     ++ isEmptyStr (pp ++ ".item") (pk .: "item")
-                    ++ concat
-                      [ cmp (pp ++ ".boosts." ++ T.unpack k) (int (pk .: "boosts" .: k)) (Just 0)
-                      | k <- ["atk", "def", "spa", "spd", "spe", "accuracy", "evasion"]
-                      ]
-                    ++ cmp (pp ++ ".boosts key count") (length (objEntries (pk .: "boosts"))) 7
                     ++ concat [cmp (pp ++ ".moves[" ++ show m ++ "].disabled") (mv .: "disabled") (Bool False) | (m, mv) <- zip [0 :: Int ..] (arr (pk .: "moves"))]
             | (j, pk) <- zip [0 :: Int ..] (arr (sd .: "pokemon"))
             ]
@@ -374,8 +450,12 @@ unmodelled st =
       ]
   where
     isEmptyStr path v = cmp path (txt v) ""
+    dropKey k (Object o) = Object (KM.delete (K.fromText k) o)
+    dropKey _ v = v
     isEmptyObj path v = case v of
       Object o | KM.null o -> []
       _ -> [(path, "{}", txt v)]
-    objEntries (Object o) = KM.toList o
-    objEntries _ = []
+
+objEntries :: Value -> [(K.Key, Value)]
+objEntries (Object o) = KM.toList o
+objEntries _ = []

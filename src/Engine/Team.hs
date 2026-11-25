@@ -168,6 +168,7 @@ buildMon fmt dx s = do
     , monMaxHp = maxHp
     , monHp = maxHp
     , monStats = stats
+    , monBoosts = noBoosts
     , monType1 = spType1 sp
     , monType2 = spType2 sp
     , monMoves = SV.fromList (map slot (ssMoves s))
@@ -177,4 +178,6 @@ buildMon fmt dx s = do
     , monActive = False
     , monSwitchFlag = False
     , monStatus = StatusNone
+    , monStatusStage = -1
+    , monFlinch = False
     }

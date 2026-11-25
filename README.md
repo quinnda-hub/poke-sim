@@ -46,6 +46,8 @@ are in [docs/oracle-testing.md](docs/oracle-testing.md)), then:
 ```sh
 node tools/oracle/gen-slice0.js local/traces/slice0 500
 node tools/oracle/gen-slice0.js local/traces/slice0 300 1 gen9ou struggle
+cabal run -v0 engine-pool > local/traces/slice1-pool.json
+node tools/oracle/gen-slice1.js local/traces/slice1 600 local/traces/slice1-pool.json
 cabal test parity --test-show-details=direct
 ```
 

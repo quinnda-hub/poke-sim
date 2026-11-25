@@ -1,17 +1,24 @@
+{-# LANGUAGE OverloadedStrings #-}
 -- | Type matchups, critical-hit odds and the damage formula
 -- (Showdown battle-actions.ts @getDamage@ / @modifyDamage@, battle.ts @modify@ / @randomizer@).
 module Engine.Damage
   ( critDenominator
   , isImmune
+  , statusImmune
+  , hasTypeNamed
+  , typeIsNamed
   , typeMod
-  , boostedStat
   , baseDamage
   , modifyDamage
   ) where
 
+import qualified Data.Text as T
+import qualified Data.Vector as V
+
 import Engine.Dex
 import Engine.Format (Format, trunc, truncBits)
-import Engine.State (Mon (..))
+import Engine.Rule (StatusId (..))
+import Engine.State (Mon (..), MonStatus (..))
 
 -- | Denominator of the crit chance for a crit stage, or 'Nothing' when the move cannot crit
 -- (gen 7+ table @[0, 24, 8, 2, 1]@ indexed by the clamped @critRatio@).
@@ -32,6 +39,32 @@ isImmune dx atkType m =
   atkType /= noType && (typeEffect dx (monType1 m) atkType == 3
     || (monType2 m /= noType && typeEffect dx (monType2 m) atkType == 3))
 
+-- | Whether a Pokemon has the type with this name (@pokemon.hasType@ with no type changes yet).
+hasTypeNamed :: Dex -> T.Text -> Mon -> Bool
+hasTypeNamed dx name m = typeIsNamed dx (monType1 m) name || typeIsNamed dx (monType2 m) name
+
+-- | Whether a type id ('noType' included) is the type with this name.
+typeIsNamed :: Dex -> Int -> T.Text -> Bool
+typeIsNamed dx t name = t >= 0 && t < V.length (dxTypeNames dx) && dxTypeNames dx V.! t == name
+
+-- | The natural status immunity of @pokemon.runStatusImmunity@ / @dex.getImmunity@ (pokemon.ts @setStatus@;
+-- @tox@ is checked as @psn@): data/typechart.ts gives @brn@ to Fire, @par@ to Electric, @psn@ to Poison and
+-- Steel, @frz@ to Ice.
+-- REVISIT: this table is hand-copied from data/typechart.ts (the status keys of @damageTaken@), because
+-- tools/oracle/export-dex.js does not export them; a re-pin would not regenerate it. Export them and load
+-- them from data/gen9/types.json when the export is next changed (slice 2a).
+-- LATENT: abilities (Limber, Immunity, Water Veil, ...), Misty Terrain, Safeguard and the @Immunity@ event
+-- are not modelled; nothing in the engine can attach to them yet.
+statusImmune :: Dex -> StatusId -> Mon -> Bool
+statusImmune dx st m = any (\t -> hasTypeNamed dx t m) types
+  where
+    types = case st of
+      Brn -> ["Fire"]
+      Par -> ["Electric"]
+      Psn -> ["Poison", "Steel"]
+      Tox -> ["Poison", "Steel"]
+      Frz -> ["Ice"]
+
 -- | Total type effectiveness exponent (@runEffectiveness@): +1 per super-effective type, -1 per resisted, clamped to [-6, 6].
 typeMod :: Dex -> Int -> Mon -> Int
 typeMod dx atkType m
@@ -42,12 +75,6 @@ typeMod dx atkType m
       1 -> 1
       2 -> -1
       _ -> 0
-
--- | @calculateStat@ with a stage in [-6, 6] (the boost table @[1, 1.5, .. 4]@) and no extra modifier.
-boostedStat :: Int -> Int -> Int
-boostedStat stat stage
-  | stage >= 0 = stat * (2 + min 6 stage) `quot` 2
-  | otherwise = stat * 2 `quot` (2 + min 6 (negate stage))
 
 -- | @tr(tr(tr(tr(2L/5 + 2) * BP * A) / D) / 50)@.
 baseDamage :: Format -> Int -> Int -> Int -> Int -> Int
@@ -75,9 +102,13 @@ modifyDamage f dx attacker defender mv crit roll16 base0 =
         | tm > 0 = base4 * 2 ^ tm
         | tm < 0 = iterate (\x -> trunc f (x `quot` 2)) base4 !! negate tm
         | otherwise = base4
-   in if base5 == 0 then 1 else truncBits f 16 base5
+      -- battle-actions.ts modifyDamage ~1874: `if (pokemon.status === 'brn' && move.category === 'Physical' &&
+      -- !pokemon.hasAbility('guts'))` and (gen >= 6) the move is not Facade (which has a handler, so is not
+      -- supported): `modify(baseDamage, 0.5)`, after the type step and before the final ModifyDamage event
+      base6 = if monStatus attacker == StatusBrn && mvPhysical mv then modifyBy 2048 base5 else base5
+   in if base6 == 0 then 1 else truncBits f 16 base6
   where
     -- battle.modify(value, m) with the modifier already scaled by 4096.
     -- LATENT: Showdown accumulates ability/item modifiers with chainModify (battle.ts ~2337) before one modify();
-    -- here STAB is the only modifier, so a single modifyBy is equivalent.
+    -- here STAB and burn are separate modify() calls in Showdown too, so modifyBy per step is equivalent.
     modifyBy m v = trunc f ((trunc f (v * m) + 2048 - 1) `quot` 4096)

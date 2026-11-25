@@ -9,10 +9,22 @@ correct, fast simulator first, and no bot work until it exists.
 ## Commands
 
 - Build: `cabal build all`
-- Parity test: `cabal test parity --test-show-details=direct`
+- Fast tests, for normal development:
+  `POKESIM_TIER=fast cabal test --test-show-details=direct`. It replays every
+  10th trace of each set, checks the trace pools in full, and runs the
+  hedgehog properties at 100 tests each, in about 5 s.
+- Long tests, before a PR merges into main: `cabal test --test-show-details=direct`.
+  It replays every trace and runs the properties at 2000 tests each, in about
+  45 s. With `POKESIM_TIER` unset the tier is long, so the default is never the
+  weaker run.
+- Parity test only: `cabal test parity --test-show-details=direct`. It honours
+  `POKESIM_TIER`.
 - Benchmark: `cabal bench`
 - Record traces: `node tools/oracle/gen-slice0.js local/traces/slice0 500`,
-  then `node tools/oracle/gen-slice0.js local/traces/slice0 300 1 gen9ou struggle`
+  then `node tools/oracle/gen-slice0.js local/traces/slice0 300 1 gen9ou struggle`,
+  then `cabal run -v0 engine-pool > local/traces/slice1-pool.json` and
+  `node tools/oracle/gen-slice1.js local/traces/slice1 600 local/traces/slice1-pool.json`.
+  Re-record slice 1 whenever the engine accepts more moves.
 - Re-export game data: `node tools/oracle/export-dex.js`
 - Regenerate the usage whitelist: `node tools/usage/gen-whitelist.js YYYY-MM`.
   It caches the stats under `local/usage/`.
@@ -38,6 +50,25 @@ by nothing else.
   fields, no tolerance on draw counts.
 - Use `gen9ou`, not `gen9customgame`, as the reference format. Custom Game uses
   different number truncation.
+
+## Tests and merging
+
+- Write Haskell tests with hedgehog, in `test/props/`. Properties check
+  invariants, never expected values written by hand or taken from the engine.
+  Expected battle results come only from Showdown traces.
+- Run the fast tier while developing. The long tier gates every merge into
+  main.
+- Every merge into main is a PR. A stack of PRs needs one long-tier run, at the
+  top of the stack. If it fails, find the PR in the stack that broke it and fix
+  that PR.
+- A new test goes in both tiers, with a smaller count or sample in fast. Within
+  a trace or property, the fast tier never skips a check that the long tier
+  makes, it only runs fewer cases. The one exception is a check over the whole
+  corpus, which a sample cannot make. That check runs in the long tier only.
+  Today that is the requirement that every accepted move and species appears
+  in some trace's teams.
+- `cabal.project` sets `tests: True`. Without it the solver cannot fit hedgehog
+  into the plan.
 
 ## Things that are not obvious from the code
 

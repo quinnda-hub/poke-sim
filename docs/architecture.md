@@ -3,10 +3,10 @@
 This describes the new engine core under `src/Engine/` and the decisions behind
 it. The older simulator under `src/Pokemon/` is described at the end.
 
-Status: slice 0 is built and replays 800 recorded Showdown battles with
-identical draws and state. Decisions 1 to 5 and 7 are implemented for that
-slice. The usage whitelist (decision 8) is generated, but teams are not yet
-checked against it. Rules as data (decision 6) are not built yet.
+Status: slices 0 and 1 are built and replay 1,400 recorded Showdown battles
+with identical draws and state. Decisions 1 to 5 and 7 are implemented. Rules
+as data (decision 6) cover moves, but not yet abilities or items. The usage
+whitelist (decision 8) is generated, but teams are not yet checked against it.
 See [roadmap.md](roadmap.md).
 
 ## Goals, in order
@@ -111,7 +111,36 @@ functions, so they can be listed, compared and counted.
   the expected result. Generating both from one source would let a wrong rule
   agree with itself.
 
-This is not built yet. Slice 0 has no rules, only plain damaging moves.
+Moves are built this way since slice 1 (`src/Engine/Rule.hs`). A `MoveRule`
+is organised by the slot of Showdown's move pipeline each part runs in:
+
+- the hit count;
+- the target;
+- `runMoveEffects` on the target (heal, stages, status);
+- `selfDrops`;
+- `secondaries`, each with its chance;
+- drain;
+- recoil;
+- freezing and thawing.
+
+Its slots are what the architecture calls triggers, for moves. Abilities and
+items will add triggers that are not move slots.
+
+A move is accepted only when its whole exported entry is accounted for. Every
+field is translated or listed as inert with a reason. Any other field, and any
+handler code, rejects the move. `executable` separates what the vocabulary can
+describe from what the engine can run yet.
+
+The trace generator takes its pool from the engine (`engine-pool`). That is the
+"rule data generates test scenarios" half. The expected results still come only
+from Showdown.
+
+Abilities and items are not built yet. The design for them is in
+[handlers.md](handlers.md). Showdown dispatches them through sorted events, so
+the engine uses one generic dispatcher that mirrors Showdown's collection and
+sort, including the draws its tie shuffles make. Handler bodies are either data
+rules or named Haskell handlers. A new rule kind needs at least three
+whitelisted users.
 
 ### 7. Format differences are parameters
 
