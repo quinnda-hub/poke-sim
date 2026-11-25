@@ -48,9 +48,9 @@ comparePriority a b =
 sortQueue :: MonadChance m => SV.Vector Action -> m (SV.Vector Action)
 sortQueue q = SV.fromList <$> speedSortWith comparePriority (SV.toList q)
 
--- | @pokemon.getActionSpeed()@ of a Pokemon right now: its Spe stat with its current stage.
+-- | @pokemon.getActionSpeed()@ of a Pokemon right now: its Spe stat with its current stage and paralysis.
 monSpeedNow :: Format -> Mon -> Int
-monSpeedNow fmt m = actionSpeed fmt (stSpe (monStats m)) (bsSpe (monBoosts m))
+monSpeedNow fmt m = actionSpeed fmt (stSpe (monStats m)) (bsSpe (monBoosts m)) (monStatus m == StatusPar)
 {-# INLINE monSpeedNow #-}
 
 -- | @pokemon.getActionSpeed()@ for the Pokemon of an actor.

@@ -130,6 +130,19 @@ checkBattle b = do
       if monFainted m && monHp m /= 0 then bad "fainted with hp > 0" else Right ()
       if monHp m == 0 && not (monFainted m) then bad "hp 0 but not fainted" else Right ()
       if monStatus m == StatusFainted && monHp m /= 0 then bad "status fnt with hp > 0" else Right ()
+      -- statuses: toxic's stage is in 0..15 exactly while badly poisoned (its onStart sets 0, residual stops at
+      -- 15); the other statuses and a cured Pokemon have a fresh statusState (no stage); only a Pokemon that
+      -- fainted badly poisoned keeps a stale stage (faint and the fnt / '' assignments leave statusState alone)
+      let stage = monStatusStage m
+      if monStatus m == StatusTox && (stage < 0 || stage > 15) then bad ("badly poisoned with stage " ++ show stage) else Right ()
+      if monStatus m /= StatusTox && stage /= -1 && not (monFainted m && stage >= 0 && stage <= 15)
+        then bad ("stage " ++ show stage ++ " with status " ++ show (monStatus m) ++ " on a live Pokemon") else Right ()
+      -- flinch (duration 1) lives only on an active Pokemon with HP, and never survives to a move request
+      -- (Residual removes it); the one exception is a battle that ends mid-residual
+      if monFlinch m && (not (monActive m) || monFainted m || monHp m <= 0) then bad "flinch on a Pokemon that is not active or has no HP" else Right ()
+      case request b of
+        Awaiting MoveRequest _ _ | monFlinch m -> bad "flinch at a move request"
+        _ -> Right ()
 
 -- | A 'MonadChance' that counts its draws (always returning the lower bound).
 newtype Counter a = Counter (State Int a)

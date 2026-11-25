@@ -121,16 +121,17 @@ plainRule = MoveRule
   , mrIgnoreImmunity = False
   }
 
--- | The part of the vocabulary the engine can run in the current phase (phases 1 and 2: HP effects and stat
--- stages).
+-- | The part of the vocabulary the engine can run in the current phase (phases 1 to 3: HP effects, stat stages
+-- and status conditions).
 --
--- A damaging move: single or multi-hit, with drain or recoil, @self@ boosts and boost secondaries. A status
--- move: exactly one hit effect, a self-targeted heal or a stat change on its target. Status conditions,
--- flinch, thawing and defrost are not executable yet.
+-- A damaging move: single or multi-hit, with drain or recoil, @self@ boosts, and boost, status and flinch
+-- secondaries, thawing the target (@thawsTarget@) and the user (@defrost@). A status move: exactly one hit
+-- effect, a self-targeted heal, or a stat change or a status condition on its target. Nothing here inflicts
+-- sleep (the translation rejects it), and a status or flinch effect on the user is not executable.
 executable :: MoveRule -> Bool
 executable r =
-  not (mrThawsTarget r) && not (mrDefrost r)
-    && all boostOnly (mrSelf r) && all (\s -> all boostOnly (secTarget s ++ secSelf s)) (mrSecondaries r)
+  (not (mrThawsTarget r) || mrDamaging r)
+    && all boostOnly (mrSelf r) && all (\s -> all targetEffect (secTarget s) && all boostOnly (secSelf s)) (mrSecondaries r)
     && if mrDamaging r
       then null (mrOnHit r) && not (mrIgnoreImmunity r) && mrTarget r == TargetFoe
       else mrHits r == OneHit && mrDrain r == Nothing && mrRecoil r == Nothing
@@ -138,10 +139,16 @@ executable r =
         && (case (mrOnHit r, mrTarget r) of
               ([EHeal _ _], TargetSelf) -> True
               ([EBoost _], _) -> True
+              ([EStatus _], TargetFoe) -> True
               _ -> False)
   where
     boostOnly (EBoost _) = True
     boostOnly _ = False
+    targetEffect e = case e of
+      EBoost _ -> True
+      EStatus _ -> True
+      EFlinch -> True
+      EHeal _ _ -> False
 
 -- ---------------------------------------------------------------------------
 -- Translation

@@ -178,4 +178,6 @@ buildMon fmt dx s = do
     , monActive = False
     , monSwitchFlag = False
     , monStatus = StatusNone
+    , monStatusStage = -1
+    , monFlinch = False
     }

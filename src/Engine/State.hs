@@ -115,8 +115,9 @@ data MoveSlot = MoveSlot
   }
   deriving (Eq, Show)
 
--- | Pokemon status. Slice 0 has only the @fnt@ marker Showdown sets in @checkFainted@.
-data MonStatus = StatusNone | StatusFainted
+-- | @pokemon.status@: none, the five major statuses of slice 1 (sleep is not in the slice), and the @fnt@
+-- marker Showdown sets in @checkFainted@.
+data MonStatus = StatusNone | StatusFainted | StatusBrn | StatusPar | StatusPsn | StatusTox | StatusFrz
   deriving (Eq, Show)
 
 -- | One Pokemon.
@@ -140,7 +141,16 @@ data Mon = Mon
   -- ^ @isActive@.
   , monSwitchFlag :: !Bool
   , monStatus :: !MonStatus
-  -- ^ @pokemon.status@: 'StatusFainted' (@fnt@) from @checkFainted@ until the Pokemon is replaced.
+  -- ^ @pokemon.status@: 'StatusFainted' (@fnt@) from @checkFainted@ until the Pokemon is replaced. A Pokemon
+  -- that faints keeps its status until then (@faint@ does not touch it).
+  , monStatusStage :: !Int
+  -- ^ @statusState.stage@ (toxic's counter), or -1 when the key is absent. @setStatus@ builds a fresh
+  -- @statusState@ (absent), toxic's @onStart@ sets it to 0, its @onSwitchIn@ resets it to 0 and each
+  -- residual increments it. @fnt@ and the @status = ''@ of a replaced faint are plain assignments that leave
+  -- @statusState@ alone, so a Pokemon that fainted badly poisoned keeps its stage.
+  , monFlinch :: !Bool
+  -- ^ The @flinch@ volatile (duration 1): set by a flinch secondary, removed by the next @Residual@ and by
+  -- @clearVolatile@.
   }
   deriving (Eq, Show)
 

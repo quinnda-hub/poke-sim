@@ -103,7 +103,7 @@ tally (multi-hit counts, drain at full HP, recoil knockouts, a failed heal,
 spread moves into an immunity, every pool move used) should show none at zero.
 
 Traces live under `local/` and are not committed: slice 0's 800 battles take
-about 280 MB and slice 1's 600 about 310 MB. They are reproducible from the
+about 280 MB and slice 1's 600 about 320 MB. They are reproducible from the
 seeds.
 
 To isolate one behaviour, write a scenario by hand and give it explicit choices:

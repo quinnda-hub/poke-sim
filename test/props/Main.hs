@@ -28,7 +28,7 @@ import Engine.Dex (supportedMoves)
 import Engine.Format (trunc, truncBits)
 import Engine.Rule (executable, moveRule)
 import Engine.State
-import Engine.Stats (boostedStat)
+import Engine.Stats (actionSpeed, boostedStat)
 import Engine.Turn (roundDiv, stagedAccuracy)
 import Playout
 
@@ -54,6 +54,7 @@ main = do
     , checkSequential $ Group "arithmetic (against JavaScript semantics)"
         [ ("roundDiv is Math.round(n / d)", withTests (fromIntegral n) propRoundDiv)
         , ("boostedStat is Math.floor(stat * stage multiplier)", withTests (fromIntegral n) propBoostedStat)
+        , ("a paralysed action speed is floor(boosted speed * 50 / 100)", withTests (fromIntegral n) propParalysedSpeed)
         , ("stagedAccuracy is trunc(acc * stage multiplier)", withTests (fromIntegral n) propAccuracy)
         , ("trunc and truncBits are >>> 0 and its masks", withTests (fromIntegral n) propTrunc)
         ]
@@ -154,6 +155,19 @@ propBoostedStat = property $ do
       m = table !! abs s
       expected = if s >= 0 then floor (toRational stat * m) else floor (toRational stat / m) :: Int
   boostedStat stat s === expected
+
+propParalysedSpeed :: Property
+propParalysedSpeed = property $ do
+  -- Spe stats of level <= 100 Pokemon stay under 1000; a stage up to 6 multiplies by at most 4
+  spe <- forAll (Gen.int (Range.linear 1 999))
+  s <- forAll (Gen.int (Range.linearFrom 0 (-6) 6))
+  let table = [1, 3 / 2, 2, 5 / 2, 3, 7 / 2, 4] :: [Rational]
+      m = table !! abs s
+      boosted = if s >= 0 then floor (toRational spe * m) else floor (toRational spe / m) :: Int
+  -- par.onModifySpe: Math.floor(finalModify(spe) * 50 / 100) after the stage; the Spe stat is then capped at
+  -- 10000 (out of reach here) and getActionSpeed truncates to 13 bits
+  actionSpeed gen9ou spe s True === boosted * 50 `div` 100 `mod` 8192
+  actionSpeed gen9ou spe s False === boosted `mod` 8192
 
 propAccuracy :: Property
 propAccuracy = property $ do

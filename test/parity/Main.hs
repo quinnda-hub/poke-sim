@@ -359,7 +359,13 @@ diffMon dex path orig m ev =
     ++ cmp (path ++ ".gender") (txt (ev .: "gender")) (genderName (monGender m))
     ++ cmp (path ++ ".hp") (int (ev .: "hp")) (Just (monHp m))
     ++ cmp (path ++ ".maxhp") (int (ev .: "maxhp")) (Just (monMaxHp m))
-    ++ cmp (path ++ ".status") (txt (ev .: "status")) (case monStatus m of StatusNone -> ""; StatusFainted -> "fnt")
+    ++ cmp (path ++ ".status") (txt (ev .: "status")) (statusName (monStatus m))
+    -- statusState.stage (toxic's counter): present with the value, or absent
+    ++ cmp (path ++ ".statusState.stage") (int (ev .: "statusState" .: "stage")) (if monStatusStage m < 0 then Nothing else Just (monStatusStage m))
+    -- volatiles: the engine models only flinch (duration 1), which a battle that ends mid-residual leaves in the
+    -- final snapshot; every other volatile must be absent
+    ++ cmp (path ++ ".volatiles") (ev .: "volatiles")
+         (Object (if monFlinch m then KM.singleton "flinch" (Object (KM.singleton "duration" (Number 1))) else KM.empty))
     ++ cmp (path ++ ".fainted") (ev .: "fainted") (Bool (monFainted m))
     ++ cmp (path ++ ".active") (ev .: "active") (Bool (monActive m))
     ++ concat
@@ -387,6 +393,14 @@ diffMon dex path orig m ev =
     typeName t = T.unpack (dxTypeNames dex V.! t)
     types = typeName (monType1 m) : [typeName (monType2 m) | monType2 m /= noType]
     genderName g = case g of GenderM -> "M"; GenderF -> "F"; GenderNone -> ""
+    statusName s = case s of
+      StatusNone -> ""
+      StatusFainted -> "fnt"
+      StatusBrn -> "brn"
+      StatusPar -> "par"
+      StatusPsn -> "psn"
+      StatusTox -> "tox"
+      StatusFrz -> "frz"
 
 -- | Fields of a snapshot that the engine does not model must hold their defaults, so a trace that uses an
 -- out-of-slice mechanic fails loudly instead of going unchecked.
@@ -399,8 +413,7 @@ unmodelled st =
       [ isEmptyObj (sp ++ ".sideConditions") (sd .: "sideConditions")
           ++ concat
             [ let pp = sp ++ ".pokemon[" ++ show j ++ "]"
-               in isEmptyObj (pp ++ ".volatiles") (pk .: "volatiles")
-                    ++ isEmptyObj (pp ++ ".statusState") (pk .: "statusState")
+               in isEmptyObj (pp ++ ".statusState (keys other than stage)") (dropKey "stage" (pk .: "statusState"))
                     ++ isEmptyStr (pp ++ ".terastallized") (pk .: "terastallized")
                     ++ cmp (pp ++ ".ability") (txt (pk .: "ability")) "noability"
                     ++ isEmptyStr (pp ++ ".item") (pk .: "item")
@@ -412,6 +425,8 @@ unmodelled st =
       ]
   where
     isEmptyStr path v = cmp path (txt v) ""
+    dropKey k (Object o) = Object (KM.delete (K.fromText k) o)
+    dropKey _ v = v
     isEmptyObj path v = case v of
       Object o | KM.null o -> []
       _ -> [(path, "{}", txt v)]
