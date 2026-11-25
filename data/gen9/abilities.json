@@ -1,0 +1,5245 @@
+{
+ "adaptability": {
+  "name": "Adaptability",
+  "id": "adaptability",
+  "num": 91,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onModifySTAB"
+  ]
+ },
+ "aerilate": {
+  "name": "Aerilate",
+  "id": "aerilate",
+  "num": 184,
+  "gen": 6,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onModifyTypePriority": -1,
+  "onBasePowerPriority": 23,
+  "handlers": [
+   "onBasePower",
+   "onModifyType"
+  ]
+ },
+ "aftermath": {
+  "name": "Aftermath",
+  "id": "aftermath",
+  "num": 106,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onDamagingHitOrder": 1,
+  "handlers": [
+   "onDamagingHit"
+  ]
+ },
+ "airlock": {
+  "name": "Air Lock",
+  "id": "airlock",
+  "num": 76,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": true,
+  "flags": {},
+  "handlers": [
+   "onEnd",
+   "onStart",
+   "onSwitchIn"
+  ]
+ },
+ "analytic": {
+  "name": "Analytic",
+  "id": "analytic",
+  "num": 148,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onBasePowerPriority": 21,
+  "handlers": [
+   "onBasePower"
+  ]
+ },
+ "angerpoint": {
+  "name": "Anger Point",
+  "id": "angerpoint",
+  "num": 83,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onHit"
+  ]
+ },
+ "angershell": {
+  "name": "Anger Shell",
+  "id": "angershell",
+  "num": 271,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onAfterMoveSecondary",
+   "onDamage",
+   "onTryEatItem"
+  ]
+ },
+ "anticipation": {
+  "name": "Anticipation",
+  "id": "anticipation",
+  "num": 107,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onStart"
+  ]
+ },
+ "arenatrap": {
+  "name": "Arena Trap",
+  "id": "arenatrap",
+  "num": 71,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onFoeMaybeTrapPokemon",
+   "onFoeTrapPokemon"
+  ]
+ },
+ "armortail": {
+  "name": "Armor Tail",
+  "id": "armortail",
+  "num": 296,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onFoeTryMove"
+  ]
+ },
+ "aromaveil": {
+  "name": "Aroma Veil",
+  "id": "aromaveil",
+  "num": 165,
+  "gen": 6,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onAllyTryAddVolatile"
+  ]
+ },
+ "asoneglastrier": {
+  "name": "As One (Glastrier)",
+  "id": "asoneglastrier",
+  "num": 266,
+  "gen": 8,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "failroleplay": 1,
+   "noreceiver": 1,
+   "noentrain": 1,
+   "notrace": 1,
+   "failskillswap": 1,
+   "cantsuppress": 1
+  },
+  "onSwitchInPriority": 1,
+  "handlers": [
+   "onEnd",
+   "onFoeTryEatItem",
+   "onSourceAfterFaint",
+   "onStart"
+  ]
+ },
+ "asonespectrier": {
+  "name": "As One (Spectrier)",
+  "id": "asonespectrier",
+  "num": 267,
+  "gen": 8,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "failroleplay": 1,
+   "noreceiver": 1,
+   "noentrain": 1,
+   "notrace": 1,
+   "failskillswap": 1,
+   "cantsuppress": 1
+  },
+  "onSwitchInPriority": 1,
+  "handlers": [
+   "onEnd",
+   "onFoeTryEatItem",
+   "onSourceAfterFaint",
+   "onStart"
+  ]
+ },
+ "aurabreak": {
+  "name": "Aura Break",
+  "id": "aurabreak",
+  "num": 188,
+  "gen": 6,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onAnyTryPrimaryHit",
+   "onStart"
+  ]
+ },
+ "auraguard": {
+  "name": "Aura Guard",
+  "id": "auraguard",
+  "num": 319,
+  "gen": 9,
+  "isNonstandard": "Future",
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onSourceModifyDamage"
+  ]
+ },
+ "baddreams": {
+  "name": "Bad Dreams",
+  "id": "baddreams",
+  "num": 123,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onResidualOrder": 28,
+  "onResidualSubOrder": 2,
+  "handlers": [
+   "onResidual"
+  ]
+ },
+ "ballfetch": {
+  "name": "Ball Fetch",
+  "id": "ballfetch",
+  "num": 237,
+  "gen": 8,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {}
+ },
+ "battery": {
+  "name": "Battery",
+  "id": "battery",
+  "num": 217,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onAllyBasePowerPriority": 22,
+  "handlers": [
+   "onAllyBasePower"
+  ]
+ },
+ "battlearmor": {
+  "name": "Battle Armor",
+  "id": "battlearmor",
+  "num": 4,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "onCriticalHit": false
+ },
+ "battlebond": {
+  "name": "Battle Bond",
+  "id": "battlebond",
+  "num": 210,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "failroleplay": 1,
+   "noreceiver": 1,
+   "noentrain": 1,
+   "notrace": 1,
+   "failskillswap": 1,
+   "cantsuppress": 1
+  },
+  "onModifyMovePriority": -1,
+  "handlers": [
+   "onModifyMove",
+   "onSourceAfterFaint"
+  ]
+ },
+ "beadsofruin": {
+  "name": "Beads of Ruin",
+  "id": "beadsofruin",
+  "num": 284,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onAnyModifySpD",
+   "onStart"
+  ]
+ },
+ "beastboost": {
+  "name": "Beast Boost",
+  "id": "beastboost",
+  "num": 224,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onSourceAfterFaint"
+  ]
+ },
+ "berserk": {
+  "name": "Berserk",
+  "id": "berserk",
+  "num": 201,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onAfterMoveSecondary",
+   "onDamage",
+   "onTryEatItem"
+  ]
+ },
+ "bigpecks": {
+  "name": "Big Pecks",
+  "id": "bigpecks",
+  "num": 145,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onTryBoost"
+  ]
+ },
+ "blaze": {
+  "name": "Blaze",
+  "id": "blaze",
+  "num": 66,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onModifyAtkPriority": 5,
+  "onModifySpAPriority": 5,
+  "handlers": [
+   "onModifyAtk",
+   "onModifySpA"
+  ]
+ },
+ "bulletproof": {
+  "name": "Bulletproof",
+  "id": "bulletproof",
+  "num": 171,
+  "gen": 6,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onTryHit"
+  ]
+ },
+ "cheekpouch": {
+  "name": "Cheek Pouch",
+  "id": "cheekpouch",
+  "num": 167,
+  "gen": 6,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onEatItem"
+  ]
+ },
+ "chillingneigh": {
+  "name": "Chilling Neigh",
+  "id": "chillingneigh",
+  "num": 264,
+  "gen": 8,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onSourceAfterFaint"
+  ]
+ },
+ "chlorophyll": {
+  "name": "Chlorophyll",
+  "id": "chlorophyll",
+  "num": 34,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onModifySpe"
+  ]
+ },
+ "clearbody": {
+  "name": "Clear Body",
+  "id": "clearbody",
+  "num": 29,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onTryBoost"
+  ]
+ },
+ "cloudnine": {
+  "name": "Cloud Nine",
+  "id": "cloudnine",
+  "num": 13,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": true,
+  "flags": {},
+  "handlers": [
+   "onEnd",
+   "onStart",
+   "onSwitchIn"
+  ]
+ },
+ "colorchange": {
+  "name": "Color Change",
+  "id": "colorchange",
+  "num": 16,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onAfterMoveSecondary"
+  ]
+ },
+ "comatose": {
+  "name": "Comatose",
+  "id": "comatose",
+  "num": 213,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "failroleplay": 1,
+   "noreceiver": 1,
+   "noentrain": 1,
+   "notrace": 1,
+   "failskillswap": 1,
+   "cantsuppress": 1
+  },
+  "handlers": [
+   "onSetStatus",
+   "onStart"
+  ]
+ },
+ "commander": {
+  "name": "Commander",
+  "id": "commander",
+  "num": 279,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "failroleplay": 1,
+   "noreceiver": 1,
+   "noentrain": 1,
+   "notrace": 1,
+   "failskillswap": 1
+  },
+  "onAnySwitchInPriority": -2,
+  "handlers": [
+   "onAnySwitchIn",
+   "onStart",
+   "onUpdate"
+  ]
+ },
+ "competitive": {
+  "name": "Competitive",
+  "id": "competitive",
+  "num": 172,
+  "gen": 6,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onAfterEachBoost"
+  ]
+ },
+ "compoundeyes": {
+  "name": "Compound Eyes",
+  "id": "compoundeyes",
+  "num": 14,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onSourceModifyAccuracyPriority": -1,
+  "handlers": [
+   "onSourceModifyAccuracy"
+  ]
+ },
+ "contrary": {
+  "name": "Contrary",
+  "id": "contrary",
+  "num": 126,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onChangeBoost"
+  ]
+ },
+ "corrosion": {
+  "name": "Corrosion",
+  "id": "corrosion",
+  "num": 212,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {}
+ },
+ "costar": {
+  "name": "Costar",
+  "id": "costar",
+  "num": 294,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onSwitchInPriority": -2,
+  "handlers": [
+   "onStart"
+  ]
+ },
+ "cottondown": {
+  "name": "Cotton Down",
+  "id": "cottondown",
+  "num": 238,
+  "gen": 8,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onDamagingHit"
+  ]
+ },
+ "cudchew": {
+  "name": "Cud Chew",
+  "id": "cudchew",
+  "num": 291,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onResidualOrder": 28,
+  "onResidualSubOrder": 2,
+  "handlers": [
+   "onEatItem",
+   "onResidual"
+  ]
+ },
+ "curiousmedicine": {
+  "name": "Curious Medicine",
+  "id": "curiousmedicine",
+  "num": 261,
+  "gen": 8,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onStart"
+  ]
+ },
+ "cursedbody": {
+  "name": "Cursed Body",
+  "id": "cursedbody",
+  "num": 130,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onDamagingHit"
+  ]
+ },
+ "cutecharm": {
+  "name": "Cute Charm",
+  "id": "cutecharm",
+  "num": 56,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onDamagingHit"
+  ]
+ },
+ "damp": {
+  "name": "Damp",
+  "id": "damp",
+  "num": 6,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onAnyDamage",
+   "onAnyTryMove"
+  ]
+ },
+ "dancer": {
+  "name": "Dancer",
+  "id": "dancer",
+  "num": 216,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {}
+ },
+ "darkaura": {
+  "name": "Dark Aura",
+  "id": "darkaura",
+  "num": 186,
+  "gen": 6,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onAnyBasePowerPriority": 20,
+  "handlers": [
+   "onAnyBasePower",
+   "onStart"
+  ]
+ },
+ "dauntlessshield": {
+  "name": "Dauntless Shield",
+  "id": "dauntlessshield",
+  "num": 235,
+  "gen": 8,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onStart"
+  ]
+ },
+ "dazzling": {
+  "name": "Dazzling",
+  "id": "dazzling",
+  "num": 219,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onFoeTryMove"
+  ]
+ },
+ "defeatist": {
+  "name": "Defeatist",
+  "id": "defeatist",
+  "num": 129,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onModifyAtkPriority": 5,
+  "onModifySpAPriority": 5,
+  "handlers": [
+   "onModifyAtk",
+   "onModifySpA"
+  ]
+ },
+ "defiant": {
+  "name": "Defiant",
+  "id": "defiant",
+  "num": 128,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onAfterEachBoost"
+  ]
+ },
+ "deltastream": {
+  "name": "Delta Stream",
+  "id": "deltastream",
+  "num": 191,
+  "gen": 6,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onAnySetWeather",
+   "onEnd",
+   "onStart"
+  ]
+ },
+ "desolateland": {
+  "name": "Desolate Land",
+  "id": "desolateland",
+  "num": 190,
+  "gen": 6,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onAnySetWeather",
+   "onEnd",
+   "onStart"
+  ]
+ },
+ "disguise": {
+  "name": "Disguise",
+  "id": "disguise",
+  "num": 209,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "failroleplay": 1,
+   "noreceiver": 1,
+   "noentrain": 1,
+   "notrace": 1,
+   "failskillswap": 1,
+   "cantsuppress": 1,
+   "breakable": 1,
+   "notransform": 1
+  },
+  "onDamagePriority": 1,
+  "handlers": [
+   "onCriticalHit",
+   "onDamage",
+   "onEffectiveness",
+   "onUpdate"
+  ]
+ },
+ "download": {
+  "name": "Download",
+  "id": "download",
+  "num": 88,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onStart"
+  ]
+ },
+ "dragonize": {
+  "name": "Dragonize",
+  "id": "dragonize",
+  "num": 312,
+  "gen": 9,
+  "isNonstandard": "Future",
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onModifyTypePriority": -1,
+  "onBasePowerPriority": 23,
+  "handlers": [
+   "onBasePower",
+   "onModifyType"
+  ]
+ },
+ "dragonsmaw": {
+  "name": "Dragon's Maw",
+  "id": "dragonsmaw",
+  "num": 263,
+  "gen": 8,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onModifyAtkPriority": 5,
+  "onModifySpAPriority": 5,
+  "handlers": [
+   "onModifyAtk",
+   "onModifySpA"
+  ]
+ },
+ "drizzle": {
+  "name": "Drizzle",
+  "id": "drizzle",
+  "num": 2,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onStart"
+  ]
+ },
+ "drought": {
+  "name": "Drought",
+  "id": "drought",
+  "num": 70,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onStart"
+  ]
+ },
+ "dryskin": {
+  "name": "Dry Skin",
+  "id": "dryskin",
+  "num": 87,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "onSourceBasePowerPriority": 17,
+  "handlers": [
+   "onSourceBasePower",
+   "onTryHit",
+   "onWeather"
+  ]
+ },
+ "earlybird": {
+  "name": "Early Bird",
+  "id": "earlybird",
+  "num": 48,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {}
+ },
+ "eartheater": {
+  "name": "Earth Eater",
+  "id": "eartheater",
+  "num": 297,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onTryHit"
+  ]
+ },
+ "eelevate": {
+  "name": "Eelevate",
+  "id": "eelevate",
+  "num": 313,
+  "gen": 9,
+  "isNonstandard": "Future",
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onSourceAfterFaint"
+  ]
+ },
+ "effectspore": {
+  "name": "Effect Spore",
+  "id": "effectspore",
+  "num": 27,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onDamagingHit"
+  ]
+ },
+ "electricsurge": {
+  "name": "Electric Surge",
+  "id": "electricsurge",
+  "num": 226,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onStart"
+  ]
+ },
+ "electromorphosis": {
+  "name": "Electromorphosis",
+  "id": "electromorphosis",
+  "num": 280,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onDamagingHitOrder": 1,
+  "handlers": [
+   "onDamagingHit"
+  ]
+ },
+ "embodyaspectcornerstone": {
+  "name": "Embody Aspect (Cornerstone)",
+  "id": "embodyaspectcornerstone",
+  "num": 304,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "failroleplay": 1,
+   "noreceiver": 1,
+   "noentrain": 1,
+   "notrace": 1,
+   "failskillswap": 1,
+   "notransform": 1
+  },
+  "handlers": [
+   "onStart"
+  ]
+ },
+ "embodyaspecthearthflame": {
+  "name": "Embody Aspect (Hearthflame)",
+  "id": "embodyaspecthearthflame",
+  "num": 303,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "failroleplay": 1,
+   "noreceiver": 1,
+   "noentrain": 1,
+   "notrace": 1,
+   "failskillswap": 1,
+   "notransform": 1
+  },
+  "handlers": [
+   "onStart"
+  ]
+ },
+ "embodyaspectteal": {
+  "name": "Embody Aspect (Teal)",
+  "id": "embodyaspectteal",
+  "num": 301,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "failroleplay": 1,
+   "noreceiver": 1,
+   "noentrain": 1,
+   "notrace": 1,
+   "failskillswap": 1,
+   "notransform": 1
+  },
+  "handlers": [
+   "onStart"
+  ]
+ },
+ "embodyaspectwellspring": {
+  "name": "Embody Aspect (Wellspring)",
+  "id": "embodyaspectwellspring",
+  "num": 302,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "failroleplay": 1,
+   "noreceiver": 1,
+   "noentrain": 1,
+   "notrace": 1,
+   "failskillswap": 1,
+   "notransform": 1
+  },
+  "handlers": [
+   "onStart"
+  ]
+ },
+ "emergencyexit": {
+  "name": "Emergency Exit",
+  "id": "emergencyexit",
+  "num": 194,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onEmergencyExit"
+  ]
+ },
+ "fairyaura": {
+  "name": "Fairy Aura",
+  "id": "fairyaura",
+  "num": 187,
+  "gen": 6,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onAnyBasePowerPriority": 20,
+  "handlers": [
+   "onAnyBasePower",
+   "onStart"
+  ]
+ },
+ "filter": {
+  "name": "Filter",
+  "id": "filter",
+  "num": 111,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onSourceModifyDamage"
+  ]
+ },
+ "firemane": {
+  "name": "Fire Mane",
+  "id": "firemane",
+  "num": 316,
+  "gen": 9,
+  "isNonstandard": "Future",
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onModifyAtkPriority": 5,
+  "onModifySpAPriority": 5,
+  "handlers": [
+   "onModifyAtk",
+   "onModifySpA"
+  ]
+ },
+ "flamebody": {
+  "name": "Flame Body",
+  "id": "flamebody",
+  "num": 49,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onDamagingHit"
+  ]
+ },
+ "flareboost": {
+  "name": "Flare Boost",
+  "id": "flareboost",
+  "num": 138,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onBasePowerPriority": 19,
+  "handlers": [
+   "onBasePower"
+  ]
+ },
+ "flashfire": {
+  "name": "Flash Fire",
+  "id": "flashfire",
+  "num": 18,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "condition": {
+   "noCopy": true,
+   "onModifyAtkPriority": 5,
+   "onModifySpAPriority": 5
+  },
+  "handlers": [
+   "condition.onEnd",
+   "condition.onModifyAtk",
+   "condition.onModifySpA",
+   "condition.onStart",
+   "onEnd",
+   "onTryHit"
+  ]
+ },
+ "flowergift": {
+  "name": "Flower Gift",
+  "id": "flowergift",
+  "num": 122,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "failroleplay": 1,
+   "noreceiver": 1,
+   "noentrain": 1,
+   "notrace": 1,
+   "breakable": 1
+  },
+  "onSwitchInPriority": -2,
+  "onAllyModifyAtkPriority": 3,
+  "onAllyModifySpDPriority": 4,
+  "handlers": [
+   "onAllyModifyAtk",
+   "onAllyModifySpD",
+   "onStart",
+   "onWeatherChange"
+  ]
+ },
+ "flowerveil": {
+  "name": "Flower Veil",
+  "id": "flowerveil",
+  "num": 166,
+  "gen": 6,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onAllySetStatus",
+   "onAllyTryAddVolatile",
+   "onAllyTryBoost"
+  ]
+ },
+ "fluffy": {
+  "name": "Fluffy",
+  "id": "fluffy",
+  "num": 218,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onSourceModifyDamage"
+  ]
+ },
+ "forecast": {
+  "name": "Forecast",
+  "id": "forecast",
+  "num": 59,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "failroleplay": 1,
+   "noreceiver": 1,
+   "noentrain": 1,
+   "notrace": 1
+  },
+  "onSwitchInPriority": -2,
+  "handlers": [
+   "onStart",
+   "onWeatherChange"
+  ]
+ },
+ "forewarn": {
+  "name": "Forewarn",
+  "id": "forewarn",
+  "num": 108,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onStart"
+  ]
+ },
+ "friendguard": {
+  "name": "Friend Guard",
+  "id": "friendguard",
+  "num": 132,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onAnyModifyDamage"
+  ]
+ },
+ "frisk": {
+  "name": "Frisk",
+  "id": "frisk",
+  "num": 119,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onStart"
+  ]
+ },
+ "fullmetalbody": {
+  "name": "Full Metal Body",
+  "id": "fullmetalbody",
+  "num": 230,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onTryBoost"
+  ]
+ },
+ "furcoat": {
+  "name": "Fur Coat",
+  "id": "furcoat",
+  "num": 169,
+  "gen": 6,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "onModifyDefPriority": 6,
+  "handlers": [
+   "onModifyDef"
+  ]
+ },
+ "galewings": {
+  "name": "Gale Wings",
+  "id": "galewings",
+  "num": 177,
+  "gen": 6,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onModifyPriority"
+  ]
+ },
+ "galvanize": {
+  "name": "Galvanize",
+  "id": "galvanize",
+  "num": 206,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onModifyTypePriority": -1,
+  "onBasePowerPriority": 23,
+  "handlers": [
+   "onBasePower",
+   "onModifyType"
+  ]
+ },
+ "gluttony": {
+  "name": "Gluttony",
+  "id": "gluttony",
+  "num": 82,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onDamage",
+   "onStart"
+  ]
+ },
+ "goodasgold": {
+  "name": "Good as Gold",
+  "id": "goodasgold",
+  "num": 283,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onTryHit"
+  ]
+ },
+ "gooey": {
+  "name": "Gooey",
+  "id": "gooey",
+  "num": 183,
+  "gen": 6,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onDamagingHit"
+  ]
+ },
+ "gorillatactics": {
+  "name": "Gorilla Tactics",
+  "id": "gorillatactics",
+  "num": 255,
+  "gen": 8,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onModifyAtkPriority": 1,
+  "handlers": [
+   "onBeforeMove",
+   "onDisableMove",
+   "onEnd",
+   "onModifyAtk",
+   "onModifyMove",
+   "onStart"
+  ]
+ },
+ "grasspelt": {
+  "name": "Grass Pelt",
+  "id": "grasspelt",
+  "num": 179,
+  "gen": 6,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "onModifyDefPriority": 6,
+  "handlers": [
+   "onModifyDef"
+  ]
+ },
+ "grassysurge": {
+  "name": "Grassy Surge",
+  "id": "grassysurge",
+  "num": 229,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onStart"
+  ]
+ },
+ "grimneigh": {
+  "name": "Grim Neigh",
+  "id": "grimneigh",
+  "num": 265,
+  "gen": 8,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onSourceAfterFaint"
+  ]
+ },
+ "guarddog": {
+  "name": "Guard Dog",
+  "id": "guarddog",
+  "num": 275,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "onDragOutPriority": 1,
+  "onTryBoostPriority": 2,
+  "handlers": [
+   "onDragOut",
+   "onTryBoost"
+  ]
+ },
+ "gulpmissile": {
+  "name": "Gulp Missile",
+  "id": "gulpmissile",
+  "num": 241,
+  "gen": 8,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "cantsuppress": 1,
+   "notransform": 1
+  },
+  "handlers": [
+   "onDamagingHit",
+   "onSourceTryPrimaryHit"
+  ]
+ },
+ "guts": {
+  "name": "Guts",
+  "id": "guts",
+  "num": 62,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onModifyAtkPriority": 5,
+  "handlers": [
+   "onModifyAtk"
+  ]
+ },
+ "hadronengine": {
+  "name": "Hadron Engine",
+  "id": "hadronengine",
+  "num": 289,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onModifySpAPriority": 5,
+  "handlers": [
+   "onModifySpA",
+   "onStart"
+  ]
+ },
+ "harvest": {
+  "name": "Harvest",
+  "id": "harvest",
+  "num": 139,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onResidualOrder": 28,
+  "onResidualSubOrder": 2,
+  "handlers": [
+   "onResidual"
+  ]
+ },
+ "healer": {
+  "name": "Healer",
+  "id": "healer",
+  "num": 131,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onResidualOrder": 5,
+  "onResidualSubOrder": 3,
+  "handlers": [
+   "onResidual"
+  ]
+ },
+ "heatproof": {
+  "name": "Heatproof",
+  "id": "heatproof",
+  "num": 85,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "onSourceModifyAtkPriority": 6,
+  "onSourceModifySpAPriority": 5,
+  "handlers": [
+   "onDamage",
+   "onSourceModifyAtk",
+   "onSourceModifySpA"
+  ]
+ },
+ "heavymetal": {
+  "name": "Heavy Metal",
+  "id": "heavymetal",
+  "num": 134,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "onModifyWeightPriority": 1,
+  "handlers": [
+   "onModifyWeight"
+  ]
+ },
+ "honeygather": {
+  "name": "Honey Gather",
+  "id": "honeygather",
+  "num": 118,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {}
+ },
+ "hospitality": {
+  "name": "Hospitality",
+  "id": "hospitality",
+  "num": 299,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onSwitchInPriority": -2,
+  "handlers": [
+   "onStart"
+  ]
+ },
+ "hugepower": {
+  "name": "Huge Power",
+  "id": "hugepower",
+  "num": 37,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onModifyAtkPriority": 5,
+  "handlers": [
+   "onModifyAtk"
+  ]
+ },
+ "hungerswitch": {
+  "name": "Hunger Switch",
+  "id": "hungerswitch",
+  "num": 258,
+  "gen": 8,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "failroleplay": 1,
+   "noreceiver": 1,
+   "noentrain": 1,
+   "notrace": 1,
+   "failskillswap": 1,
+   "notransform": 1
+  },
+  "onResidualOrder": 29,
+  "handlers": [
+   "onResidual"
+  ]
+ },
+ "hustle": {
+  "name": "Hustle",
+  "id": "hustle",
+  "num": 55,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onModifyAtkPriority": 5,
+  "onSourceModifyAccuracyPriority": -1,
+  "handlers": [
+   "onModifyAtk",
+   "onSourceModifyAccuracy"
+  ]
+ },
+ "hydration": {
+  "name": "Hydration",
+  "id": "hydration",
+  "num": 93,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onResidualOrder": 5,
+  "onResidualSubOrder": 3,
+  "handlers": [
+   "onResidual"
+  ]
+ },
+ "hypercutter": {
+  "name": "Hyper Cutter",
+  "id": "hypercutter",
+  "num": 52,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onTryBoost"
+  ]
+ },
+ "icebody": {
+  "name": "Ice Body",
+  "id": "icebody",
+  "num": 115,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onImmunity",
+   "onWeather"
+  ]
+ },
+ "iceface": {
+  "name": "Ice Face",
+  "id": "iceface",
+  "num": 248,
+  "gen": 8,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "failroleplay": 1,
+   "noreceiver": 1,
+   "noentrain": 1,
+   "notrace": 1,
+   "failskillswap": 1,
+   "cantsuppress": 1,
+   "breakable": 1,
+   "notransform": 1
+  },
+  "onSwitchInPriority": -2,
+  "onDamagePriority": 1,
+  "handlers": [
+   "onCriticalHit",
+   "onDamage",
+   "onEffectiveness",
+   "onStart",
+   "onUpdate",
+   "onWeatherChange"
+  ]
+ },
+ "icescales": {
+  "name": "Ice Scales",
+  "id": "icescales",
+  "num": 246,
+  "gen": 8,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onSourceModifyDamage"
+  ]
+ },
+ "illuminate": {
+  "name": "Illuminate",
+  "id": "illuminate",
+  "num": 35,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onModifyMove",
+   "onTryBoost"
+  ]
+ },
+ "illusion": {
+  "name": "Illusion",
+  "id": "illusion",
+  "num": 149,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "failroleplay": 1,
+   "noreceiver": 1,
+   "noentrain": 1,
+   "notrace": 1,
+   "failskillswap": 1
+  },
+  "handlers": [
+   "onBeforeSwitchIn",
+   "onDamagingHit",
+   "onEnd",
+   "onFaint"
+  ]
+ },
+ "immunity": {
+  "name": "Immunity",
+  "id": "immunity",
+  "num": 17,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onSetStatus",
+   "onUpdate"
+  ]
+ },
+ "imposter": {
+  "name": "Imposter",
+  "id": "imposter",
+  "num": 150,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "failroleplay": 1,
+   "noreceiver": 1,
+   "noentrain": 1,
+   "notrace": 1
+  },
+  "handlers": [
+   "onSwitchIn"
+  ]
+ },
+ "infiltrator": {
+  "name": "Infiltrator",
+  "id": "infiltrator",
+  "num": 151,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onModifyMove"
+  ]
+ },
+ "innardsout": {
+  "name": "Innards Out",
+  "id": "innardsout",
+  "num": 215,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onDamagingHitOrder": 1,
+  "handlers": [
+   "onDamagingHit"
+  ]
+ },
+ "innerfocus": {
+  "name": "Inner Focus",
+  "id": "innerfocus",
+  "num": 39,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onTryAddVolatile",
+   "onTryBoost"
+  ]
+ },
+ "insomnia": {
+  "name": "Insomnia",
+  "id": "insomnia",
+  "num": 15,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onSetStatus",
+   "onTryAddVolatile",
+   "onUpdate"
+  ]
+ },
+ "intimidate": {
+  "name": "Intimidate",
+  "id": "intimidate",
+  "num": 22,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onStart"
+  ]
+ },
+ "intrepidsword": {
+  "name": "Intrepid Sword",
+  "id": "intrepidsword",
+  "num": 234,
+  "gen": 8,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onStart"
+  ]
+ },
+ "ironbarbs": {
+  "name": "Iron Barbs",
+  "id": "ironbarbs",
+  "num": 160,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onDamagingHitOrder": 1,
+  "handlers": [
+   "onDamagingHit"
+  ]
+ },
+ "ironfist": {
+  "name": "Iron Fist",
+  "id": "ironfist",
+  "num": 89,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onBasePowerPriority": 23,
+  "handlers": [
+   "onBasePower"
+  ]
+ },
+ "justified": {
+  "name": "Justified",
+  "id": "justified",
+  "num": 154,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onDamagingHit"
+  ]
+ },
+ "keeneye": {
+  "name": "Keen Eye",
+  "id": "keeneye",
+  "num": 51,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onModifyMove",
+   "onTryBoost"
+  ]
+ },
+ "klutz": {
+  "name": "Klutz",
+  "id": "klutz",
+  "num": 103,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onSwitchInPriority": 1,
+  "handlers": [
+   "onStart"
+  ]
+ },
+ "leafguard": {
+  "name": "Leaf Guard",
+  "id": "leafguard",
+  "num": 102,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onSetStatus",
+   "onTryAddVolatile"
+  ]
+ },
+ "levitate": {
+  "name": "Levitate",
+  "id": "levitate",
+  "num": 26,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  }
+ },
+ "libero": {
+  "name": "Libero",
+  "id": "libero",
+  "num": 236,
+  "gen": 8,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onPrepareHit"
+  ]
+ },
+ "lightmetal": {
+  "name": "Light Metal",
+  "id": "lightmetal",
+  "num": 135,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onModifyWeight"
+  ]
+ },
+ "lightningrod": {
+  "name": "Lightning Rod",
+  "id": "lightningrod",
+  "num": 31,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onAnyRedirectTarget",
+   "onTryHit"
+  ]
+ },
+ "limber": {
+  "name": "Limber",
+  "id": "limber",
+  "num": 7,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onSetStatus",
+   "onUpdate"
+  ]
+ },
+ "lingeringaroma": {
+  "name": "Lingering Aroma",
+  "id": "lingeringaroma",
+  "num": 268,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onDamagingHit"
+  ]
+ },
+ "liquidooze": {
+  "name": "Liquid Ooze",
+  "id": "liquidooze",
+  "num": 64,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onSourceTryHeal"
+  ]
+ },
+ "liquidvoice": {
+  "name": "Liquid Voice",
+  "id": "liquidvoice",
+  "num": 204,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onModifyTypePriority": -1,
+  "handlers": [
+   "onModifyType"
+  ]
+ },
+ "longreach": {
+  "name": "Long Reach",
+  "id": "longreach",
+  "num": 203,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onModifyMove"
+  ]
+ },
+ "magicbounce": {
+  "name": "Magic Bounce",
+  "id": "magicbounce",
+  "num": 156,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "onTryHitPriority": 1,
+  "handlers": [
+   "onAllyTryHitSide",
+   "onTryHit"
+  ]
+ },
+ "magicguard": {
+  "name": "Magic Guard",
+  "id": "magicguard",
+  "num": 98,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onDamage"
+  ]
+ },
+ "magician": {
+  "name": "Magician",
+  "id": "magician",
+  "num": 170,
+  "gen": 6,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onAfterMoveSecondarySelf"
+  ]
+ },
+ "magmaarmor": {
+  "name": "Magma Armor",
+  "id": "magmaarmor",
+  "num": 40,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onImmunity",
+   "onUpdate"
+  ]
+ },
+ "magnetpull": {
+  "name": "Magnet Pull",
+  "id": "magnetpull",
+  "num": 42,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onFoeMaybeTrapPokemon",
+   "onFoeTrapPokemon"
+  ]
+ },
+ "marvelscale": {
+  "name": "Marvel Scale",
+  "id": "marvelscale",
+  "num": 63,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "onModifyDefPriority": 6,
+  "handlers": [
+   "onModifyDef"
+  ]
+ },
+ "megalauncher": {
+  "name": "Mega Launcher",
+  "id": "megalauncher",
+  "num": 178,
+  "gen": 6,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onBasePowerPriority": 19,
+  "handlers": [
+   "onBasePower"
+  ]
+ },
+ "megasol": {
+  "name": "Mega Sol",
+  "id": "megasol",
+  "num": 315,
+  "gen": 9,
+  "isNonstandard": "Future",
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onWeatherModifyDamagePriority": 1,
+  "handlers": [
+   "onWeatherModifyDamage"
+  ]
+ },
+ "merciless": {
+  "name": "Merciless",
+  "id": "merciless",
+  "num": 196,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onModifyCritRatio"
+  ]
+ },
+ "mimicry": {
+  "name": "Mimicry",
+  "id": "mimicry",
+  "num": 250,
+  "gen": 8,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onSwitchInPriority": -1,
+  "handlers": [
+   "onStart",
+   "onTerrainChange"
+  ]
+ },
+ "mindseye": {
+  "name": "Mind's Eye",
+  "id": "mindseye",
+  "num": 300,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "onModifyMovePriority": -5,
+  "handlers": [
+   "onModifyMove",
+   "onTryBoost"
+  ]
+ },
+ "minus": {
+  "name": "Minus",
+  "id": "minus",
+  "num": 58,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onModifySpAPriority": 5,
+  "handlers": [
+   "onModifySpA"
+  ]
+ },
+ "mirrorarmor": {
+  "name": "Mirror Armor",
+  "id": "mirrorarmor",
+  "num": 240,
+  "gen": 8,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onTryBoost"
+  ]
+ },
+ "mistysurge": {
+  "name": "Misty Surge",
+  "id": "mistysurge",
+  "num": 228,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onStart"
+  ]
+ },
+ "moldbreaker": {
+  "name": "Mold Breaker",
+  "id": "moldbreaker",
+  "num": 104,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onModifyMove",
+   "onStart"
+  ]
+ },
+ "moody": {
+  "name": "Moody",
+  "id": "moody",
+  "num": 141,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onResidualOrder": 28,
+  "onResidualSubOrder": 2,
+  "handlers": [
+   "onResidual"
+  ]
+ },
+ "motordrive": {
+  "name": "Motor Drive",
+  "id": "motordrive",
+  "num": 78,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onTryHit"
+  ]
+ },
+ "mountaineer": {
+  "name": "Mountaineer",
+  "id": "mountaineer",
+  "num": -1,
+  "gen": 0,
+  "isNonstandard": "CAP",
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onDamage",
+   "onTryHit"
+  ]
+ },
+ "moxie": {
+  "name": "Moxie",
+  "id": "moxie",
+  "num": 153,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onSourceAfterFaint"
+  ]
+ },
+ "multiscale": {
+  "name": "Multiscale",
+  "id": "multiscale",
+  "num": 136,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onSourceModifyDamage"
+  ]
+ },
+ "multitype": {
+  "name": "Multitype",
+  "id": "multitype",
+  "num": 121,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "failroleplay": 1,
+   "noreceiver": 1,
+   "noentrain": 1,
+   "notrace": 1,
+   "failskillswap": 1,
+   "cantsuppress": 1
+  }
+ },
+ "mummy": {
+  "name": "Mummy",
+  "id": "mummy",
+  "num": 152,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onDamagingHit"
+  ]
+ },
+ "myceliummight": {
+  "name": "Mycelium Might",
+  "id": "myceliummight",
+  "num": 298,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onFractionalPriorityPriority": -1,
+  "handlers": [
+   "onFractionalPriority",
+   "onModifyMove"
+  ]
+ },
+ "naturalcure": {
+  "name": "Natural Cure",
+  "id": "naturalcure",
+  "num": 30,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onCheckShow",
+   "onSwitchOut"
+  ]
+ },
+ "neuroforce": {
+  "name": "Neuroforce",
+  "id": "neuroforce",
+  "num": 233,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onModifyDamage"
+  ]
+ },
+ "neutralizinggas": {
+  "name": "Neutralizing Gas",
+  "id": "neutralizinggas",
+  "num": 256,
+  "gen": 8,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "failroleplay": 1,
+   "noreceiver": 1,
+   "noentrain": 1,
+   "notrace": 1,
+   "failskillswap": 1,
+   "notransform": 1
+  },
+  "onSwitchInPriority": 2,
+  "handlers": [
+   "onEnd",
+   "onSwitchIn"
+  ]
+ },
+ "noability": {
+  "name": "No Ability",
+  "id": "noability",
+  "num": 0,
+  "gen": 0,
+  "isNonstandard": "Past",
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {}
+ },
+ "noguard": {
+  "name": "No Guard",
+  "id": "noguard",
+  "num": 99,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onAnyInvulnerabilityPriority": 1,
+  "handlers": [
+   "onAnyAccuracy",
+   "onAnyInvulnerability"
+  ]
+ },
+ "normalize": {
+  "name": "Normalize",
+  "id": "normalize",
+  "num": 96,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onModifyTypePriority": 1,
+  "onBasePowerPriority": 23,
+  "handlers": [
+   "onBasePower",
+   "onModifyType"
+  ]
+ },
+ "oblivious": {
+  "name": "Oblivious",
+  "id": "oblivious",
+  "num": 12,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onImmunity",
+   "onTryBoost",
+   "onTryHit",
+   "onUpdate"
+  ]
+ },
+ "opportunist": {
+  "name": "Opportunist",
+  "id": "opportunist",
+  "num": 290,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onAnySwitchInPriority": -3,
+  "onResidualOrder": 29,
+  "handlers": [
+   "onAnyAfterMega",
+   "onAnyAfterMove",
+   "onAnyAfterTerastallization",
+   "onAnySwitchIn",
+   "onEnd",
+   "onFoeAfterBoost",
+   "onResidual"
+  ]
+ },
+ "orichalcumpulse": {
+  "name": "Orichalcum Pulse",
+  "id": "orichalcumpulse",
+  "num": 288,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onModifyAtkPriority": 5,
+  "handlers": [
+   "onModifyAtk",
+   "onStart"
+  ]
+ },
+ "overcoat": {
+  "name": "Overcoat",
+  "id": "overcoat",
+  "num": 142,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "onTryHitPriority": 1,
+  "handlers": [
+   "onImmunity",
+   "onTryHit"
+  ]
+ },
+ "overgrow": {
+  "name": "Overgrow",
+  "id": "overgrow",
+  "num": 65,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onModifyAtkPriority": 5,
+  "onModifySpAPriority": 5,
+  "handlers": [
+   "onModifyAtk",
+   "onModifySpA"
+  ]
+ },
+ "owntempo": {
+  "name": "Own Tempo",
+  "id": "owntempo",
+  "num": 20,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onHit",
+   "onTryAddVolatile",
+   "onTryBoost",
+   "onUpdate"
+  ]
+ },
+ "parentalbond": {
+  "name": "Parental Bond",
+  "id": "parentalbond",
+  "num": 185,
+  "gen": 6,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onPrepareHit",
+   "onSourceModifySecondaries"
+  ]
+ },
+ "pastelveil": {
+  "name": "Pastel Veil",
+  "id": "pastelveil",
+  "num": 257,
+  "gen": 8,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onAllySetStatus",
+   "onAnySwitchIn",
+   "onSetStatus",
+   "onStart",
+   "onUpdate"
+  ]
+ },
+ "perishbody": {
+  "name": "Perish Body",
+  "id": "perishbody",
+  "num": 253,
+  "gen": 8,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onDamagingHit"
+  ]
+ },
+ "persistent": {
+  "name": "Persistent",
+  "id": "persistent",
+  "num": -3,
+  "gen": 0,
+  "isNonstandard": "CAP",
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {}
+ },
+ "pickpocket": {
+  "name": "Pickpocket",
+  "id": "pickpocket",
+  "num": 124,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onAfterMoveSecondary"
+  ]
+ },
+ "pickup": {
+  "name": "Pickup",
+  "id": "pickup",
+  "num": 53,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onResidualOrder": 28,
+  "onResidualSubOrder": 2,
+  "handlers": [
+   "onResidual"
+  ]
+ },
+ "piercingdrill": {
+  "name": "Piercing Drill",
+  "id": "piercingdrill",
+  "num": 311,
+  "gen": 9,
+  "isNonstandard": "Future",
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onHitProtect"
+  ]
+ },
+ "pixilate": {
+  "name": "Pixilate",
+  "id": "pixilate",
+  "num": 182,
+  "gen": 6,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onModifyTypePriority": -1,
+  "onBasePowerPriority": 23,
+  "handlers": [
+   "onBasePower",
+   "onModifyType"
+  ]
+ },
+ "plus": {
+  "name": "Plus",
+  "id": "plus",
+  "num": 57,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onModifySpAPriority": 5,
+  "handlers": [
+   "onModifySpA"
+  ]
+ },
+ "poisonheal": {
+  "name": "Poison Heal",
+  "id": "poisonheal",
+  "num": 90,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onDamagePriority": 1,
+  "handlers": [
+   "onDamage"
+  ]
+ },
+ "poisonpoint": {
+  "name": "Poison Point",
+  "id": "poisonpoint",
+  "num": 38,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onDamagingHit"
+  ]
+ },
+ "poisonpuppeteer": {
+  "name": "Poison Puppeteer",
+  "id": "poisonpuppeteer",
+  "num": 310,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "failroleplay": 1,
+   "noreceiver": 1,
+   "noentrain": 1,
+   "notrace": 1,
+   "failskillswap": 1
+  },
+  "handlers": [
+   "onAnyAfterSetStatus"
+  ]
+ },
+ "poisontouch": {
+  "name": "Poison Touch",
+  "id": "poisontouch",
+  "num": 143,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onSourceDamagingHit"
+  ]
+ },
+ "powerconstruct": {
+  "name": "Power Construct",
+  "id": "powerconstruct",
+  "num": 211,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "failroleplay": 1,
+   "noreceiver": 1,
+   "noentrain": 1,
+   "notrace": 1,
+   "failskillswap": 1,
+   "cantsuppress": 1
+  },
+  "onResidualOrder": 29,
+  "handlers": [
+   "onResidual"
+  ]
+ },
+ "powerofalchemy": {
+  "name": "Power of Alchemy",
+  "id": "powerofalchemy",
+  "num": 223,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "failroleplay": 1,
+   "noreceiver": 1,
+   "noentrain": 1,
+   "notrace": 1
+  },
+  "handlers": [
+   "onAllyFaint"
+  ]
+ },
+ "powerspot": {
+  "name": "Power Spot",
+  "id": "powerspot",
+  "num": 249,
+  "gen": 8,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onAllyBasePowerPriority": 22,
+  "handlers": [
+   "onAllyBasePower"
+  ]
+ },
+ "prankster": {
+  "name": "Prankster",
+  "id": "prankster",
+  "num": 158,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onModifyPriority"
+  ]
+ },
+ "pressure": {
+  "name": "Pressure",
+  "id": "pressure",
+  "num": 46,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onDeductPP",
+   "onStart"
+  ]
+ },
+ "primordialsea": {
+  "name": "Primordial Sea",
+  "id": "primordialsea",
+  "num": 189,
+  "gen": 6,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onAnySetWeather",
+   "onEnd",
+   "onStart"
+  ]
+ },
+ "prismarmor": {
+  "name": "Prism Armor",
+  "id": "prismarmor",
+  "num": 232,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onSourceModifyDamage"
+  ]
+ },
+ "propellertail": {
+  "name": "Propeller Tail",
+  "id": "propellertail",
+  "num": 239,
+  "gen": 8,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onModifyMovePriority": 1,
+  "handlers": [
+   "onModifyMove"
+  ]
+ },
+ "protean": {
+  "name": "Protean",
+  "id": "protean",
+  "num": 168,
+  "gen": 6,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onPrepareHit"
+  ]
+ },
+ "protosynthesis": {
+  "name": "Protosynthesis",
+  "id": "protosynthesis",
+  "num": 281,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "failroleplay": 1,
+   "noreceiver": 1,
+   "noentrain": 1,
+   "notrace": 1,
+   "failskillswap": 1,
+   "notransform": 1
+  },
+  "onSwitchInPriority": -2,
+  "condition": {
+   "noCopy": true,
+   "onModifyAtkPriority": 5,
+   "onModifyDefPriority": 6,
+   "onModifySpAPriority": 5,
+   "onModifySpDPriority": 6
+  },
+  "handlers": [
+   "condition.onEnd",
+   "condition.onModifyAtk",
+   "condition.onModifyDef",
+   "condition.onModifySpA",
+   "condition.onModifySpD",
+   "condition.onModifySpe",
+   "condition.onStart",
+   "onEnd",
+   "onStart",
+   "onWeatherChange"
+  ]
+ },
+ "psychicsurge": {
+  "name": "Psychic Surge",
+  "id": "psychicsurge",
+  "num": 227,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onStart"
+  ]
+ },
+ "punkrock": {
+  "name": "Punk Rock",
+  "id": "punkrock",
+  "num": 244,
+  "gen": 8,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "onBasePowerPriority": 7,
+  "handlers": [
+   "onBasePower",
+   "onSourceModifyDamage"
+  ]
+ },
+ "purepower": {
+  "name": "Pure Power",
+  "id": "purepower",
+  "num": 74,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onModifyAtkPriority": 5,
+  "handlers": [
+   "onModifyAtk"
+  ]
+ },
+ "purifyingsalt": {
+  "name": "Purifying Salt",
+  "id": "purifyingsalt",
+  "num": 272,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "onSourceModifyAtkPriority": 6,
+  "onSourceModifySpAPriority": 5,
+  "handlers": [
+   "onSetStatus",
+   "onSourceModifyAtk",
+   "onSourceModifySpA",
+   "onTryAddVolatile"
+  ]
+ },
+ "quarkdrive": {
+  "name": "Quark Drive",
+  "id": "quarkdrive",
+  "num": 282,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "failroleplay": 1,
+   "noreceiver": 1,
+   "noentrain": 1,
+   "notrace": 1,
+   "failskillswap": 1,
+   "notransform": 1
+  },
+  "onSwitchInPriority": -2,
+  "condition": {
+   "noCopy": true,
+   "onModifyAtkPriority": 5,
+   "onModifyDefPriority": 6,
+   "onModifySpAPriority": 5,
+   "onModifySpDPriority": 6
+  },
+  "handlers": [
+   "condition.onEnd",
+   "condition.onModifyAtk",
+   "condition.onModifyDef",
+   "condition.onModifySpA",
+   "condition.onModifySpD",
+   "condition.onModifySpe",
+   "condition.onStart",
+   "onEnd",
+   "onStart",
+   "onTerrainChange"
+  ]
+ },
+ "queenlymajesty": {
+  "name": "Queenly Majesty",
+  "id": "queenlymajesty",
+  "num": 214,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onFoeTryMove"
+  ]
+ },
+ "quickdraw": {
+  "name": "Quick Draw",
+  "id": "quickdraw",
+  "num": 259,
+  "gen": 8,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onFractionalPriorityPriority": -1,
+  "handlers": [
+   "onFractionalPriority"
+  ]
+ },
+ "quickfeet": {
+  "name": "Quick Feet",
+  "id": "quickfeet",
+  "num": 95,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onModifySpe"
+  ]
+ },
+ "raindish": {
+  "name": "Rain Dish",
+  "id": "raindish",
+  "num": 44,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onWeather"
+  ]
+ },
+ "rattled": {
+  "name": "Rattled",
+  "id": "rattled",
+  "num": 155,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onAfterBoost",
+   "onDamagingHit"
+  ]
+ },
+ "rebound": {
+  "name": "Rebound",
+  "id": "rebound",
+  "num": -2,
+  "gen": 0,
+  "isNonstandard": "CAP",
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "onTryHitPriority": 1,
+  "handlers": [
+   "onAllyTryHitSide",
+   "onTryHit"
+  ]
+ },
+ "receiver": {
+  "name": "Receiver",
+  "id": "receiver",
+  "num": 222,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "failroleplay": 1,
+   "noreceiver": 1,
+   "noentrain": 1,
+   "notrace": 1
+  },
+  "handlers": [
+   "onAllyFaint"
+  ]
+ },
+ "reckless": {
+  "name": "Reckless",
+  "id": "reckless",
+  "num": 120,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onBasePowerPriority": 23,
+  "handlers": [
+   "onBasePower"
+  ]
+ },
+ "refrigerate": {
+  "name": "Refrigerate",
+  "id": "refrigerate",
+  "num": 174,
+  "gen": 6,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onModifyTypePriority": -1,
+  "onBasePowerPriority": 23,
+  "handlers": [
+   "onBasePower",
+   "onModifyType"
+  ]
+ },
+ "regenerator": {
+  "name": "Regenerator",
+  "id": "regenerator",
+  "num": 144,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onSwitchOut"
+  ]
+ },
+ "ripen": {
+  "name": "Ripen",
+  "id": "ripen",
+  "num": 247,
+  "gen": 8,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onSourceModifyDamagePriority": -1,
+  "onTryEatItemPriority": -1,
+  "handlers": [
+   "onChangeBoost",
+   "onEatItem",
+   "onSourceModifyDamage",
+   "onTryEatItem",
+   "onTryHeal"
+  ]
+ },
+ "rivalry": {
+  "name": "Rivalry",
+  "id": "rivalry",
+  "num": 79,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onBasePowerPriority": 24,
+  "handlers": [
+   "onBasePower"
+  ]
+ },
+ "rkssystem": {
+  "name": "RKS System",
+  "id": "rkssystem",
+  "num": 225,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "failroleplay": 1,
+   "noreceiver": 1,
+   "noentrain": 1,
+   "notrace": 1,
+   "failskillswap": 1,
+   "cantsuppress": 1
+  }
+ },
+ "rockhead": {
+  "name": "Rock Head",
+  "id": "rockhead",
+  "num": 69,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onDamage"
+  ]
+ },
+ "rockypayload": {
+  "name": "Rocky Payload",
+  "id": "rockypayload",
+  "num": 276,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onModifyAtkPriority": 5,
+  "onModifySpAPriority": 5,
+  "handlers": [
+   "onModifyAtk",
+   "onModifySpA"
+  ]
+ },
+ "roughskin": {
+  "name": "Rough Skin",
+  "id": "roughskin",
+  "num": 24,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onDamagingHitOrder": 1,
+  "handlers": [
+   "onDamagingHit"
+  ]
+ },
+ "runaway": {
+  "name": "Run Away",
+  "id": "runaway",
+  "num": 50,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {}
+ },
+ "sandforce": {
+  "name": "Sand Force",
+  "id": "sandforce",
+  "num": 159,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onBasePowerPriority": 21,
+  "handlers": [
+   "onBasePower",
+   "onImmunity"
+  ]
+ },
+ "sandrush": {
+  "name": "Sand Rush",
+  "id": "sandrush",
+  "num": 146,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onImmunity",
+   "onModifySpe"
+  ]
+ },
+ "sandspit": {
+  "name": "Sand Spit",
+  "id": "sandspit",
+  "num": 245,
+  "gen": 8,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onDamagingHit"
+  ]
+ },
+ "sandstream": {
+  "name": "Sand Stream",
+  "id": "sandstream",
+  "num": 45,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onStart"
+  ]
+ },
+ "sandveil": {
+  "name": "Sand Veil",
+  "id": "sandveil",
+  "num": 8,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "onModifyAccuracyPriority": -1,
+  "handlers": [
+   "onImmunity",
+   "onModifyAccuracy"
+  ]
+ },
+ "sapsipper": {
+  "name": "Sap Sipper",
+  "id": "sapsipper",
+  "num": 157,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "onTryHitPriority": 1,
+  "handlers": [
+   "onAllyTryHitSide",
+   "onTryHit"
+  ]
+ },
+ "schooling": {
+  "name": "Schooling",
+  "id": "schooling",
+  "num": 208,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "failroleplay": 1,
+   "noreceiver": 1,
+   "noentrain": 1,
+   "notrace": 1,
+   "failskillswap": 1,
+   "cantsuppress": 1
+  },
+  "onSwitchInPriority": -1,
+  "onResidualOrder": 29,
+  "handlers": [
+   "onResidual",
+   "onStart"
+  ]
+ },
+ "scrappy": {
+  "name": "Scrappy",
+  "id": "scrappy",
+  "num": 113,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onModifyMovePriority": -5,
+  "handlers": [
+   "onModifyMove",
+   "onTryBoost"
+  ]
+ },
+ "screencleaner": {
+  "name": "Screen Cleaner",
+  "id": "screencleaner",
+  "num": 251,
+  "gen": 8,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onStart"
+  ]
+ },
+ "seedsower": {
+  "name": "Seed Sower",
+  "id": "seedsower",
+  "num": 269,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onDamagingHit"
+  ]
+ },
+ "serenegrace": {
+  "name": "Serene Grace",
+  "id": "serenegrace",
+  "num": 32,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onModifyMovePriority": -2,
+  "handlers": [
+   "onModifyMove"
+  ]
+ },
+ "shadowshield": {
+  "name": "Shadow Shield",
+  "id": "shadowshield",
+  "num": 231,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onSourceModifyDamage"
+  ]
+ },
+ "shadowtag": {
+  "name": "Shadow Tag",
+  "id": "shadowtag",
+  "num": 23,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onFoeMaybeTrapPokemon",
+   "onFoeTrapPokemon"
+  ]
+ },
+ "sharpness": {
+  "name": "Sharpness",
+  "id": "sharpness",
+  "num": 292,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onBasePowerPriority": 19,
+  "handlers": [
+   "onBasePower"
+  ]
+ },
+ "shedskin": {
+  "name": "Shed Skin",
+  "id": "shedskin",
+  "num": 61,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onResidualOrder": 5,
+  "onResidualSubOrder": 3,
+  "handlers": [
+   "onResidual"
+  ]
+ },
+ "sheerforce": {
+  "name": "Sheer Force",
+  "id": "sheerforce",
+  "num": 125,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onBasePowerPriority": 21,
+  "handlers": [
+   "onBasePower",
+   "onModifyMove"
+  ]
+ },
+ "shellarmor": {
+  "name": "Shell Armor",
+  "id": "shellarmor",
+  "num": 75,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "onCriticalHit": false
+ },
+ "shielddust": {
+  "name": "Shield Dust",
+  "id": "shielddust",
+  "num": 19,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onModifySecondaries"
+  ]
+ },
+ "shieldsdown": {
+  "name": "Shields Down",
+  "id": "shieldsdown",
+  "num": 197,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "failroleplay": 1,
+   "noreceiver": 1,
+   "noentrain": 1,
+   "notrace": 1,
+   "failskillswap": 1,
+   "cantsuppress": 1
+  },
+  "onSwitchInPriority": -1,
+  "onResidualOrder": 29,
+  "handlers": [
+   "onResidual",
+   "onSetStatus",
+   "onStart",
+   "onTryAddVolatile"
+  ]
+ },
+ "simple": {
+  "name": "Simple",
+  "id": "simple",
+  "num": 86,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onChangeBoost"
+  ]
+ },
+ "skilllink": {
+  "name": "Skill Link",
+  "id": "skilllink",
+  "num": 92,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onModifyMove"
+  ]
+ },
+ "slowstart": {
+  "name": "Slow Start",
+  "id": "slowstart",
+  "num": 112,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onResidualOrder": 28,
+  "onResidualSubOrder": 2,
+  "onModifyAtkPriority": 5,
+  "handlers": [
+   "onEnd",
+   "onModifyAtk",
+   "onModifySpe",
+   "onResidual",
+   "onStart"
+  ]
+ },
+ "slushrush": {
+  "name": "Slush Rush",
+  "id": "slushrush",
+  "num": 202,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onModifySpe"
+  ]
+ },
+ "sniper": {
+  "name": "Sniper",
+  "id": "sniper",
+  "num": 97,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onModifyDamage"
+  ]
+ },
+ "snowcloak": {
+  "name": "Snow Cloak",
+  "id": "snowcloak",
+  "num": 81,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "onModifyAccuracyPriority": -1,
+  "handlers": [
+   "onImmunity",
+   "onModifyAccuracy"
+  ]
+ },
+ "snowwarning": {
+  "name": "Snow Warning",
+  "id": "snowwarning",
+  "num": 117,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onStart"
+  ]
+ },
+ "solarpower": {
+  "name": "Solar Power",
+  "id": "solarpower",
+  "num": 94,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onModifySpAPriority": 5,
+  "handlers": [
+   "onModifySpA",
+   "onWeather"
+  ]
+ },
+ "solidrock": {
+  "name": "Solid Rock",
+  "id": "solidrock",
+  "num": 116,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onSourceModifyDamage"
+  ]
+ },
+ "soulheart": {
+  "name": "Soul-Heart",
+  "id": "soulheart",
+  "num": 220,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onAnyFaintPriority": 1,
+  "handlers": [
+   "onAnyFaint"
+  ]
+ },
+ "soundproof": {
+  "name": "Soundproof",
+  "id": "soundproof",
+  "num": 43,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onAllyTryHitSide",
+   "onTryHit"
+  ]
+ },
+ "speedboost": {
+  "name": "Speed Boost",
+  "id": "speedboost",
+  "num": 3,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onResidualOrder": 28,
+  "onResidualSubOrder": 2,
+  "handlers": [
+   "onResidual"
+  ]
+ },
+ "spicyspray": {
+  "name": "Spicy Spray",
+  "id": "spicyspray",
+  "num": 318,
+  "gen": 9,
+  "isNonstandard": "Future",
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onDamagingHit"
+  ]
+ },
+ "stakeout": {
+  "name": "Stakeout",
+  "id": "stakeout",
+  "num": 198,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onModifyAtkPriority": 5,
+  "onModifySpAPriority": 5,
+  "handlers": [
+   "onModifyAtk",
+   "onModifySpA"
+  ]
+ },
+ "stall": {
+  "name": "Stall",
+  "id": "stall",
+  "num": 100,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onFractionalPriority": -0.1
+ },
+ "stalwart": {
+  "name": "Stalwart",
+  "id": "stalwart",
+  "num": 242,
+  "gen": 8,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onModifyMovePriority": 1,
+  "handlers": [
+   "onModifyMove"
+  ]
+ },
+ "stamina": {
+  "name": "Stamina",
+  "id": "stamina",
+  "num": 192,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onDamagingHit"
+  ]
+ },
+ "stancechange": {
+  "name": "Stance Change",
+  "id": "stancechange",
+  "num": 176,
+  "gen": 6,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "failroleplay": 1,
+   "noreceiver": 1,
+   "noentrain": 1,
+   "notrace": 1,
+   "failskillswap": 1,
+   "cantsuppress": 1
+  },
+  "onModifyMovePriority": 1,
+  "handlers": [
+   "onModifyMove"
+  ]
+ },
+ "static": {
+  "name": "Static",
+  "id": "static",
+  "num": 9,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onDamagingHit"
+  ]
+ },
+ "steadfast": {
+  "name": "Steadfast",
+  "id": "steadfast",
+  "num": 80,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onFlinch"
+  ]
+ },
+ "steamengine": {
+  "name": "Steam Engine",
+  "id": "steamengine",
+  "num": 243,
+  "gen": 8,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onDamagingHit"
+  ]
+ },
+ "steelworker": {
+  "name": "Steelworker",
+  "id": "steelworker",
+  "num": 200,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onModifyAtkPriority": 5,
+  "onModifySpAPriority": 5,
+  "handlers": [
+   "onModifyAtk",
+   "onModifySpA"
+  ]
+ },
+ "steelyspirit": {
+  "name": "Steely Spirit",
+  "id": "steelyspirit",
+  "num": 252,
+  "gen": 8,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onAllyBasePowerPriority": 22,
+  "handlers": [
+   "onAllyBasePower"
+  ]
+ },
+ "stench": {
+  "name": "Stench",
+  "id": "stench",
+  "num": 1,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onModifyMovePriority": -1,
+  "handlers": [
+   "onModifyMove"
+  ]
+ },
+ "stickyhold": {
+  "name": "Sticky Hold",
+  "id": "stickyhold",
+  "num": 60,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onTakeItem"
+  ]
+ },
+ "stormdrain": {
+  "name": "Storm Drain",
+  "id": "stormdrain",
+  "num": 114,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onAnyRedirectTarget",
+   "onTryHit"
+  ]
+ },
+ "strongjaw": {
+  "name": "Strong Jaw",
+  "id": "strongjaw",
+  "num": 173,
+  "gen": 6,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onBasePowerPriority": 19,
+  "handlers": [
+   "onBasePower"
+  ]
+ },
+ "sturdy": {
+  "name": "Sturdy",
+  "id": "sturdy",
+  "num": 5,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "onDamagePriority": -30,
+  "handlers": [
+   "onDamage",
+   "onTryHit"
+  ]
+ },
+ "suctioncups": {
+  "name": "Suction Cups",
+  "id": "suctioncups",
+  "num": 21,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "onDragOutPriority": 1,
+  "handlers": [
+   "onDragOut"
+  ]
+ },
+ "superluck": {
+  "name": "Super Luck",
+  "id": "superluck",
+  "num": 105,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onModifyCritRatio"
+  ]
+ },
+ "supersweetsyrup": {
+  "name": "Supersweet Syrup",
+  "id": "supersweetsyrup",
+  "num": 306,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onStart"
+  ]
+ },
+ "supremeoverlord": {
+  "name": "Supreme Overlord",
+  "id": "supremeoverlord",
+  "num": 293,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onBasePowerPriority": 21,
+  "handlers": [
+   "onBasePower",
+   "onEnd",
+   "onStart"
+  ]
+ },
+ "surgesurfer": {
+  "name": "Surge Surfer",
+  "id": "surgesurfer",
+  "num": 207,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onModifySpe"
+  ]
+ },
+ "swarm": {
+  "name": "Swarm",
+  "id": "swarm",
+  "num": 68,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onModifyAtkPriority": 5,
+  "onModifySpAPriority": 5,
+  "handlers": [
+   "onModifyAtk",
+   "onModifySpA"
+  ]
+ },
+ "sweetveil": {
+  "name": "Sweet Veil",
+  "id": "sweetveil",
+  "num": 175,
+  "gen": 6,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onAllySetStatus",
+   "onAllyTryAddVolatile"
+  ]
+ },
+ "swiftswim": {
+  "name": "Swift Swim",
+  "id": "swiftswim",
+  "num": 33,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onModifySpe"
+  ]
+ },
+ "swordofruin": {
+  "name": "Sword of Ruin",
+  "id": "swordofruin",
+  "num": 285,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onAnyModifyDef",
+   "onStart"
+  ]
+ },
+ "symbiosis": {
+  "name": "Symbiosis",
+  "id": "symbiosis",
+  "num": 180,
+  "gen": 6,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onAllyAfterUseItem"
+  ]
+ },
+ "synchronize": {
+  "name": "Synchronize",
+  "id": "synchronize",
+  "num": 28,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onAfterSetStatus"
+  ]
+ },
+ "tabletsofruin": {
+  "name": "Tablets of Ruin",
+  "id": "tabletsofruin",
+  "num": 284,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onAnyModifyAtk",
+   "onStart"
+  ]
+ },
+ "tangledfeet": {
+  "name": "Tangled Feet",
+  "id": "tangledfeet",
+  "num": 77,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "onModifyAccuracyPriority": -1,
+  "handlers": [
+   "onModifyAccuracy"
+  ]
+ },
+ "tanglinghair": {
+  "name": "Tangling Hair",
+  "id": "tanglinghair",
+  "num": 221,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onDamagingHit"
+  ]
+ },
+ "technician": {
+  "name": "Technician",
+  "id": "technician",
+  "num": 101,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onBasePowerPriority": 30,
+  "handlers": [
+   "onBasePower"
+  ]
+ },
+ "telepathy": {
+  "name": "Telepathy",
+  "id": "telepathy",
+  "num": 140,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onTryHit"
+  ]
+ },
+ "teraformzero": {
+  "name": "Teraform Zero",
+  "id": "teraformzero",
+  "num": 309,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "failroleplay": 1,
+   "noreceiver": 1,
+   "noentrain": 1,
+   "notrace": 1,
+   "failskillswap": 1
+  },
+  "handlers": [
+   "onAfterTerastallization"
+  ]
+ },
+ "terashell": {
+  "name": "Tera Shell",
+  "id": "terashell",
+  "num": 308,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "failroleplay": 1,
+   "noreceiver": 1,
+   "noentrain": 1,
+   "notrace": 1,
+   "failskillswap": 1,
+   "breakable": 1
+  }
+ },
+ "terashift": {
+  "name": "Tera Shift",
+  "id": "terashift",
+  "num": 307,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "failroleplay": 1,
+   "noreceiver": 1,
+   "noentrain": 1,
+   "notrace": 1,
+   "failskillswap": 1,
+   "cantsuppress": 1,
+   "notransform": 1
+  },
+  "onSwitchInPriority": 2,
+  "handlers": [
+   "onSwitchIn"
+  ]
+ },
+ "teravolt": {
+  "name": "Teravolt",
+  "id": "teravolt",
+  "num": 164,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onModifyMove",
+   "onStart"
+  ]
+ },
+ "thermalexchange": {
+  "name": "Thermal Exchange",
+  "id": "thermalexchange",
+  "num": 270,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onDamagingHit",
+   "onSetStatus",
+   "onUpdate"
+  ]
+ },
+ "thickfat": {
+  "name": "Thick Fat",
+  "id": "thickfat",
+  "num": 47,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "onSourceModifyAtkPriority": 6,
+  "onSourceModifySpAPriority": 5,
+  "handlers": [
+   "onSourceModifyAtk",
+   "onSourceModifySpA"
+  ]
+ },
+ "tintedlens": {
+  "name": "Tinted Lens",
+  "id": "tintedlens",
+  "num": 110,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onModifyDamage"
+  ]
+ },
+ "torrent": {
+  "name": "Torrent",
+  "id": "torrent",
+  "num": 67,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onModifyAtkPriority": 5,
+  "onModifySpAPriority": 5,
+  "handlers": [
+   "onModifyAtk",
+   "onModifySpA"
+  ]
+ },
+ "toughclaws": {
+  "name": "Tough Claws",
+  "id": "toughclaws",
+  "num": 181,
+  "gen": 6,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onBasePowerPriority": 21,
+  "handlers": [
+   "onBasePower"
+  ]
+ },
+ "toxicboost": {
+  "name": "Toxic Boost",
+  "id": "toxicboost",
+  "num": 137,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onBasePowerPriority": 19,
+  "handlers": [
+   "onBasePower"
+  ]
+ },
+ "toxicchain": {
+  "name": "Toxic Chain",
+  "id": "toxicchain",
+  "num": 305,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onSourceDamagingHit"
+  ]
+ },
+ "toxicdebris": {
+  "name": "Toxic Debris",
+  "id": "toxicdebris",
+  "num": 295,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onDamagingHit"
+  ]
+ },
+ "trace": {
+  "name": "Trace",
+  "id": "trace",
+  "num": 36,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "failroleplay": 1,
+   "noreceiver": 1,
+   "noentrain": 1,
+   "notrace": 1
+  },
+  "handlers": [
+   "onStart",
+   "onUpdate"
+  ]
+ },
+ "transistor": {
+  "name": "Transistor",
+  "id": "transistor",
+  "num": 262,
+  "gen": 8,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onModifyAtkPriority": 5,
+  "onModifySpAPriority": 5,
+  "handlers": [
+   "onModifyAtk",
+   "onModifySpA"
+  ]
+ },
+ "triage": {
+  "name": "Triage",
+  "id": "triage",
+  "num": 205,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onModifyPriority"
+  ]
+ },
+ "truant": {
+  "name": "Truant",
+  "id": "truant",
+  "num": 54,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onBeforeMovePriority": 9,
+  "condition": {},
+  "handlers": [
+   "onBeforeMove",
+   "onStart"
+  ]
+ },
+ "turboblaze": {
+  "name": "Turboblaze",
+  "id": "turboblaze",
+  "num": 163,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onModifyMove",
+   "onStart"
+  ]
+ },
+ "unaware": {
+  "name": "Unaware",
+  "id": "unaware",
+  "num": 109,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onAnyModifyBoost"
+  ]
+ },
+ "unburden": {
+  "name": "Unburden",
+  "id": "unburden",
+  "num": 84,
+  "gen": 4,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "condition": {},
+  "handlers": [
+   "condition.onModifySpe",
+   "onAfterUseItem",
+   "onEnd",
+   "onTakeItem"
+  ]
+ },
+ "unnerve": {
+  "name": "Unnerve",
+  "id": "unnerve",
+  "num": 127,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onSwitchInPriority": 1,
+  "handlers": [
+   "onEnd",
+   "onFoeTryEatItem",
+   "onStart"
+  ]
+ },
+ "unseenfist": {
+  "name": "Unseen Fist",
+  "id": "unseenfist",
+  "num": 260,
+  "gen": 8,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onModifyMove"
+  ]
+ },
+ "vesselofruin": {
+  "name": "Vessel of Ruin",
+  "id": "vesselofruin",
+  "num": 284,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onAnyModifySpA",
+   "onStart"
+  ]
+ },
+ "victorystar": {
+  "name": "Victory Star",
+  "id": "victorystar",
+  "num": 162,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onAnyModifyAccuracyPriority": -1,
+  "handlers": [
+   "onAnyModifyAccuracy"
+  ]
+ },
+ "vitalspirit": {
+  "name": "Vital Spirit",
+  "id": "vitalspirit",
+  "num": 72,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onSetStatus",
+   "onTryAddVolatile",
+   "onUpdate"
+  ]
+ },
+ "voltabsorb": {
+  "name": "Volt Absorb",
+  "id": "voltabsorb",
+  "num": 10,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onTryHit"
+  ]
+ },
+ "wanderingspirit": {
+  "name": "Wandering Spirit",
+  "id": "wanderingspirit",
+  "num": 254,
+  "gen": 8,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onDamagingHit"
+  ]
+ },
+ "waterabsorb": {
+  "name": "Water Absorb",
+  "id": "waterabsorb",
+  "num": 11,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onTryHit"
+  ]
+ },
+ "waterbubble": {
+  "name": "Water Bubble",
+  "id": "waterbubble",
+  "num": 199,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "onSourceModifyAtkPriority": 5,
+  "onSourceModifySpAPriority": 5,
+  "handlers": [
+   "onModifyAtk",
+   "onModifySpA",
+   "onSetStatus",
+   "onSourceModifyAtk",
+   "onSourceModifySpA",
+   "onUpdate"
+  ]
+ },
+ "watercompaction": {
+  "name": "Water Compaction",
+  "id": "watercompaction",
+  "num": 195,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onDamagingHit"
+  ]
+ },
+ "waterveil": {
+  "name": "Water Veil",
+  "id": "waterveil",
+  "num": 41,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onSetStatus",
+   "onUpdate"
+  ]
+ },
+ "weakarmor": {
+  "name": "Weak Armor",
+  "id": "weakarmor",
+  "num": 133,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onDamagingHit"
+  ]
+ },
+ "wellbakedbody": {
+  "name": "Well-Baked Body",
+  "id": "wellbakedbody",
+  "num": 273,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onTryHit"
+  ]
+ },
+ "whitesmoke": {
+  "name": "White Smoke",
+  "id": "whitesmoke",
+  "num": 73,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onTryBoost"
+  ]
+ },
+ "wimpout": {
+  "name": "Wimp Out",
+  "id": "wimpout",
+  "num": 193,
+  "gen": 7,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "handlers": [
+   "onEmergencyExit"
+  ]
+ },
+ "windpower": {
+  "name": "Wind Power",
+  "id": "windpower",
+  "num": 277,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {},
+  "onDamagingHitOrder": 1,
+  "handlers": [
+   "onDamagingHit",
+   "onSideConditionStart"
+  ]
+ },
+ "windrider": {
+  "name": "Wind Rider",
+  "id": "windrider",
+  "num": 274,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "handlers": [
+   "onSideConditionStart",
+   "onStart",
+   "onTryHit"
+  ]
+ },
+ "wonderguard": {
+  "name": "Wonder Guard",
+  "id": "wonderguard",
+  "num": 25,
+  "gen": 3,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "failroleplay": 1,
+   "noreceiver": 1,
+   "noentrain": 1,
+   "failskillswap": 1,
+   "breakable": 1
+  },
+  "handlers": [
+   "onTryHit"
+  ]
+ },
+ "wonderskin": {
+  "name": "Wonder Skin",
+  "id": "wonderskin",
+  "num": 147,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "breakable": 1
+  },
+  "onModifyAccuracyPriority": 10,
+  "handlers": [
+   "onModifyAccuracy"
+  ]
+ },
+ "zenmode": {
+  "name": "Zen Mode",
+  "id": "zenmode",
+  "num": 161,
+  "gen": 5,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "failroleplay": 1,
+   "noreceiver": 1,
+   "noentrain": 1,
+   "notrace": 1,
+   "failskillswap": 1,
+   "cantsuppress": 1
+  },
+  "onResidualOrder": 29,
+  "condition": {},
+  "handlers": [
+   "condition.onEnd",
+   "condition.onStart",
+   "onEnd",
+   "onResidual"
+  ]
+ },
+ "zerotohero": {
+  "name": "Zero to Hero",
+  "id": "zerotohero",
+  "num": 278,
+  "gen": 9,
+  "isNonstandard": null,
+  "noCopy": false,
+  "affectsFainted": false,
+  "suppressWeather": false,
+  "flags": {
+   "failroleplay": 1,
+   "noreceiver": 1,
+   "noentrain": 1,
+   "notrace": 1,
+   "failskillswap": 1,
+   "cantsuppress": 1,
+   "notransform": 1
+  },
+  "handlers": [
+   "onSwitchIn",
+   "onSwitchOut"
+  ]
+ }
+}
