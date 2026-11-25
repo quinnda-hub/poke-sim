@@ -1,0 +1,4269 @@
+{
+  "meta": {
+    "month": "2026-10",
+    "metagame": "gen9ou",
+    "ratingCutoff": 1695,
+    "battles": 608936,
+    "speciesMinUsage": 0.005,
+    "entryMinShare": 0.01,
+    "source": "https://www.smogon.com/stats/2026-10/chaos/gen9ou-1695.json",
+    "showdown": {
+      "version": "0.11.11",
+      "commit": "c7fa6f16503de510c319239b5b2d29d4f7abd8c4"
+    }
+  },
+  "species": {
+    "alomomola": {
+      "usage": 0.0941,
+      "abilities": {
+        "regenerator": 0.9991
+      },
+      "items": {
+        "assaultvest": 0.3792,
+        "covertcloak": 0.0312,
+        "heavydutyboots": 0.3023,
+        "leftovers": 0.0208,
+        "rockyhelmet": 0.2532
+      },
+      "moves": {
+        "alluringvoice": 0.0111,
+        "aquajet": 0.2218,
+        "bodyslam": 0.2684,
+        "flipturn": 0.9984,
+        "healingwish": 0.0743,
+        "icywind": 0.0258,
+        "mirrorcoat": 0.4716,
+        "playrough": 0.1215,
+        "protect": 0.5306,
+        "scald": 0.394,
+        "tickle": 0.2251,
+        "wish": 0.6279
+      },
+      "teraTypes": {
+        "dark": 0.0311,
+        "dragon": 0.0144,
+        "fairy": 0.2267,
+        "flying": 0.0228,
+        "ghost": 0.3035,
+        "grass": 0.0282,
+        "ground": 0.0286,
+        "normal": 0.1875,
+        "poison": 0.0716,
+        "steel": 0.052,
+        "water": 0.0198
+      }
+    },
+    "amoonguss": {
+      "usage": 0.0072,
+      "abilities": {
+        "regenerator": 0.9924
+      },
+      "items": {
+        "assaultvest": 0.0884,
+        "ejectbutton": 0.0266,
+        "ejectpack": 0.0163,
+        "heavydutyboots": 0.5841,
+        "leftovers": 0.0762,
+        "rockyhelmet": 0.2028
+      },
+      "moves": {
+        "clearsmog": 0.4856,
+        "foulplay": 0.8049,
+        "gigadrain": 0.4653,
+        "grassknot": 0.0734,
+        "hex": 0.0161,
+        "leafstorm": 0.0411,
+        "seedbomb": 0.0712,
+        "sludgebomb": 0.2851,
+        "stompingtantrum": 0.1795,
+        "stunspore": 0.1839,
+        "synthesis": 0.557,
+        "toxic": 0.6994,
+        "worryseed": 0.1191
+      },
+      "teraTypes": {
+        "dark": 0.2103,
+        "dragon": 0.0234,
+        "fairy": 0.0396,
+        "fire": 0.0653,
+        "flying": 0.0202,
+        "ghost": 0.0364,
+        "ground": 0.0298,
+        "steel": 0.278,
+        "water": 0.2827
+      }
+    },
+    "araquanid": {
+      "usage": 0.0288,
+      "abilities": {
+        "waterbubble": 0.9998
+      },
+      "items": {
+        "choiceband": 0.0718,
+        "custapberry": 0.5001,
+        "focussash": 0.073,
+        "mentalherb": 0.0122,
+        "mysticwater": 0.0152,
+        "redcard": 0.3066
+      },
+      "moves": {
+        "endeavor": 0.7791,
+        "endure": 0.2567,
+        "hydropump": 0.0101,
+        "icywind": 0.0126,
+        "infestation": 0.013,
+        "leechlife": 0.2478,
+        "liquidation": 0.4264,
+        "lunge": 0.4556,
+        "mirrorcoat": 0.1251,
+        "pounce": 0.0351,
+        "rest": 0.0155,
+        "stickyweb": 0.9869,
+        "surf": 0.5773,
+        "waterfall": 0.018
+      },
+      "teraTypes": {
+        "ghost": 0.7783,
+        "ground": 0.0227,
+        "steel": 0.0385,
+        "water": 0.1477
+      }
+    },
+    "armarouge": {
+      "usage": 0.0082,
+      "abilities": {
+        "flashfire": 0.015,
+        "weakarmor": 0.985
+      },
+      "items": {
+        "focussash": 0.1075,
+        "leftovers": 0.0441,
+        "powerherb": 0.0105,
+        "weaknesspolicy": 0.8083
+      },
+      "moves": {
+        "armorcannon": 0.9733,
+        "aurasphere": 0.101,
+        "calmmind": 0.0944,
+        "destinybond": 0.5356,
+        "endure": 0.8974,
+        "energyball": 0.0267,
+        "expandingforce": 0.8853,
+        "focusblast": 0.2676,
+        "irondefense": 0.0228,
+        "meteorbeam": 0.0107,
+        "psyshock": 0.0387,
+        "storedpower": 0.0705,
+        "substitute": 0.0377
+      },
+      "teraTypes": {
+        "fire": 0.3454,
+        "ghost": 0.0147,
+        "grass": 0.0553,
+        "poison": 0.0185,
+        "psychic": 0.5517
+      }
+    },
+    "azumarill": {
+      "usage": 0.0075,
+      "abilities": {
+        "hugepower": 0.9946
+      },
+      "items": {
+        "assaultvest": 0.3336,
+        "choiceband": 0.5283,
+        "sitrusberry": 0.1289
+      },
+      "moves": {
+        "aquajet": 0.9952,
+        "bellydrum": 0.1344,
+        "brickbreak": 0.0742,
+        "icespinner": 0.0137,
+        "knockoff": 0.8025,
+        "liquidation": 0.9486,
+        "playrough": 0.9957
+      },
+      "teraTypes": {
+        "grass": 0.0546,
+        "ground": 0.6298,
+        "poison": 0.0236,
+        "steel": 0.0381,
+        "stellar": 0.0295,
+        "water": 0.204
+      }
+    },
+    "barraskewda": {
+      "usage": 0.0077,
+      "abilities": {
+        "swiftswim": 0.9994
+      },
+      "items": {
+        "choiceband": 0.8362,
+        "heavydutyboots": 0.0224,
+        "lifeorb": 0.0427,
+        "mysticwater": 0.0938
+      },
+      "moves": {
+        "aquajet": 0.9137,
+        "closecombat": 0.9312,
+        "flipturn": 0.9867,
+        "liquidation": 0.9954,
+        "poisonjab": 0.123,
+        "psychicfangs": 0.0271
+      },
+      "teraTypes": {
+        "fighting": 0.05,
+        "ghost": 0.0751,
+        "poison": 0.0233,
+        "water": 0.8416
+      }
+    },
+    "blaziken": {
+      "usage": 0.0143,
+      "abilities": {
+        "speedboost": 0.9983
+      },
+      "items": {
+        "airballoon": 0.1428,
+        "focussash": 0.0543,
+        "grassyseed": 0.0116,
+        "heavydutyboots": 0.01,
+        "leftovers": 0.043,
+        "lifeorb": 0.6759,
+        "scopelens": 0.0294
+      },
+      "moves": {
+        "acrobatics": 0.0164,
+        "blazekick": 0.0248,
+        "closecombat": 0.9479,
+        "earthquake": 0.0333,
+        "flareblitz": 0.3686,
+        "focusblast": 0.0145,
+        "focusenergy": 0.0342,
+        "knockoff": 0.4573,
+        "overheat": 0.4315,
+        "protect": 0.6699,
+        "stoneedge": 0.3174,
+        "swordsdance": 0.5198,
+        "thunderpunch": 0.0135,
+        "upperhand": 0.0708
+      },
+      "teraTypes": {
+        "dark": 0.026,
+        "fighting": 0.2424,
+        "fire": 0.463,
+        "flying": 0.0498,
+        "ghost": 0.1721,
+        "ground": 0.0322
+      }
+    },
+    "blissey": {
+      "usage": 0.0302,
+      "abilities": {
+        "naturalcure": 0.9901
+      },
+      "items": {
+        "heavydutyboots": 0.7941,
+        "leftovers": 0.1991
+      },
+      "moves": {
+        "calmmind": 0.7916,
+        "flamethrower": 0.0602,
+        "healbell": 0.0826,
+        "icebeam": 0.0122,
+        "protect": 0.0336,
+        "seismictoss": 0.7516,
+        "shadowball": 0.487,
+        "softboiled": 0.9992,
+        "stealthrock": 0.5994,
+        "thunderwave": 0.16
+      },
+      "teraTypes": {
+        "dark": 0.5424,
+        "fairy": 0.176,
+        "ghost": 0.0398,
+        "poison": 0.0816,
+        "steel": 0.0163,
+        "water": 0.1299
+      }
+    },
+    "ceruledge": {
+      "usage": 0.0829,
+      "abilities": {
+        "flashfire": 0.0814,
+        "weakarmor": 0.9186
+      },
+      "items": {
+        "airballoon": 0.208,
+        "covertcloak": 0.0122,
+        "focussash": 0.4068,
+        "heavydutyboots": 0.0677,
+        "leftovers": 0.0173,
+        "lifeorb": 0.2598
+      },
+      "moves": {
+        "bitterblade": 0.9601,
+        "bulkup": 0.0353,
+        "closecombat": 0.2669,
+        "destinybond": 0.0496,
+        "dragonclaw": 0.0167,
+        "poltergeist": 0.8,
+        "shadowsneak": 0.8214,
+        "solarblade": 0.0231,
+        "substitute": 0.0324,
+        "swordsdance": 0.9383,
+        "taunt": 0.0304
+      },
+      "teraTypes": {
+        "bug": 0.0652,
+        "fairy": 0.2308,
+        "fighting": 0.18,
+        "fire": 0.0409,
+        "flying": 0.0279,
+        "ghost": 0.4181,
+        "grass": 0.0298
+      }
+    },
+    "cinderace": {
+      "usage": 0.1324,
+      "abilities": {
+        "blaze": 0.464,
+        "libero": 0.536
+      },
+      "items": {
+        "choiceband": 0.0648,
+        "choicescarf": 0.0446,
+        "focussash": 0.0119,
+        "heavydutyboots": 0.8588
+      },
+      "moves": {
+        "courtchange": 0.9052,
+        "gunkshot": 0.1389,
+        "highjumpkick": 0.1127,
+        "lowkick": 0.0622,
+        "pyroball": 0.9973,
+        "suckerpunch": 0.3326,
+        "superfang": 0.0147,
+        "swordsdance": 0.054,
+        "uturn": 0.8568,
+        "willowisp": 0.4852
+      },
+      "teraTypes": {
+        "bug": 0.0362,
+        "dark": 0.0206,
+        "fighting": 0.0165,
+        "fire": 0.6328,
+        "flying": 0.0857,
+        "ghost": 0.1705,
+        "grass": 0.0204
+      }
+    },
+    "clefable": {
+      "usage": 0.0636,
+      "abilities": {
+        "magicguard": 0.7876,
+        "unaware": 0.2121
+      },
+      "items": {
+        "covertcloak": 0.0208,
+        "heavydutyboots": 0.1377,
+        "leftovers": 0.4754,
+        "lifeorb": 0.0692,
+        "rockyhelmet": 0.1338,
+        "stickybarb": 0.156
+      },
+      "moves": {
+        "calmmind": 0.3238,
+        "chargebeam": 0.0286,
+        "cosmicpower": 0.0832,
+        "encore": 0.037,
+        "fireblast": 0.0544,
+        "flamethrower": 0.104,
+        "icebeam": 0.02,
+        "knockoff": 0.4693,
+        "moonblast": 0.9713,
+        "moonlight": 0.8295,
+        "protect": 0.097,
+        "psyshock": 0.0594,
+        "stealthrock": 0.4477,
+        "storedpower": 0.0508,
+        "thunderbolt": 0.0118,
+        "thunderwave": 0.2325,
+        "trick": 0.0294,
+        "wish": 0.1185
+      },
+      "teraTypes": {
+        "dark": 0.0754,
+        "fairy": 0.0257,
+        "fire": 0.0662,
+        "ghost": 0.0427,
+        "normal": 0.0111,
+        "poison": 0.0617,
+        "steel": 0.1661,
+        "water": 0.5261
+      }
+    },
+    "clodsire": {
+      "usage": 0.0346,
+      "abilities": {
+        "unaware": 0.8255,
+        "waterabsorb": 0.1738
+      },
+      "items": {
+        "blacksludge": 0.0221,
+        "covertcloak": 0.0401,
+        "heavydutyboots": 0.5914,
+        "leftovers": 0.3366
+      },
+      "moves": {
+        "amnesia": 0.2015,
+        "bulldoze": 0.0286,
+        "counter": 0.0141,
+        "earthquake": 0.9568,
+        "haze": 0.1317,
+        "poisonjab": 0.5765,
+        "recover": 0.998,
+        "rocktomb": 0.0107,
+        "spikes": 0.2926,
+        "stealthrock": 0.2225,
+        "stockpile": 0.0641,
+        "toxic": 0.4405,
+        "toxicspikes": 0.0288
+      },
+      "teraTypes": {
+        "dark": 0.337,
+        "fairy": 0.0592,
+        "poison": 0.0171,
+        "steel": 0.5323,
+        "water": 0.0297
+      }
+    },
+    "corviknight": {
+      "usage": 0.1058,
+      "abilities": {
+        "mirrorarmor": 0.0483,
+        "pressure": 0.9504
+      },
+      "items": {
+        "covertcloak": 0.0321,
+        "leftovers": 0.3732,
+        "rockyhelmet": 0.5734
+      },
+      "moves": {
+        "agility": 0.0201,
+        "bodypress": 0.3211,
+        "bravebird": 0.7338,
+        "bulkup": 0.1166,
+        "defog": 0.6943,
+        "irondefense": 0.252,
+        "ironhead": 0.0189,
+        "powertrip": 0.0229,
+        "protect": 0.0684,
+        "roost": 0.9959,
+        "uturn": 0.7294
+      },
+      "teraTypes": {
+        "dark": 0.037,
+        "dragon": 0.5061,
+        "fairy": 0.0211,
+        "fighting": 0.0781,
+        "fire": 0.0517,
+        "flying": 0.0232,
+        "ghost": 0.0844,
+        "grass": 0.0613,
+        "ground": 0.0123,
+        "ice": 0.0822,
+        "water": 0.0369
+      }
+    },
+    "cresselia": {
+      "usage": 0.0604,
+      "abilities": {
+        "levitate": 1
+      },
+      "items": {
+        "choicescarf": 0.0155,
+        "covertcloak": 0.1317,
+        "ejectbutton": 0.0856,
+        "leftovers": 0.6026,
+        "lightclay": 0.0174,
+        "mentalherb": 0.0897,
+        "rockyhelmet": 0.0441
+      },
+      "moves": {
+        "calmmind": 0.7366,
+        "icebeam": 0.3218,
+        "lightscreen": 0.0185,
+        "lunarblessing": 0.1518,
+        "lunardance": 0.2565,
+        "moonblast": 0.5437,
+        "moonlight": 0.8005,
+        "psychic": 0.065,
+        "psyshock": 0.1119,
+        "reflect": 0.0183,
+        "storedpower": 0.4312,
+        "thunder": 0.0199,
+        "thunderbolt": 0.2291,
+        "thunderwave": 0.1485,
+        "trick": 0.0159,
+        "trickroom": 0.1112
+      },
+      "teraTypes": {
+        "bug": 0.0231,
+        "electric": 0.2521,
+        "fairy": 0.2489,
+        "ghost": 0.0314,
+        "poison": 0.3107,
+        "steel": 0.1209
+      }
+    },
+    "darkrai": {
+      "usage": 0.0942,
+      "abilities": {
+        "baddreams": 1
+      },
+      "items": {
+        "blackglasses": 0.0362,
+        "choicescarf": 0.1214,
+        "choicespecs": 0.2206,
+        "chopleberry": 0.0185,
+        "expertbelt": 0.0306,
+        "focussash": 0.0211,
+        "heavydutyboots": 0.2214,
+        "leftovers": 0.0975,
+        "lifeorb": 0.1391,
+        "mirrorherb": 0.0414,
+        "redcard": 0.0107,
+        "roseliberry": 0.012,
+        "tangaberry": 0.0234
+      },
+      "moves": {
+        "darkpulse": 0.9726,
+        "drainpunch": 0.0238,
+        "focusblast": 0.4617,
+        "icebeam": 0.7372,
+        "knockoff": 0.1832,
+        "nastyplot": 0.378,
+        "psychic": 0.0393,
+        "psyshock": 0.071,
+        "sludgebomb": 0.5309,
+        "suckerpunch": 0.039,
+        "taunt": 0.02,
+        "thunder": 0.0209,
+        "thunderwave": 0.0164,
+        "trick": 0.2243,
+        "willowisp": 0.26
+      },
+      "teraTypes": {
+        "dark": 0.2661,
+        "electric": 0.0195,
+        "fairy": 0.0415,
+        "fighting": 0.0442,
+        "ghost": 0.198,
+        "poison": 0.4159
+      }
+    },
+    "deoxysspeed": {
+      "usage": 0.0527,
+      "abilities": {
+        "pressure": 1
+      },
+      "items": {
+        "colburberry": 0.0209,
+        "ejectpack": 0.0757,
+        "focussash": 0.1969,
+        "heavydutyboots": 0.0239,
+        "leftovers": 0.0104,
+        "lifeorb": 0.2883,
+        "lightclay": 0.2492,
+        "redcard": 0.0507,
+        "rockyhelmet": 0.0452
+      },
+      "moves": {
+        "expandingforce": 0.019,
+        "focusblast": 0.2229,
+        "icebeam": 0.1317,
+        "knockoff": 0.1456,
+        "lightscreen": 0.2512,
+        "nastyplot": 0.2357,
+        "painsplit": 0.1482,
+        "psychoboost": 0.5473,
+        "recover": 0.0303,
+        "reflect": 0.2514,
+        "shadowball": 0.066,
+        "skillswap": 0.1814,
+        "spikes": 0.2987,
+        "stealthrock": 0.4096,
+        "storedpower": 0.0136,
+        "superpower": 0.1926,
+        "taunt": 0.5651,
+        "teleport": 0.1179,
+        "thunderbolt": 0.0422,
+        "thunderwave": 0.0262
+      },
+      "teraTypes": {
+        "dark": 0.0463,
+        "electric": 0.0234,
+        "fighting": 0.2919,
+        "ghost": 0.4738,
+        "poison": 0.022,
+        "psychic": 0.053,
+        "steel": 0.0602
+      }
+    },
+    "dondozo": {
+      "usage": 0.0403,
+      "abilities": {
+        "unaware": 0.9997
+      },
+      "items": {
+        "chestoberry": 0.0255,
+        "heavydutyboots": 0.2112,
+        "leftovers": 0.7348
+      },
+      "moves": {
+        "avalanche": 0.1562,
+        "bodypress": 0.3865,
+        "crunch": 0.16,
+        "curse": 0.8569,
+        "earthquake": 0.0142,
+        "liquidation": 0.0785,
+        "protect": 0.0202,
+        "rest": 0.9709,
+        "sleeptalk": 0.7363,
+        "waterfall": 0.5067,
+        "wavecrash": 0.0922
+      },
+      "teraTypes": {
+        "dark": 0.3136,
+        "dragon": 0.3155,
+        "electric": 0.0159,
+        "fairy": 0.0349,
+        "fighting": 0.226,
+        "grass": 0.0346,
+        "steel": 0.0299
+      }
+    },
+    "dragapult": {
+      "usage": 0.1078,
+      "abilities": {
+        "clearbody": 0.2817,
+        "infiltrator": 0.7123
+      },
+      "items": {
+        "airballoon": 0.0163,
+        "choiceband": 0.0545,
+        "choicescarf": 0.0103,
+        "choicespecs": 0.3466,
+        "dragonfang": 0.0121,
+        "focussash": 0.0307,
+        "heavydutyboots": 0.2881,
+        "leftovers": 0.0769,
+        "lifeorb": 0.1086,
+        "lightclay": 0.0228,
+        "spelltag": 0.0109
+      },
+      "moves": {
+        "curse": 0.0194,
+        "dracometeor": 0.6113,
+        "dragondance": 0.0591,
+        "dragondarts": 0.4439,
+        "fireblast": 0.11,
+        "flamethrower": 0.2263,
+        "hex": 0.4218,
+        "lightscreen": 0.0232,
+        "phantomforce": 0.0717,
+        "psychicfangs": 0.0108,
+        "quickattack": 0.0146,
+        "reflect": 0.0226,
+        "shadowball": 0.4605,
+        "substitute": 0.0868,
+        "suckerpunch": 0.0477,
+        "surf": 0.0122,
+        "thunderbolt": 0.0622,
+        "thunderwave": 0.1114,
+        "uturn": 0.6812,
+        "willowisp": 0.4645
+      },
+      "teraTypes": {
+        "dragon": 0.2396,
+        "fairy": 0.1309,
+        "fire": 0.0118,
+        "ghost": 0.5367,
+        "normal": 0.021,
+        "steel": 0.033
+      }
+    },
+    "dragonite": {
+      "usage": 0.195,
+      "abilities": {
+        "multiscale": 0.9979
+      },
+      "items": {
+        "choiceband": 0.0376,
+        "covertcloak": 0.0115,
+        "heavydutyboots": 0.5762,
+        "leftovers": 0.0796,
+        "lifeorb": 0.0876,
+        "loadeddice": 0.0875,
+        "lumberry": 0.0172,
+        "silkscarf": 0.0498,
+        "softsand": 0.0133
+      },
+      "moves": {
+        "dragonclaw": 0.0211,
+        "dragondance": 0.7922,
+        "dragontail": 0.1516,
+        "earthquake": 0.7124,
+        "encore": 0.1345,
+        "extremespeed": 0.7419,
+        "firepunch": 0.2397,
+        "hurricane": 0.0212,
+        "icespinner": 0.2894,
+        "ironhead": 0.0134,
+        "lowkick": 0.0383,
+        "outrage": 0.184,
+        "roost": 0.4724,
+        "scaleshot": 0.0886,
+        "stoneedge": 0.018,
+        "thunderpunch": 0.0105
+      },
+      "teraTypes": {
+        "dragon": 0.0129,
+        "fire": 0.1715,
+        "ghost": 0.021,
+        "ground": 0.1307,
+        "normal": 0.6109,
+        "steel": 0.0167
+      }
+    },
+    "enamorus": {
+      "usage": 0.0396,
+      "abilities": {
+        "contrary": 0.7958,
+        "cutecharm": 0.2042
+      },
+      "items": {
+        "choicescarf": 0.491,
+        "choicespecs": 0.1598,
+        "focussash": 0.0148,
+        "heavydutyboots": 0.0238,
+        "leftovers": 0.1381,
+        "lifeorb": 0.1219,
+        "metronome": 0.0344
+      },
+      "moves": {
+        "agility": 0.0197,
+        "alluringvoice": 0.0388,
+        "calmmind": 0.1485,
+        "drainingkiss": 0.0787,
+        "earthpower": 0.9926,
+        "focusblast": 0.0117,
+        "healingwish": 0.658,
+        "moonblast": 0.9843,
+        "mysticalfire": 0.6572,
+        "sludgebomb": 0.012,
+        "substitute": 0.2363,
+        "superpower": 0.1006,
+        "taunt": 0.0152,
+        "weatherball": 0.0149
+      },
+      "teraTypes": {
+        "fairy": 0.4029,
+        "fighting": 0.011,
+        "ground": 0.4253,
+        "steel": 0.1272
+      }
+    },
+    "excadrill": {
+      "usage": 0.0367,
+      "abilities": {
+        "moldbreaker": 0.138,
+        "sandrush": 0.8589
+      },
+      "items": {
+        "airballoon": 0.4477,
+        "choiceband": 0.0506,
+        "earthplate": 0.0151,
+        "focussash": 0.021,
+        "heavydutyboots": 0.013,
+        "leftovers": 0.2585,
+        "lifeorb": 0.1285,
+        "loadeddice": 0.0455
+      },
+      "moves": {
+        "earthquake": 0.998,
+        "ironhead": 0.5861,
+        "poisonjab": 0.0129,
+        "rapidspin": 0.919,
+        "rockblast": 0.1291,
+        "rockslide": 0.4654,
+        "rocktomb": 0.0185,
+        "stealthrock": 0.0631,
+        "substitute": 0.1433,
+        "swordsdance": 0.6408,
+        "throatchop": 0.014
+      },
+      "teraTypes": {
+        "fairy": 0.0642,
+        "flying": 0.0284,
+        "ghost": 0.3535,
+        "ground": 0.4856,
+        "rock": 0.0246,
+        "steel": 0.0163
+      }
+    },
+    "fezandipiti": {
+      "usage": 0.0065,
+      "abilities": {
+        "toxicchain": 0.9903
+      },
+      "items": {
+        "assaultvest": 0.0646,
+        "covertcloak": 0.2439,
+        "heavydutyboots": 0.2916,
+        "leftovers": 0.2773,
+        "rockyhelmet": 0.0859
+      },
+      "moves": {
+        "beatup": 0.7257,
+        "calmmind": 0.048,
+        "darkpulse": 0.0951,
+        "heatwave": 0.0419,
+        "moonblast": 0.5362,
+        "nastyplot": 0.1096,
+        "playrough": 0.3793,
+        "quickattack": 0.0607,
+        "roost": 0.9241,
+        "sludgebomb": 0.0376,
+        "swordsdance": 0.0104,
+        "tailslap": 0.0608,
+        "tailwind": 0.0113,
+        "taunt": 0.0933,
+        "uturn": 0.8275
+      },
+      "teraTypes": {
+        "bug": 0.0302,
+        "dark": 0.3397,
+        "flying": 0.1621,
+        "grass": 0.0318,
+        "ice": 0.027,
+        "poison": 0.0101,
+        "steel": 0.0163,
+        "stellar": 0.0173,
+        "water": 0.3523
+      }
+    },
+    "garchomp": {
+      "usage": 0.0467,
+      "abilities": {
+        "roughskin": 1
+      },
+      "items": {
+        "lifeorb": 0.0705,
+        "loadeddice": 0.3386,
+        "rockyhelmet": 0.5577
+      },
+      "moves": {
+        "breakingswipe": 0.0102,
+        "dracometeor": 0.0524,
+        "dragontail": 0.5474,
+        "earthquake": 0.9756,
+        "endure": 0.0151,
+        "fireblast": 0.0228,
+        "firefang": 0.1617,
+        "flamethrower": 0.0285,
+        "ironhead": 0.0184,
+        "liquidation": 0.022,
+        "outrage": 0.0173,
+        "poisonjab": 0.1529,
+        "rest": 0.0231,
+        "scaleshot": 0.371,
+        "spikes": 0.5372,
+        "stealthrock": 0.587,
+        "stoneedge": 0.0317,
+        "substitute": 0.0188,
+        "swordsdance": 0.3711
+      },
+      "teraTypes": {
+        "dragon": 0.0373,
+        "fairy": 0.024,
+        "fire": 0.1494,
+        "ghost": 0.5253,
+        "ground": 0.0106,
+        "poison": 0.172,
+        "steel": 0.0565,
+        "water": 0.0219
+      }
+    },
+    "garganacl": {
+      "usage": 0.0416,
+      "abilities": {
+        "purifyingsalt": 0.9981
+      },
+      "items": {
+        "heavydutyboots": 0.026,
+        "leftovers": 0.9695
+      },
+      "moves": {
+        "avalanche": 0.0309,
+        "bodypress": 0.0648,
+        "curse": 0.3767,
+        "earthquake": 0.1135,
+        "heavyslam": 0.0184,
+        "icepunch": 0.1966,
+        "irondefense": 0.0523,
+        "protect": 0.585,
+        "recover": 0.9974,
+        "saltcure": 0.9995,
+        "stealthrock": 0.5509
+      },
+      "teraTypes": {
+        "fairy": 0.1896,
+        "ghost": 0.0363,
+        "grass": 0.0127,
+        "water": 0.7348
+      }
+    },
+    "gholdengo": {
+      "usage": 0.2697,
+      "abilities": {
+        "goodasgold": 1
+      },
+      "items": {
+        "airballoon": 0.3222,
+        "choicescarf": 0.3954,
+        "choicespecs": 0.0181,
+        "covertcloak": 0.0169,
+        "custapberry": 0.0441,
+        "grassyseed": 0.0259,
+        "heavydutyboots": 0.0159,
+        "leftovers": 0.0399,
+        "metalcoat": 0.0261,
+        "rockyhelmet": 0.0395,
+        "shucaberry": 0.0348
+      },
+      "moves": {
+        "dazzlinggleam": 0.1355,
+        "focusblast": 0.1762,
+        "hex": 0.1014,
+        "makeitrain": 0.8291,
+        "nastyplot": 0.5187,
+        "psyshock": 0.164,
+        "recover": 0.5944,
+        "shadowball": 0.8623,
+        "thunderbolt": 0.06,
+        "thunderwave": 0.1376,
+        "trick": 0.4063
+      },
+      "teraTypes": {
+        "dark": 0.0103,
+        "fairy": 0.3526,
+        "fighting": 0.0901,
+        "flying": 0.1336,
+        "ghost": 0.1603,
+        "steel": 0.1744,
+        "water": 0.0594
+      }
+    },
+    "glimmora": {
+      "usage": 0.1297,
+      "abilities": {
+        "toxicdebris": 0.9935
+      },
+      "items": {
+        "choicescarf": 0.0339,
+        "custapberry": 0.0113,
+        "ejectbutton": 0.0134,
+        "focussash": 0.3442,
+        "powerherb": 0.2336,
+        "redcard": 0.3434
+      },
+      "moves": {
+        "dazzlinggleam": 0.057,
+        "earthpower": 0.9291,
+        "energyball": 0.0967,
+        "meteorbeam": 0.2339,
+        "mortalspin": 0.8349,
+        "mudshot": 0.0457,
+        "powergem": 0.4371,
+        "rockpolish": 0.0306,
+        "sludgebomb": 0.0305,
+        "sludgewave": 0.2509,
+        "spikes": 0.2817,
+        "spikyshield": 0.0112,
+        "stealthrock": 0.7434
+      },
+      "teraTypes": {
+        "fairy": 0.0457,
+        "flying": 0.0214,
+        "ghost": 0.7717,
+        "grass": 0.0609,
+        "ground": 0.0737,
+        "rock": 0.0155
+      }
+    },
+    "gliscor": {
+      "usage": 0.1138,
+      "abilities": {
+        "poisonheal": 0.9996
+      },
+      "items": {
+        "toxicorb": 0.9994
+      },
+      "moves": {
+        "agility": 0.1117,
+        "earthquake": 0.6473,
+        "facade": 0.368,
+        "knockoff": 0.5413,
+        "protect": 0.8791,
+        "spikes": 0.205,
+        "stealthrock": 0.1171,
+        "substitute": 0.1116,
+        "swordsdance": 0.4385,
+        "toxic": 0.4726,
+        "toxicspikes": 0.0258,
+        "uturn": 0.0601
+      },
+      "teraTypes": {
+        "dark": 0.1524,
+        "dragon": 0.0134,
+        "fairy": 0.1063,
+        "ghost": 0.0379,
+        "ground": 0.012,
+        "normal": 0.3624,
+        "steel": 0.0165,
+        "water": 0.2885
+      }
+    },
+    "goodrahisui": {
+      "usage": 0.0066,
+      "abilities": {
+        "gooey": 0.4021,
+        "sapsipper": 0.5002,
+        "shellarmor": 0.0977
+      },
+      "items": {
+        "assaultvest": 0.6946,
+        "choicespecs": 0.1644,
+        "heavydutyboots": 0.0232,
+        "leftovers": 0.0698,
+        "rockyhelmet": 0.03
+      },
+      "moves": {
+        "acidarmor": 0.0223,
+        "acidspray": 0.0411,
+        "bodypress": 0.026,
+        "dracometeor": 0.4777,
+        "dragonpulse": 0.0331,
+        "dragontail": 0.4959,
+        "earthquake": 0.1078,
+        "fireblast": 0.0182,
+        "flamethrower": 0.3751,
+        "flashcannon": 0.6198,
+        "heavyslam": 0.1945,
+        "icebeam": 0.5796,
+        "ironhead": 0.0132,
+        "knockoff": 0.41,
+        "rest": 0.0332,
+        "sleeptalk": 0.0294,
+        "sludgebomb": 0.1486,
+        "surf": 0.0819,
+        "thunder": 0.0119,
+        "thunderbolt": 0.2305
+      },
+      "teraTypes": {
+        "bug": 0.0526,
+        "dragon": 0.0482,
+        "fairy": 0.469,
+        "flying": 0.1679,
+        "ghost": 0.0539,
+        "grass": 0.0208,
+        "poison": 0.0234,
+        "steel": 0.0885,
+        "water": 0.0639
+      }
+    },
+    "greattusk": {
+      "usage": 0.3282,
+      "abilities": {
+        "protosynthesis": 1
+      },
+      "items": {
+        "assaultvest": 0.053,
+        "boosterenergy": 0.2578,
+        "choiceband": 0.0175,
+        "choicescarf": 0.0658,
+        "heavydutyboots": 0.2611,
+        "leftovers": 0.1032,
+        "lifeorb": 0.0126,
+        "rockyhelmet": 0.2128
+      },
+      "moves": {
+        "bodypress": 0.0198,
+        "bulkup": 0.1625,
+        "closecombat": 0.3528,
+        "earthquake": 0.0502,
+        "headlongrush": 0.9387,
+        "headsmash": 0.0683,
+        "icespinner": 0.8173,
+        "knockoff": 0.1729,
+        "rapidspin": 0.8908,
+        "stealthrock": 0.373,
+        "stoneedge": 0.0209,
+        "supercellslam": 0.012,
+        "taunt": 0.0608,
+        "temperflare": 0.037
+      },
+      "teraTypes": {
+        "dark": 0.0171,
+        "fairy": 0.0215,
+        "fighting": 0.1383,
+        "fire": 0.0793,
+        "ghost": 0.1185,
+        "ground": 0.0814,
+        "ice": 0.098,
+        "poison": 0.0526,
+        "steel": 0.2677,
+        "water": 0.0948
+      }
+    },
+    "grimmsnarl": {
+      "usage": 0.0068,
+      "abilities": {
+        "prankster": 0.9954
+      },
+      "items": {
+        "flameorb": 0.0269,
+        "leftovers": 0.0853,
+        "lightclay": 0.8623
+      },
+      "moves": {
+        "bulkup": 0.0219,
+        "fling": 0.0269,
+        "foulplay": 0.0127,
+        "lightscreen": 0.8742,
+        "lowkick": 0.2629,
+        "partingshot": 0.5055,
+        "playrough": 0.055,
+        "reflect": 0.8743,
+        "spiritbreak": 0.4233,
+        "suckerpunch": 0.088,
+        "taunt": 0.6914,
+        "thunderwave": 0.1294
+      },
+      "teraTypes": {
+        "dark": 0.0505,
+        "fairy": 0.0275,
+        "fighting": 0.0427,
+        "fire": 0.0199,
+        "ghost": 0.2549,
+        "ground": 0.0284,
+        "poison": 0.1755,
+        "steel": 0.3943
+      }
+    },
+    "hatterene": {
+      "usage": 0.1249,
+      "abilities": {
+        "magicbounce": 0.9991
+      },
+      "items": {
+        "airballoon": 0.0199,
+        "assaultvest": 0.1637,
+        "covertcloak": 0.0294,
+        "custapberry": 0.0353,
+        "ejectbutton": 0.1523,
+        "focussash": 0.0906,
+        "grassyseed": 0.0113,
+        "leftovers": 0.1752,
+        "lifeorb": 0.0166,
+        "redcard": 0.011,
+        "rockyhelmet": 0.2839
+      },
+      "moves": {
+        "calmmind": 0.1842,
+        "dazzlinggleam": 0.1751,
+        "drainingkiss": 0.7542,
+        "expandingforce": 0.0393,
+        "futuresight": 0.0397,
+        "healingwish": 0.3441,
+        "mistyexplosion": 0.0171,
+        "mysticalfire": 0.4271,
+        "nuzzle": 0.6116,
+        "painsplit": 0.2766,
+        "psychic": 0.0253,
+        "psychicnoise": 0.6727,
+        "psyshock": 0.1651,
+        "storedpower": 0.0756,
+        "trickroom": 0.1716
+      },
+      "teraTypes": {
+        "bug": 0.0266,
+        "dark": 0.0116,
+        "fire": 0.0192,
+        "flying": 0.1089,
+        "ghost": 0.0151,
+        "grass": 0.0226,
+        "ground": 0.0114,
+        "normal": 0.0357,
+        "poison": 0.0445,
+        "psychic": 0.0331,
+        "steel": 0.214,
+        "stellar": 0.0114,
+        "water": 0.4388
+      }
+    },
+    "hawlucha": {
+      "usage": 0.0278,
+      "abilities": {
+        "moldbreaker": 0.0415,
+        "unburden": 0.9572
+      },
+      "items": {
+        "chestoberry": 0.0101,
+        "grassyseed": 0.6923,
+        "heavydutyboots": 0.0148,
+        "mistyseed": 0.0833,
+        "psychicseed": 0.1698
+      },
+      "moves": {
+        "acrobatics": 0.9606,
+        "bravebird": 0.0262,
+        "bulkup": 0.0694,
+        "closecombat": 0.7328,
+        "defog": 0.0318,
+        "drainpunch": 0.0778,
+        "encore": 0.2103,
+        "firepunch": 0.3393,
+        "lowkick": 0.1454,
+        "rest": 0.0101,
+        "roost": 0.196,
+        "stoneedge": 0.033,
+        "substitute": 0.1679,
+        "swordsdance": 0.9065,
+        "taunt": 0.0139,
+        "throatchop": 0.0488
+      },
+      "teraTypes": {
+        "electric": 0.2609,
+        "fighting": 0.0104,
+        "fire": 0.354,
+        "flying": 0.0298,
+        "ghost": 0.0133,
+        "ground": 0.0669,
+        "rock": 0.0116,
+        "steel": 0.2379
+      }
+    },
+    "heatran": {
+      "usage": 0.0309,
+      "abilities": {
+        "flamebody": 0.2172,
+        "flashfire": 0.7828
+      },
+      "items": {
+        "airballoon": 0.23,
+        "choicespecs": 0.0225,
+        "ejectpack": 0.0225,
+        "heavydutyboots": 0.1236,
+        "leftovers": 0.5723
+      },
+      "moves": {
+        "earthpower": 0.9228,
+        "flamethrower": 0.027,
+        "flashcannon": 0.0564,
+        "heavyslam": 0.0843,
+        "lavaplume": 0.1479,
+        "magmastorm": 0.8018,
+        "metalsound": 0.0299,
+        "overheat": 0.0356,
+        "powergem": 0.0107,
+        "protect": 0.1446,
+        "solarbeam": 0.0347,
+        "stealthrock": 0.7824,
+        "taunt": 0.4809,
+        "willowisp": 0.4028
+      },
+      "teraTypes": {
+        "bug": 0.1107,
+        "dark": 0.0157,
+        "fairy": 0.0817,
+        "fire": 0.0134,
+        "flying": 0.0469,
+        "ghost": 0.2255,
+        "grass": 0.3751,
+        "normal": 0.1116,
+        "water": 0.016
+      }
+    },
+    "hippowdon": {
+      "usage": 0.0081,
+      "abilities": {
+        "sandstream": 0.9967
+      },
+      "items": {
+        "heavydutyboots": 0.0106,
+        "leftovers": 0.0309,
+        "rockyhelmet": 0.0572,
+        "smoothrock": 0.8943
+      },
+      "moves": {
+        "earthquake": 0.9915,
+        "icefang": 0.3027,
+        "rockslide": 0.0132,
+        "slackoff": 0.998,
+        "stealthrock": 0.7474,
+        "whirlwind": 0.9067
+      },
+      "teraTypes": {
+        "fighting": 0.3405,
+        "ghost": 0.0558,
+        "grass": 0.0193,
+        "ground": 0.0199,
+        "ice": 0.014,
+        "rock": 0.4894,
+        "water": 0.0343
+      }
+    },
+    "hoopaunbound": {
+      "usage": 0.0355,
+      "abilities": {
+        "magician": 1
+      },
+      "items": {
+        "assaultvest": 0.2039,
+        "choiceband": 0.3559,
+        "choicescarf": 0.1037,
+        "choicespecs": 0.0586,
+        "custapberry": 0.0181,
+        "ejectpack": 0.0555,
+        "leftovers": 0.016,
+        "lifeorb": 0.0333,
+        "psychicseed": 0.1223
+      },
+      "moves": {
+        "darkpulse": 0.1408,
+        "drainpunch": 0.7339,
+        "expandingforce": 0.1324,
+        "focusblast": 0.1857,
+        "grassknot": 0.0113,
+        "gunkshot": 0.1447,
+        "hyperspacefury": 0.7256,
+        "icepunch": 0.0327,
+        "knockoff": 0.4933,
+        "nastyplot": 0.0201,
+        "psychic": 0.1868,
+        "psychicnoise": 0.2835,
+        "psyshock": 0.047,
+        "substitute": 0.0177,
+        "thunderbolt": 0.2017,
+        "trick": 0.0688,
+        "trickroom": 0.2088,
+        "zenheadbutt": 0.3317
+      },
+      "teraTypes": {
+        "dark": 0.5551,
+        "electric": 0.0148,
+        "fairy": 0.0788,
+        "fighting": 0.0561,
+        "ghost": 0.0652,
+        "poison": 0.0764,
+        "psychic": 0.1283,
+        "steel": 0.0164
+      }
+    },
+    "hydrapple": {
+      "usage": 0.0296,
+      "abilities": {
+        "regenerator": 0.9957
+      },
+      "items": {
+        "assaultvest": 0.0796,
+        "choicespecs": 0.07,
+        "ejectpack": 0.0237,
+        "heavydutyboots": 0.4235,
+        "leftovers": 0.0162,
+        "lifeorb": 0.1782,
+        "rockyhelmet": 0.1921
+      },
+      "moves": {
+        "bodypress": 0.0222,
+        "dracometeor": 0.3512,
+        "dragontail": 0.0789,
+        "earthpower": 0.9808,
+        "ficklebeam": 0.6707,
+        "gigadrain": 0.8817,
+        "hydropump": 0.0235,
+        "leafstorm": 0.1407,
+        "nastyplot": 0.8226
+      },
+      "teraTypes": {
+        "dragon": 0.1391,
+        "fairy": 0.2509,
+        "ghost": 0.0134,
+        "poison": 0.4499,
+        "steel": 0.1032,
+        "water": 0.0292
+      }
+    },
+    "hydreigon": {
+      "usage": 0.0155,
+      "abilities": {
+        "levitate": 1
+      },
+      "items": {
+        "choicescarf": 0.0225,
+        "choicespecs": 0.313,
+        "ejectpack": 0.0125,
+        "leftovers": 0.2525,
+        "lifeorb": 0.3686
+      },
+      "moves": {
+        "darkpulse": 0.9227,
+        "dracometeor": 0.7692,
+        "earthpower": 0.5124,
+        "fireblast": 0.0162,
+        "flamethrower": 0.0542,
+        "flashcannon": 0.6795,
+        "focusblast": 0.0588,
+        "nastyplot": 0.5439,
+        "stealthrock": 0.0982,
+        "substitute": 0.129,
+        "taunt": 0.113,
+        "uturn": 0.0363
+      },
+      "teraTypes": {
+        "dark": 0.0324,
+        "dragon": 0.0104,
+        "fire": 0.0318,
+        "ghost": 0.1144,
+        "poison": 0.0335,
+        "steel": 0.7629
+      }
+    },
+    "indeedee": {
+      "usage": 0.0111,
+      "abilities": {
+        "psychicsurge": 0.9998
+      },
+      "items": {
+        "choicescarf": 0.0191,
+        "choicespecs": 0.0261,
+        "terrainextender": 0.9494
+      },
+      "moves": {
+        "dazzlinggleam": 0.4688,
+        "encore": 0.728,
+        "expandingforce": 0.9996,
+        "healingwish": 0.9458,
+        "hypervoice": 0.0267,
+        "shadowball": 0.2159,
+        "trick": 0.0313,
+        "trickroom": 0.5603
+      },
+      "teraTypes": {
+        "dark": 0.0131,
+        "fairy": 0.6627,
+        "psychic": 0.2563,
+        "water": 0.0537
+      }
+    },
+    "ironboulder": {
+      "usage": 0.0066,
+      "abilities": {
+        "quarkdrive": 1
+      },
+      "items": {
+        "boosterenergy": 0.7902,
+        "choiceband": 0.1453,
+        "lifeorb": 0.0229,
+        "powerherb": 0.0281
+      },
+      "moves": {
+        "closecombat": 0.6228,
+        "earthquake": 0.6664,
+        "megahorn": 0.0292,
+        "mightycleave": 0.9893,
+        "psychocut": 0.1398,
+        "sacredsword": 0.0546,
+        "solarblade": 0.0442,
+        "substitute": 0.2033,
+        "swordsdance": 0.7738,
+        "taunt": 0.0179,
+        "throatchop": 0.031,
+        "wildcharge": 0.0116,
+        "zenheadbutt": 0.4121
+      },
+      "teraTypes": {
+        "dark": 0.0333,
+        "fairy": 0.0411,
+        "fighting": 0.3762,
+        "flying": 0.0954,
+        "grass": 0.0481,
+        "ground": 0.2369,
+        "rock": 0.1544
+      }
+    },
+    "ironcrown": {
+      "usage": 0.0482,
+      "abilities": {
+        "quarkdrive": 1
+      },
+      "items": {
+        "assaultvest": 0.153,
+        "boosterenergy": 0.4718,
+        "choicespecs": 0.2365,
+        "grassyseed": 0.0153,
+        "leftovers": 0.0133,
+        "weaknesspolicy": 0.0829
+      },
+      "moves": {
+        "agility": 0.1222,
+        "calmmind": 0.5659,
+        "expandingforce": 0.0935,
+        "focusblast": 0.8689,
+        "futuresight": 0.0622,
+        "irondefense": 0.0358,
+        "psychic": 0.067,
+        "psychicnoise": 0.355,
+        "psyshock": 0.3284,
+        "storedpower": 0.1562,
+        "substitute": 0.0142,
+        "tachyoncutter": 0.8887,
+        "voltswitch": 0.4195
+      },
+      "teraTypes": {
+        "electric": 0.0141,
+        "fairy": 0.0518,
+        "fighting": 0.5197,
+        "flying": 0.0185,
+        "steel": 0.3508,
+        "water": 0.0281
+      }
+    },
+    "ironhands": {
+      "usage": 0.0192,
+      "abilities": {
+        "quarkdrive": 1
+      },
+      "items": {
+        "assaultvest": 0.0413,
+        "boosterenergy": 0.5227,
+        "grassyseed": 0.0957,
+        "leftovers": 0.1242,
+        "punchingglove": 0.019,
+        "quickclaw": 0.1325,
+        "shucaberry": 0.017
+      },
+      "moves": {
+        "closecombat": 0.2012,
+        "drainpunch": 0.7962,
+        "earthquake": 0.0531,
+        "firepunch": 0.0142,
+        "heavyslam": 0.1299,
+        "icepunch": 0.982,
+        "supercellslam": 0.4926,
+        "swordsdance": 0.7895,
+        "thunderpunch": 0.2684,
+        "wildcharge": 0.2297
+      },
+      "teraTypes": {
+        "bug": 0.2132,
+        "fairy": 0.0291,
+        "fighting": 0.0293,
+        "fire": 0.1344,
+        "flying": 0.4996,
+        "ghost": 0.0241,
+        "grass": 0.0152,
+        "ground": 0.0169,
+        "steel": 0.0161
+      }
+    },
+    "ironjugulis": {
+      "usage": 0.0059,
+      "abilities": {
+        "quarkdrive": 1
+      },
+      "items": {
+        "boosterenergy": 0.8082,
+        "choicescarf": 0.0141,
+        "choicespecs": 0.024,
+        "lifeorb": 0.075,
+        "powerherb": 0.0215,
+        "rockyhelmet": 0.0498
+      },
+      "moves": {
+        "airslash": 0.1163,
+        "chargebeam": 0.0196,
+        "darkpulse": 0.5604,
+        "earthpower": 0.9326,
+        "focusblast": 0.1431,
+        "heatwave": 0.0572,
+        "hurricane": 0.8719,
+        "knockoff": 0.4013,
+        "meteorbeam": 0.0224,
+        "taunt": 0.7812,
+        "uturn": 0.0417,
+        "workup": 0.0147
+      },
+      "teraTypes": {
+        "dark": 0.0582,
+        "fire": 0.0214,
+        "ghost": 0.0321,
+        "ground": 0.8741
+      }
+    },
+    "ironmoth": {
+      "usage": 0.1001,
+      "abilities": {
+        "quarkdrive": 1
+      },
+      "items": {
+        "boosterenergy": 0.8163,
+        "choicespecs": 0.0612,
+        "heavydutyboots": 0.0982,
+        "powerherb": 0.0125
+      },
+      "moves": {
+        "dazzlinggleam": 0.3705,
+        "discharge": 0.0809,
+        "energyball": 0.3816,
+        "fierydance": 0.9799,
+        "lightscreen": 0.0134,
+        "meteorbeam": 0.0125,
+        "morningsun": 0.1679,
+        "overheat": 0.1127,
+        "psychic": 0.197,
+        "sludgewave": 0.8562,
+        "solarbeam": 0.0244,
+        "substitute": 0.3923,
+        "toxic": 0.1167,
+        "toxicspikes": 0.1264,
+        "uturn": 0.0196,
+        "whirlwind": 0.1234
+      },
+      "teraTypes": {
+        "dark": 0.0116,
+        "fairy": 0.2896,
+        "fire": 0.0997,
+        "ghost": 0.2377,
+        "grass": 0.3288
+      }
+    },
+    "irontreads": {
+      "usage": 0.1337,
+      "abilities": {
+        "quarkdrive": 1
+      },
+      "items": {
+        "airballoon": 0.0675,
+        "assaultvest": 0.0454,
+        "boosterenergy": 0.4351,
+        "clearamulet": 0.0451,
+        "earthplate": 0.0277,
+        "ejectbutton": 0.0119,
+        "heavydutyboots": 0.0683,
+        "leftovers": 0.2764
+      },
+      "moves": {
+        "earthpower": 0.1028,
+        "earthquake": 0.8626,
+        "endeavor": 0.0443,
+        "highhorsepower": 0.0186,
+        "icespinner": 0.3743,
+        "ironhead": 0.0403,
+        "knockoff": 0.5511,
+        "rapidspin": 0.9943,
+        "stealthrock": 0.7721,
+        "steelbeam": 0.0976,
+        "stoneedge": 0.0178,
+        "supercellslam": 0.0332,
+        "voltswitch": 0.0571
+      },
+      "teraTypes": {
+        "dark": 0.0133,
+        "electric": 0.0162,
+        "fairy": 0.014,
+        "flying": 0.0149,
+        "ghost": 0.6388,
+        "grass": 0.0105,
+        "ground": 0.1383,
+        "ice": 0.0786,
+        "normal": 0.0234,
+        "water": 0.0286
+      }
+    },
+    "ironvaliant": {
+      "usage": 0.1856,
+      "abilities": {
+        "quarkdrive": 1
+      },
+      "items": {
+        "boosterenergy": 0.788,
+        "choicescarf": 0.0188,
+        "choicespecs": 0.1344,
+        "expertbelt": 0.0125,
+        "heavydutyboots": 0.0191,
+        "lifeorb": 0.0203
+      },
+      "moves": {
+        "agility": 0.0116,
+        "aurasphere": 0.0252,
+        "calmmind": 0.3155,
+        "closecombat": 0.3517,
+        "destinybond": 0.1351,
+        "drainpunch": 0.0193,
+        "encore": 0.308,
+        "expandingforce": 0.0123,
+        "focusblast": 0.0603,
+        "icepunch": 0.0211,
+        "knockoff": 0.4675,
+        "liquidation": 0.0125,
+        "moonblast": 0.7842,
+        "psyshock": 0.0563,
+        "shadowball": 0.3887,
+        "spiritbreak": 0.1392,
+        "substitute": 0.0232,
+        "swordsdance": 0.2394,
+        "taunt": 0.1019,
+        "thunderbolt": 0.236,
+        "trick": 0.0575,
+        "vacuumwave": 0.2105
+      },
+      "teraTypes": {
+        "dark": 0.1045,
+        "electric": 0.064,
+        "fairy": 0.1469,
+        "fighting": 0.0135,
+        "ghost": 0.3498,
+        "steel": 0.2961,
+        "stellar": 0.0119
+      }
+    },
+    "keldeo": {
+      "usage": 0.0189,
+      "abilities": {
+        "justified": 1
+      },
+      "items": {
+        "assaultvest": 0.019,
+        "choicescarf": 0.0276,
+        "choicespecs": 0.2419,
+        "covertcloak": 0.0345,
+        "heavydutyboots": 0.4283,
+        "leftovers": 0.0752,
+        "rockyhelmet": 0.102,
+        "splashplate": 0.0439
+      },
+      "moves": {
+        "aurasphere": 0.2604,
+        "calmmind": 0.3117,
+        "flipturn": 0.4841,
+        "focusblast": 0.0183,
+        "hydropump": 0.0697,
+        "icywind": 0.1795,
+        "painsplit": 0.0103,
+        "reflect": 0.0177,
+        "secretsword": 0.7444,
+        "substitute": 0.0279,
+        "surf": 0.9495,
+        "taunt": 0.0259,
+        "vacuumwave": 0.8921
+      },
+      "teraTypes": {
+        "fighting": 0.0438,
+        "ghost": 0.0142,
+        "poison": 0.0302,
+        "steel": 0.1201,
+        "water": 0.7708
+      }
+    },
+    "kingambit": {
+      "usage": 0.2688,
+      "abilities": {
+        "defiant": 0.014,
+        "supremeoverlord": 0.9852
+      },
+      "items": {
+        "airballoon": 0.1258,
+        "blackglasses": 0.2319,
+        "leftovers": 0.5081,
+        "lumberry": 0.0547,
+        "shucaberry": 0.0174
+      },
+      "moves": {
+        "ironhead": 0.8609,
+        "kowtowcleave": 0.7231,
+        "lowkick": 0.4469,
+        "suckerpunch": 0.9976,
+        "swordsdance": 0.9508
+      },
+      "teraTypes": {
+        "bug": 0.067,
+        "dark": 0.1831,
+        "fairy": 0.1125,
+        "fighting": 0.0527,
+        "fire": 0.1282,
+        "flying": 0.1014,
+        "ghost": 0.3401
+      }
+    },
+    "kingdra": {
+      "usage": 0.0252,
+      "abilities": {
+        "sniper": 0.0126,
+        "swiftswim": 0.9874
+      },
+      "items": {
+        "choicespecs": 0.8634,
+        "lifeorb": 0.0189,
+        "mysticwater": 0.1,
+        "scopelens": 0.0141
+      },
+      "moves": {
+        "agility": 0.0119,
+        "dracometeor": 0.9783,
+        "dragonpulse": 0.0236,
+        "flipturn": 0.108,
+        "focusenergy": 0.0142,
+        "hurricane": 0.9743,
+        "icebeam": 0.0256,
+        "scald": 0.0372,
+        "surf": 0.8274,
+        "wavecrash": 0.0186,
+        "weatherball": 0.9612
+      },
+      "teraTypes": {
+        "dragon": 0.0158,
+        "stellar": 0.0135,
+        "water": 0.9569
+      }
+    },
+    "klefki": {
+      "usage": 0.0119,
+      "abilities": {
+        "prankster": 0.9999
+      },
+      "items": {
+        "ejectbutton": 0.0945,
+        "lightclay": 0.6096,
+        "rockyhelmet": 0.2756
+      },
+      "moves": {
+        "dazzlinggleam": 0.2869,
+        "fairylock": 0.1022,
+        "foulplay": 0.011,
+        "lightscreen": 0.6099,
+        "magnetrise": 0.2813,
+        "recycle": 0.0924,
+        "reflect": 0.6117,
+        "spikes": 0.9892,
+        "switcheroo": 0.0326,
+        "thunderwave": 0.9598
+      },
+      "teraTypes": {
+        "ghost": 0.3777,
+        "water": 0.603
+      }
+    },
+    "kommoo": {
+      "usage": 0.0096,
+      "abilities": {
+        "bulletproof": 0.154,
+        "overcoat": 0.208,
+        "soundproof": 0.638
+      },
+      "items": {
+        "chestoberry": 0.0129,
+        "lansatberry": 0.0208,
+        "leftovers": 0.7152,
+        "lifeorb": 0.0336,
+        "salacberry": 0.0142,
+        "throatspray": 0.1813
+      },
+      "moves": {
+        "aurasphere": 0.1767,
+        "bellydrum": 0.0161,
+        "bodypress": 0.0528,
+        "boomburst": 0.2142,
+        "clangingscales": 0.4983,
+        "clangoroussoul": 0.7519,
+        "closecombat": 0.0463,
+        "dragontail": 0.0473,
+        "drainpunch": 0.4308,
+        "earthquake": 0.0224,
+        "flamethrower": 0.3671,
+        "irondefense": 0.0464,
+        "ironhead": 0.0126,
+        "rest": 0.0133,
+        "shadowclaw": 0.3581,
+        "stealthrock": 0.1846,
+        "substitute": 0.5481,
+        "taunt": 0.1582
+      },
+      "teraTypes": {
+        "dragon": 0.0115,
+        "fire": 0.1218,
+        "ghost": 0.3846,
+        "ground": 0.018,
+        "normal": 0.1839,
+        "steel": 0.263
+      }
+    },
+    "kyurem": {
+      "usage": 0.1449,
+      "abilities": {
+        "pressure": 1
+      },
+      "items": {
+        "assaultvest": 0.2315,
+        "choicescarf": 0.0778,
+        "choicespecs": 0.238,
+        "heavydutyboots": 0.0476,
+        "leftovers": 0.1664,
+        "loadeddice": 0.2025,
+        "nevermeltice": 0.0206
+      },
+      "moves": {
+        "blizzard": 0.2096,
+        "bodypress": 0.1144,
+        "dracometeor": 0.2944,
+        "dragondance": 0.1862,
+        "dragontail": 0.0118,
+        "earthpower": 0.9055,
+        "flashcannon": 0.0169,
+        "focusblast": 0.0471,
+        "freezedry": 0.8863,
+        "icebeam": 0.5092,
+        "iciclespear": 0.2425,
+        "protect": 0.139,
+        "scaleshot": 0.154,
+        "shadowclaw": 0.0425,
+        "substitute": 0.2225
+      },
+      "teraTypes": {
+        "dragon": 0.0107,
+        "fairy": 0.1098,
+        "fire": 0.0175,
+        "ghost": 0.0647,
+        "ground": 0.2901,
+        "ice": 0.3751,
+        "poison": 0.0833,
+        "steel": 0.0354
+      }
+    },
+    "landorustherian": {
+      "usage": 0.1304,
+      "abilities": {
+        "intimidate": 1
+      },
+      "items": {
+        "assaultvest": 0.0219,
+        "choicescarf": 0.2619,
+        "earthplate": 0.0244,
+        "leftovers": 0.0334,
+        "lightball": 0.0339,
+        "rockyhelmet": 0.5859,
+        "softsand": 0.0142
+      },
+      "moves": {
+        "brickbreak": 0.012,
+        "earthpower": 0.3362,
+        "earthquake": 0.6744,
+        "fling": 0.034,
+        "grassknot": 0.2,
+        "outrage": 0.016,
+        "psychic": 0.0138,
+        "rocktomb": 0.0269,
+        "smackdown": 0.0444,
+        "stealthrock": 0.6961,
+        "stoneedge": 0.4465,
+        "swordsdance": 0.01,
+        "taunt": 0.5104,
+        "uturn": 0.921,
+        "weatherball": 0.0209
+      },
+      "teraTypes": {
+        "dragon": 0.0241,
+        "fairy": 0.0771,
+        "flying": 0.0103,
+        "ghost": 0.1505,
+        "grass": 0.0176,
+        "ground": 0.2618,
+        "steel": 0.0107,
+        "water": 0.4306
+      }
+    },
+    "latias": {
+      "usage": 0.0159,
+      "abilities": {
+        "levitate": 1
+      },
+      "items": {
+        "choicescarf": 0.1949,
+        "ejectpack": 0.0219,
+        "keeberry": 0.0483,
+        "leftovers": 0.1163,
+        "souldew": 0.1544,
+        "weaknesspolicy": 0.438
+      },
+      "moves": {
+        "agility": 0.4857,
+        "aurasphere": 0.4115,
+        "calmmind": 0.6584,
+        "dracometeor": 0.3752,
+        "drainingkiss": 0.2071,
+        "healingwish": 0.3086,
+        "icebeam": 0.0102,
+        "mistball": 0.0381,
+        "psychic": 0.1839,
+        "psyshock": 0.1707,
+        "recover": 0.2934,
+        "storedpower": 0.5943,
+        "substitute": 0.0195,
+        "trick": 0.1959,
+        "wish": 0.026
+      },
+      "teraTypes": {
+        "dragon": 0.033,
+        "fairy": 0.1931,
+        "ghost": 0.0256,
+        "poison": 0.1635,
+        "steel": 0.5708
+      }
+    },
+    "latios": {
+      "usage": 0.0153,
+      "abilities": {
+        "levitate": 1
+      },
+      "items": {
+        "choicescarf": 0.256,
+        "choicespecs": 0.1578,
+        "covertcloak": 0.1205,
+        "leftovers": 0.0312,
+        "lifeorb": 0.047,
+        "souldew": 0.2948,
+        "weaknesspolicy": 0.0729
+      },
+      "moves": {
+        "agility": 0.1136,
+        "aurasphere": 0.2535,
+        "calmmind": 0.4745,
+        "dracometeor": 0.8281,
+        "dragonpulse": 0.0607,
+        "flipturn": 0.2388,
+        "icebeam": 0.1106,
+        "lusterpurge": 0.3795,
+        "psychicnoise": 0.452,
+        "psyshock": 0.0258,
+        "recover": 0.4392,
+        "roar": 0.0156,
+        "shadowball": 0.0606,
+        "storedpower": 0.0736,
+        "substitute": 0.025,
+        "surf": 0.0388,
+        "thunderbolt": 0.0631,
+        "trick": 0.3092
+      },
+      "teraTypes": {
+        "dragon": 0.2652,
+        "electric": 0.0515,
+        "fighting": 0.0595,
+        "ghost": 0.0237,
+        "poison": 0.0211,
+        "steel": 0.5437,
+        "water": 0.0105
+      }
+    },
+    "lokix": {
+      "usage": 0.028,
+      "abilities": {
+        "tintedlens": 0.9989
+      },
+      "items": {
+        "blackglasses": 0.0403,
+        "choiceband": 0.7508,
+        "heavydutyboots": 0.0535,
+        "lifeorb": 0.0765,
+        "silverpowder": 0.0668
+      },
+      "moves": {
+        "axekick": 0.0126,
+        "firstimpression": 0.8886,
+        "knockoff": 0.9851,
+        "leechlife": 0.8104,
+        "lowkick": 0.015,
+        "protect": 0.0276,
+        "suckerpunch": 0.2453,
+        "swordsdance": 0.1253,
+        "taunt": 0.0131,
+        "uturn": 0.8729
+      },
+      "teraTypes": {
+        "bug": 0.8777,
+        "dark": 0.1053
+      }
+    },
+    "manaphy": {
+      "usage": 0.0165,
+      "abilities": {
+        "hydration": 1
+      },
+      "items": {
+        "covertcloak": 0.0136,
+        "leftovers": 0.8049,
+        "lifeorb": 0.0254,
+        "mentalherb": 0.0856,
+        "sitrusberry": 0.0467
+      },
+      "moves": {
+        "acidarmor": 0.2729,
+        "alluringvoice": 0.5729,
+        "energyball": 0.2223,
+        "hydropump": 0.0276,
+        "icebeam": 0.1382,
+        "rest": 0.0972,
+        "scald": 0.337,
+        "storedpower": 0.2802,
+        "substitute": 0.3241,
+        "surf": 0.6236,
+        "tailglow": 0.7213,
+        "takeheart": 0.3458,
+        "weatherball": 0.0106
+      },
+      "teraTypes": {
+        "dragon": 0.0128,
+        "fairy": 0.5339,
+        "grass": 0.3237,
+        "poison": 0.0528,
+        "psychic": 0.0188,
+        "steel": 0.0236,
+        "water": 0.0202
+      }
+    },
+    "mandibuzz": {
+      "usage": 0.0135,
+      "abilities": {
+        "bigpecks": 0.4118,
+        "overcoat": 0.586
+      },
+      "items": {
+        "heavydutyboots": 0.9034,
+        "rockyhelmet": 0.0925
+      },
+      "moves": {
+        "defog": 0.7615,
+        "foulplay": 0.9379,
+        "irondefense": 0.2244,
+        "knockoff": 0.0967,
+        "roost": 0.9976,
+        "toxic": 0.5124,
+        "uturn": 0.4404
+      },
+      "teraTypes": {
+        "dark": 0.017,
+        "dragon": 0.0328,
+        "fairy": 0.1892,
+        "fire": 0.0355,
+        "ghost": 0.2035,
+        "grass": 0.1127,
+        "poison": 0.0134,
+        "steel": 0.0998,
+        "water": 0.2941
+      }
+    },
+    "maushold": {
+      "usage": 0.0136,
+      "abilities": {
+        "technician": 0.9976
+      },
+      "items": {
+        "heavydutyboots": 0.0147,
+        "widelens": 0.977
+      },
+      "moves": {
+        "beatup": 0.3111,
+        "bite": 0.6805,
+        "encore": 0.9795,
+        "populationbomb": 0.9996,
+        "tidyup": 0.9986
+      },
+      "teraTypes": {
+        "dark": 0.1084,
+        "ghost": 0.8359,
+        "normal": 0.0509
+      }
+    },
+    "meowscarada": {
+      "usage": 0.0237,
+      "abilities": {
+        "overgrow": 0.1733,
+        "protean": 0.8267
+      },
+      "items": {
+        "choiceband": 0.4679,
+        "choicescarf": 0.2011,
+        "expertbelt": 0.0339,
+        "focussash": 0.1605,
+        "heavydutyboots": 0.108,
+        "lifeorb": 0.0203
+      },
+      "moves": {
+        "aurasphere": 0.0109,
+        "flowertrick": 0.8204,
+        "knockoff": 0.9779,
+        "lowkick": 0.2124,
+        "playrough": 0.0176,
+        "powergem": 0.0383,
+        "spikes": 0.0591,
+        "suckerpunch": 0.0611,
+        "taunt": 0.0116,
+        "trick": 0.0842,
+        "tripleaxel": 0.6942,
+        "uturn": 0.9601
+      },
+      "teraTypes": {
+        "dark": 0.1289,
+        "fairy": 0.0694,
+        "fire": 0.0589,
+        "ghost": 0.1968,
+        "grass": 0.4731,
+        "ice": 0.0228,
+        "rock": 0.0309
+      }
+    },
+    "mimikyu": {
+      "usage": 0.0058,
+      "abilities": {
+        "disguise": 1
+      },
+      "items": {
+        "damprock": 0.0129,
+        "lifeorb": 0.3881,
+        "mentalherb": 0.1774,
+        "redcard": 0.4039
+      },
+      "moves": {
+        "curse": 0.6981,
+        "destinybond": 0.3744,
+        "drainpunch": 0.0418,
+        "playrough": 0.7968,
+        "protect": 0.1781,
+        "raindance": 0.0129,
+        "shadowclaw": 0.2302,
+        "shadowsneak": 0.4365,
+        "swordsdance": 0.278,
+        "taunt": 0.1736,
+        "thief": 0.0162,
+        "trickroom": 0.6984,
+        "willowisp": 0.0394
+      },
+      "teraTypes": {
+        "dark": 0.1885,
+        "fairy": 0.0704,
+        "ghost": 0.3672,
+        "normal": 0.0381,
+        "steel": 0.0117,
+        "water": 0.3066
+      }
+    },
+    "moltres": {
+      "usage": 0.0598,
+      "abilities": {
+        "flamebody": 0.9922
+      },
+      "items": {
+        "heavydutyboots": 0.9896
+      },
+      "moves": {
+        "airslash": 0.0143,
+        "bravebird": 0.0155,
+        "burningjealousy": 0.0173,
+        "flamethrower": 0.9464,
+        "hurricane": 0.0866,
+        "overheat": 0.0171,
+        "roar": 0.6683,
+        "roost": 0.9811,
+        "scorchingsands": 0.1248,
+        "uturn": 0.7792,
+        "willowisp": 0.3318
+      },
+      "teraTypes": {
+        "dragon": 0.0574,
+        "fairy": 0.5947,
+        "fire": 0.0216,
+        "grass": 0.1839,
+        "ground": 0.0365,
+        "poison": 0.0198,
+        "steel": 0.0147,
+        "water": 0.0489
+      }
+    },
+    "moltresgalar": {
+      "usage": 0.0135,
+      "abilities": {
+        "berserk": 1
+      },
+      "items": {
+        "chestoberry": 0.0419,
+        "heavydutyboots": 0.0124,
+        "leftovers": 0.0184,
+        "sitrusberry": 0.9093
+      },
+      "moves": {
+        "agility": 0.9385,
+        "airslash": 0.3232,
+        "fierywrath": 0.9965,
+        "hurricane": 0.5959,
+        "nastyplot": 0.9901,
+        "rest": 0.0432,
+        "taunt": 0.0911
+      },
+      "teraTypes": {
+        "dark": 0.1862,
+        "fairy": 0.0676,
+        "flying": 0.0418,
+        "ghost": 0.6563,
+        "steel": 0.036
+      }
+    },
+    "ninetales": {
+      "usage": 0.0296,
+      "abilities": {
+        "drought": 0.9992
+      },
+      "items": {
+        "choicespecs": 0.0495,
+        "heatrock": 0.9446
+      },
+      "moves": {
+        "encore": 0.9326,
+        "flamethrower": 0.1006,
+        "healingwish": 0.965,
+        "nastyplot": 0.0126,
+        "overheat": 0.5439,
+        "scorchingsands": 0.1806,
+        "solarbeam": 0.062,
+        "weatherball": 0.3973,
+        "willowisp": 0.7782
+      },
+      "teraTypes": {
+        "fairy": 0.0696,
+        "fire": 0.1027,
+        "flying": 0.0661,
+        "ghost": 0.6736,
+        "grass": 0.0546,
+        "ground": 0.017
+      }
+    },
+    "ninetalesalola": {
+      "usage": 0.016,
+      "abilities": {
+        "snowwarning": 1
+      },
+      "items": {
+        "choicescarf": 0.0105,
+        "lifeorb": 0.0503,
+        "lightclay": 0.9306
+      },
+      "moves": {
+        "auroraveil": 0.9387,
+        "blizzard": 0.185,
+        "darkpulse": 0.0557,
+        "encore": 0.8825,
+        "freezedry": 0.8421,
+        "mistyterrain": 0.2363,
+        "moonblast": 0.3295,
+        "nastyplot": 0.0618,
+        "painsplit": 0.0952,
+        "roar": 0.0177,
+        "snowscape": 0.3399
+      },
+      "teraTypes": {
+        "dark": 0.0535,
+        "ghost": 0.1517,
+        "ice": 0.05,
+        "steel": 0.0829,
+        "water": 0.6278
+      }
+    },
+    "ogerpon": {
+      "usage": 0.0565,
+      "abilities": {
+        "defiant": 1
+      },
+      "items": {
+        "choiceband": 0.3418,
+        "heavydutyboots": 0.5133,
+        "scopelens": 0.0933
+      },
+      "moves": {
+        "encore": 0.5765,
+        "ivycudgel": 0.9971,
+        "knockoff": 0.9582,
+        "lowkick": 0.1417,
+        "playrough": 0.0215,
+        "rocktomb": 0.1603,
+        "spikes": 0.0328,
+        "superpower": 0.0733,
+        "swordsdance": 0.2068,
+        "synthesis": 0.1922,
+        "taunt": 0.0119,
+        "uturn": 0.6057
+      },
+      "teraTypes": {
+        "grass": 1
+      }
+    },
+    "ogerponcornerstone": {
+      "usage": 0.023,
+      "abilities": {
+        "sturdy": 1
+      },
+      "items": {
+        "cornerstonemask": 1
+      },
+      "moves": {
+        "counter": 0.0126,
+        "encore": 0.0399,
+        "grassyglide": 0.0334,
+        "hornleech": 0.3073,
+        "ivycudgel": 0.9999,
+        "knockoff": 0.3637,
+        "lowkick": 0.5441,
+        "powerwhip": 0.6444,
+        "spikes": 0.0751,
+        "spikyshield": 0.0158,
+        "superpower": 0.0401,
+        "swordsdance": 0.6172,
+        "synthesis": 0.0204,
+        "taunt": 0.2277,
+        "trailblaze": 0.0306,
+        "uturn": 0.0145
+      },
+      "teraTypes": {
+        "rock": 1
+      }
+    },
+    "ogerponwellspring": {
+      "usage": 0.177,
+      "abilities": {
+        "waterabsorb": 1
+      },
+      "items": {
+        "wellspringmask": 1
+      },
+      "moves": {
+        "encore": 0.2422,
+        "grassyglide": 0.0115,
+        "hornleech": 0.2597,
+        "ivycudgel": 0.9998,
+        "knockoff": 0.3086,
+        "playrough": 0.4068,
+        "powerwhip": 0.3503,
+        "spikes": 0.076,
+        "substitute": 0.0282,
+        "swordsdance": 0.5511,
+        "synthesis": 0.1641,
+        "taunt": 0.1659,
+        "trailblaze": 0.1927,
+        "uturn": 0.2057
+      },
+      "teraTypes": {
+        "water": 1
+      }
+    },
+    "okidogi": {
+      "usage": 0.0125,
+      "abilities": {
+        "guarddog": 0.6769,
+        "toxicchain": 0.3231
+      },
+      "items": {
+        "assaultvest": 0.2706,
+        "choiceband": 0.041,
+        "choicescarf": 0.0806,
+        "leftovers": 0.5587,
+        "shucaberry": 0.0255
+      },
+      "moves": {
+        "bulkup": 0.5896,
+        "closecombat": 0.1388,
+        "counter": 0.0133,
+        "drainpunch": 0.861,
+        "facade": 0.1524,
+        "gunkshot": 0.4912,
+        "icepunch": 0.6547,
+        "knockoff": 0.9247,
+        "poisonjab": 0.1364,
+        "taunt": 0.0178
+      },
+      "teraTypes": {
+        "bug": 0.0135,
+        "dark": 0.1376,
+        "fairy": 0.0107,
+        "fighting": 0.0427,
+        "fire": 0.1514,
+        "flying": 0.1158,
+        "ghost": 0.0327,
+        "grass": 0.0103,
+        "normal": 0.1523,
+        "water": 0.3229
+      }
+    },
+    "pecharunt": {
+      "usage": 0.0833,
+      "abilities": {
+        "poisonpuppeteer": 1
+      },
+      "items": {
+        "airballoon": 0.0619,
+        "covertcloak": 0.0142,
+        "heavydutyboots": 0.6761,
+        "leftovers": 0.0712,
+        "rockyhelmet": 0.1371,
+        "shucaberry": 0.0262
+      },
+      "moves": {
+        "foulplay": 0.217,
+        "hex": 0.0514,
+        "malignantchain": 0.7572,
+        "nastyplot": 0.2366,
+        "partingshot": 0.7544,
+        "recover": 0.9894,
+        "shadowball": 0.7304,
+        "toxic": 0.2427
+      },
+      "teraTypes": {
+        "dark": 0.2884,
+        "fairy": 0.0407,
+        "ghost": 0.5334,
+        "grass": 0.0345,
+        "normal": 0.0102,
+        "water": 0.0643
+      }
+    },
+    "pelipper": {
+      "usage": 0.0402,
+      "abilities": {
+        "drizzle": 0.9995
+      },
+      "items": {
+        "choicespecs": 0.0458,
+        "damprock": 0.9349
+      },
+      "moves": {
+        "hurricane": 0.9913,
+        "hydropump": 0.0114,
+        "icebeam": 0.0353,
+        "knockoff": 0.1837,
+        "roost": 0.8215,
+        "surf": 0.1311,
+        "tailwind": 0.01,
+        "uturn": 0.9913,
+        "weatherball": 0.8191
+      },
+      "teraTypes": {
+        "dark": 0.1461,
+        "flying": 0.0181,
+        "ghost": 0.0894,
+        "grass": 0.0234,
+        "ground": 0.5289,
+        "normal": 0.0523,
+        "steel": 0.0642,
+        "water": 0.0552
+      }
+    },
+    "primarina": {
+      "usage": 0.0457,
+      "abilities": {
+        "liquidvoice": 0.3878,
+        "torrent": 0.6122
+      },
+      "items": {
+        "assaultvest": 0.6013,
+        "choicespecs": 0.0919,
+        "custapberry": 0.0189,
+        "grassyseed": 0.0106,
+        "heavydutyboots": 0.0565,
+        "leftovers": 0.2116
+      },
+      "moves": {
+        "aquajet": 0.0325,
+        "calmmind": 0.1583,
+        "drainingkiss": 0.1566,
+        "encore": 0.0495,
+        "energyball": 0.0298,
+        "flipturn": 0.5707,
+        "hydropump": 0.0315,
+        "hypervoice": 0.026,
+        "icebeam": 0.063,
+        "moonblast": 0.8964,
+        "psychic": 0.0162,
+        "psychicnoise": 0.8505,
+        "shadowball": 0.0419,
+        "sparklingaria": 0.1213,
+        "substitute": 0.2151,
+        "surf": 0.4917,
+        "weatherball": 0.0318,
+        "whirlpool": 0.1998
+      },
+      "teraTypes": {
+        "bug": 0.0168,
+        "fairy": 0.0402,
+        "ghost": 0.1551,
+        "grass": 0.1165,
+        "ground": 0.0812,
+        "normal": 0.0109,
+        "poison": 0.3484,
+        "steel": 0.1675,
+        "water": 0.0512
+      }
+    },
+    "quaquaval": {
+      "usage": 0.0069,
+      "abilities": {
+        "moxie": 0.9921
+      },
+      "items": {
+        "assaultvest": 0.1327,
+        "choiceband": 0.3638,
+        "choicescarf": 0.0131,
+        "covertcloak": 0.0165,
+        "heavydutyboots": 0.118,
+        "leftovers": 0.0518,
+        "lifeorb": 0.0434,
+        "lumberry": 0.0621,
+        "mysticwater": 0.1555,
+        "rockyhelmet": 0.0236
+      },
+      "moves": {
+        "aquajet": 0.4963,
+        "aquastep": 0.9213,
+        "bulkup": 0.0277,
+        "closecombat": 0.907,
+        "encore": 0.0263,
+        "flipturn": 0.0159,
+        "icespinner": 0.0687,
+        "knockoff": 0.1568,
+        "lowkick": 0.0174,
+        "rapidspin": 0.2884,
+        "roost": 0.0884,
+        "substitute": 0.023,
+        "swordsdance": 0.2273,
+        "tripleaxel": 0.1739,
+        "uturn": 0.0835,
+        "wavecrash": 0.4386
+      },
+      "teraTypes": {
+        "bug": 0.0131,
+        "dark": 0.0194,
+        "fairy": 0.0109,
+        "fire": 0.0205,
+        "ghost": 0.0507,
+        "ground": 0.0626,
+        "poison": 0.0118,
+        "steel": 0.2202,
+        "stellar": 0.0181,
+        "water": 0.5406
+      }
+    },
+    "ragingbolt": {
+      "usage": 0.1856,
+      "abilities": {
+        "protosynthesis": 1
+      },
+      "items": {
+        "assaultvest": 0.0238,
+        "boosterenergy": 0.6243,
+        "choicescarf": 0.0115,
+        "choicespecs": 0.1368,
+        "heavydutyboots": 0.0478,
+        "leftovers": 0.074,
+        "lifeorb": 0.035,
+        "shucaberry": 0.0181,
+        "sitrusberry": 0.01
+      },
+      "moves": {
+        "calmmind": 0.5913,
+        "discharge": 0.0309,
+        "dracometeor": 0.2806,
+        "dragonpulse": 0.734,
+        "solarbeam": 0.0123,
+        "substitute": 0.011,
+        "thunder": 0.1352,
+        "thunderbolt": 0.7481,
+        "thunderclap": 0.9732,
+        "voltswitch": 0.2304,
+        "weatherball": 0.2325
+      },
+      "teraTypes": {
+        "bug": 0.1586,
+        "dragon": 0.0198,
+        "electric": 0.0353,
+        "fairy": 0.4988,
+        "fire": 0.0227,
+        "flying": 0.0619,
+        "ghost": 0.1891
+      }
+    },
+    "regieleki": {
+      "usage": 0.008,
+      "abilities": {
+        "transistor": 1
+      },
+      "items": {
+        "choiceband": 0.0125,
+        "choicespecs": 0.2234,
+        "heavydutyboots": 0.2003,
+        "lightclay": 0.0549,
+        "magnet": 0.492
+      },
+      "moves": {
+        "ancientpower": 0.0299,
+        "electroball": 0.3376,
+        "explosion": 0.08,
+        "extremespeed": 0.0468,
+        "hyperbeam": 0.1063,
+        "lightscreen": 0.0573,
+        "rapidspin": 0.8655,
+        "reflect": 0.0624,
+        "substitute": 0.435,
+        "supercellslam": 0.0201,
+        "swift": 0.1441,
+        "thunderbolt": 0.7764,
+        "thunderwave": 0.0425,
+        "voltswitch": 0.9714
+      },
+      "teraTypes": {
+        "electric": 0.8299,
+        "flying": 0.0101,
+        "ghost": 0.0354,
+        "grass": 0.0102,
+        "normal": 0.0969,
+        "steel": 0.011
+      }
+    },
+    "ribombee": {
+      "usage": 0.0344,
+      "abilities": {
+        "shielddust": 0.9749,
+        "sweetveil": 0.0203
+      },
+      "items": {
+        "choicescarf": 0.0644,
+        "focussash": 0.8929,
+        "lightclay": 0.0313
+      },
+      "moves": {
+        "bugbuzz": 0.0299,
+        "lightscreen": 0.0315,
+        "moonblast": 0.9703,
+        "pounce": 0.0128,
+        "psychicnoise": 0.1876,
+        "reflect": 0.0314,
+        "skillswap": 0.7508,
+        "stickyweb": 0.9977,
+        "stunspore": 0.8448,
+        "switcheroo": 0.0322,
+        "tailwind": 0.0348,
+        "trick": 0.0364,
+        "uturn": 0.0229
+      },
+      "teraTypes": {
+        "bug": 0.0172,
+        "ghost": 0.6577,
+        "steel": 0.3182
+      }
+    },
+    "rillaboom": {
+      "usage": 0.0649,
+      "abilities": {
+        "grassysurge": 0.9996
+      },
+      "items": {
+        "assaultvest": 0.0217,
+        "choiceband": 0.3554,
+        "choicescarf": 0.0141,
+        "heavydutyboots": 0.0216,
+        "lifeorb": 0.3799,
+        "lumberry": 0.0289,
+        "miracleseed": 0.0131,
+        "terrainextender": 0.1481
+      },
+      "moves": {
+        "bulkup": 0.0255,
+        "drainpunch": 0.1824,
+        "grassyglide": 0.9962,
+        "highhorsepower": 0.2366,
+        "knockoff": 0.944,
+        "lowkick": 0.0398,
+        "swordsdance": 0.451,
+        "taunt": 0.0112,
+        "uturn": 0.5326,
+        "woodhammer": 0.5577
+      },
+      "teraTypes": {
+        "dark": 0.1869,
+        "fire": 0.0698,
+        "grass": 0.5598,
+        "steel": 0.1457
+      }
+    },
+    "rotomwash": {
+      "usage": 0.0052,
+      "abilities": {
+        "levitate": 1
+      },
+      "items": {
+        "choicescarf": 0.1712,
+        "covertcloak": 0.0464,
+        "heavydutyboots": 0.0102,
+        "leftovers": 0.3943,
+        "lightclay": 0.1423,
+        "rockyhelmet": 0.196,
+        "terrainextender": 0.0144
+      },
+      "moves": {
+        "discharge": 0.0361,
+        "electricterrain": 0.0145,
+        "hydropump": 0.9719,
+        "lightscreen": 0.1531,
+        "nastyplot": 0.0408,
+        "painsplit": 0.6498,
+        "protect": 0.0687,
+        "reflect": 0.1449,
+        "thunderbolt": 0.0461,
+        "thunderwave": 0.0474,
+        "trick": 0.1777,
+        "voltswitch": 0.938,
+        "willowisp": 0.6908
+      },
+      "teraTypes": {
+        "electric": 0.1015,
+        "fairy": 0.0105,
+        "ghost": 0.0456,
+        "grass": 0.0227,
+        "poison": 0.1485,
+        "steel": 0.6565
+      }
+    },
+    "samurotthisui": {
+      "usage": 0.1464,
+      "abilities": {
+        "sharpness": 0.9958
+      },
+      "items": {
+        "assaultvest": 0.382,
+        "blackglasses": 0.0974,
+        "choiceband": 0.044,
+        "choicescarf": 0.1336,
+        "focussash": 0.1509,
+        "heavydutyboots": 0.1721
+      },
+      "moves": {
+        "aquacutter": 0.2122,
+        "aquajet": 0.1126,
+        "ceaselessedge": 0.9976,
+        "encore": 0.1414,
+        "flipturn": 0.3282,
+        "knockoff": 0.5746,
+        "razorshell": 0.564,
+        "sacredsword": 0.1985,
+        "suckerpunch": 0.683,
+        "surf": 0.0174,
+        "swordsdance": 0.0872,
+        "taunt": 0.0579,
+        "xscissor": 0.0112
+      },
+      "teraTypes": {
+        "dark": 0.1577,
+        "fairy": 0.0111,
+        "fire": 0.039,
+        "ghost": 0.254,
+        "ground": 0.0142,
+        "poison": 0.3843,
+        "water": 0.1063
+      }
+    },
+    "scizor": {
+      "usage": 0.021,
+      "abilities": {
+        "technician": 0.9986
+      },
+      "items": {
+        "assaultvest": 0.0102,
+        "choiceband": 0.5271,
+        "heavydutyboots": 0.1194,
+        "leftovers": 0.0556,
+        "lifeorb": 0.1501,
+        "metalcoat": 0.0372,
+        "sitrusberry": 0.0785
+      },
+      "moves": {
+        "brickbreak": 0.0203,
+        "bugbite": 0.0269,
+        "bulletpunch": 0.9991,
+        "closecombat": 0.6552,
+        "defog": 0.1668,
+        "dualwingbeat": 0.1297,
+        "knockoff": 0.8645,
+        "quickattack": 0.046,
+        "swordsdance": 0.3337,
+        "uturn": 0.7315
+      },
+      "teraTypes": {
+        "bug": 0.014,
+        "dark": 0.0319,
+        "dragon": 0.0122,
+        "fighting": 0.0482,
+        "fire": 0.0451,
+        "flying": 0.0225,
+        "ghost": 0.0216,
+        "normal": 0.0458,
+        "steel": 0.716,
+        "water": 0.036
+      }
+    },
+    "serperior": {
+      "usage": 0.0092,
+      "abilities": {
+        "contrary": 0.9989
+      },
+      "items": {
+        "choicescarf": 0.2314,
+        "choicespecs": 0.0782,
+        "custapberry": 0.0269,
+        "heavydutyboots": 0.0148,
+        "leftovers": 0.4995,
+        "lifeorb": 0.0248,
+        "lightclay": 0.0262,
+        "widelens": 0.084
+      },
+      "moves": {
+        "dragonpulse": 0.2779,
+        "endure": 0.0269,
+        "energyball": 0.0744,
+        "gigadrain": 0.2523,
+        "glare": 0.8316,
+        "knockoff": 0.2133,
+        "leafstorm": 0.995,
+        "leechseed": 0.4228,
+        "lightscreen": 0.0281,
+        "reflect": 0.0267,
+        "substitute": 0.566,
+        "synthesis": 0.1635,
+        "taunt": 0.0731
+      },
+      "teraTypes": {
+        "dragon": 0.054,
+        "fire": 0.1334,
+        "ghost": 0.1642,
+        "grass": 0.4301,
+        "ground": 0.028,
+        "steel": 0.135,
+        "water": 0.0208
+      }
+    },
+    "sinistcha": {
+      "usage": 0.0373,
+      "abilities": {
+        "heatproof": 0.9948
+      },
+      "items": {
+        "colburberry": 0.1152,
+        "heavydutyboots": 0.8143,
+        "leftovers": 0.048
+      },
+      "moves": {
+        "calmmind": 0.8566,
+        "foulplay": 0.0176,
+        "hex": 0.0216,
+        "matchagotcha": 0.9911,
+        "nastyplot": 0.0985,
+        "shadowball": 0.9653,
+        "strengthsap": 0.9992,
+        "stunspore": 0.0346
+      },
+      "teraTypes": {
+        "fairy": 0.0305,
+        "ghost": 0.032,
+        "poison": 0.8937,
+        "steel": 0.0181
+      }
+    },
+    "skarmory": {
+      "usage": 0.0402,
+      "abilities": {
+        "keeneye": 0.0117,
+        "sturdy": 0.9793
+      },
+      "items": {
+        "heavydutyboots": 0.0671,
+        "leftovers": 0.0684,
+        "rockyhelmet": 0.853
+      },
+      "moves": {
+        "bodypress": 0.7719,
+        "bravebird": 0.2622,
+        "drillrun": 0.0111,
+        "irondefense": 0.4868,
+        "roost": 0.9899,
+        "spikes": 0.7802,
+        "stealthrock": 0.1865,
+        "taunt": 0.0189,
+        "whirlwind": 0.4734
+      },
+      "teraTypes": {
+        "dragon": 0.3787,
+        "fighting": 0.3461,
+        "ghost": 0.2213,
+        "grass": 0.027,
+        "ground": 0.0119
+      }
+    },
+    "skeledirge": {
+      "usage": 0.0056,
+      "abilities": {
+        "unaware": 0.9964
+      },
+      "items": {
+        "covertcloak": 0.2435,
+        "heavydutyboots": 0.4804,
+        "leftovers": 0.1529,
+        "mistyseed": 0.0951
+      },
+      "moves": {
+        "alluringvoice": 0.0758,
+        "earthpower": 0.3585,
+        "flamecharge": 0.0515,
+        "hex": 0.4729,
+        "shadowball": 0.4206,
+        "slackoff": 0.9433,
+        "substitute": 0.0417,
+        "torchsong": 0.9974,
+        "willowisp": 0.6003
+      },
+      "teraTypes": {
+        "dark": 0.0185,
+        "dragon": 0.0572,
+        "fairy": 0.2726,
+        "fire": 0.0276,
+        "flying": 0.0105,
+        "ghost": 0.0466,
+        "grass": 0.0802,
+        "steel": 0.0358,
+        "water": 0.4368
+      }
+    },
+    "slitherwing": {
+      "usage": 0.0169,
+      "abilities": {
+        "protosynthesis": 1
+      },
+      "items": {
+        "assaultvest": 0.2535,
+        "boosterenergy": 0.0536,
+        "choiceband": 0.2377,
+        "choicescarf": 0.0121,
+        "heavydutyboots": 0.2703,
+        "rockyhelmet": 0.1572
+      },
+      "moves": {
+        "acrobatics": 0.0491,
+        "brickbreak": 0.0154,
+        "bulkup": 0.0447,
+        "closecombat": 0.4718,
+        "earthquake": 0.158,
+        "firstimpression": 0.9285,
+        "flamecharge": 0.0269,
+        "flareblitz": 0.3295,
+        "leechlife": 0.0333,
+        "lowkick": 0.0128,
+        "morningsun": 0.4276,
+        "temperflare": 0.0324,
+        "uturn": 0.9399,
+        "wildcharge": 0.1051,
+        "willowisp": 0.4197
+      },
+      "teraTypes": {
+        "bug": 0.1567,
+        "dragon": 0.0262,
+        "electric": 0.0771,
+        "fairy": 0.1271,
+        "fire": 0.354,
+        "flying": 0.0208,
+        "ghost": 0.0231,
+        "steel": 0.1204,
+        "water": 0.0676
+      }
+    },
+    "slowkinggalar": {
+      "usage": 0.1414,
+      "abilities": {
+        "regenerator": 0.9994
+      },
+      "items": {
+        "assaultvest": 0.2255,
+        "blacksludge": 0.0695,
+        "choicescarf": 0.0322,
+        "colburberry": 0.1092,
+        "ejectbutton": 0.0152,
+        "heavydutyboots": 0.3712,
+        "leftovers": 0.0203,
+        "rockyhelmet": 0.106,
+        "shucaberry": 0.0366
+      },
+      "moves": {
+        "chillyreception": 0.7343,
+        "flamethrower": 0.3314,
+        "focusblast": 0.0237,
+        "foulplay": 0.0234,
+        "futuresight": 0.616,
+        "icebeam": 0.3745,
+        "psychic": 0.0129,
+        "psychicnoise": 0.227,
+        "psyshock": 0.1209,
+        "slackoff": 0.0183,
+        "sludgebomb": 0.9103,
+        "thunderwave": 0.3171,
+        "toxic": 0.1109,
+        "toxicspikes": 0.0242,
+        "trick": 0.0961,
+        "whirlpool": 0.0117
+      },
+      "teraTypes": {
+        "dark": 0.0461,
+        "fairy": 0.1065,
+        "grass": 0.1068,
+        "ice": 0.069,
+        "poison": 0.011,
+        "steel": 0.0346,
+        "water": 0.5945
+      }
+    },
+    "tinglu": {
+      "usage": 0.1102,
+      "abilities": {
+        "vesselofruin": 1
+      },
+      "items": {
+        "custapberry": 0.0272,
+        "heavydutyboots": 0.0417,
+        "leftovers": 0.6637,
+        "redcard": 0.076,
+        "rockyhelmet": 0.0916,
+        "weaknesspolicy": 0.0883
+      },
+      "moves": {
+        "earthquake": 0.9122,
+        "heavyslam": 0.1124,
+        "payback": 0.1548,
+        "protect": 0.017,
+        "rest": 0.1247,
+        "ruination": 0.779,
+        "sleeptalk": 0.0511,
+        "spikes": 0.3614,
+        "stealthrock": 0.7209,
+        "stoneedge": 0.0605,
+        "taunt": 0.0439,
+        "whirlwind": 0.6425
+      },
+      "teraTypes": {
+        "fairy": 0.0245,
+        "ghost": 0.3329,
+        "poison": 0.097,
+        "steel": 0.0377,
+        "water": 0.4894
+      }
+    },
+    "tinkaton": {
+      "usage": 0.0227,
+      "abilities": {
+        "moldbreaker": 0.6836,
+        "pickpocket": 0.3161
+      },
+      "items": {
+        "airballoon": 0.9384,
+        "leftovers": 0.0446
+      },
+      "moves": {
+        "encore": 0.9685,
+        "foulplay": 0.022,
+        "gigatonhammer": 0.9829,
+        "icehammer": 0.1738,
+        "knockoff": 0.2313,
+        "playrough": 0.0112,
+        "stealthrock": 0.9781,
+        "swordsdance": 0.0209,
+        "thunderwave": 0.5916
+      },
+      "teraTypes": {
+        "dark": 0.0743,
+        "fairy": 0.0194,
+        "flying": 0.0158,
+        "ghost": 0.2422,
+        "ice": 0.1125,
+        "steel": 0.0105,
+        "water": 0.5189
+      }
+    },
+    "torkoal": {
+      "usage": 0.0221,
+      "abilities": {
+        "drought": 0.9994
+      },
+      "items": {
+        "charcoal": 0.0105,
+        "choicespecs": 0.0827,
+        "ejectpack": 0.0156,
+        "heatrock": 0.8412,
+        "heavydutyboots": 0.0465
+      },
+      "moves": {
+        "bodypress": 0.1094,
+        "burningjealousy": 0.0105,
+        "clearsmog": 0.1177,
+        "earthpower": 0.1176,
+        "earthquake": 0.2899,
+        "eruption": 0.1536,
+        "fireblast": 0.0197,
+        "flamethrower": 0.0957,
+        "lavaplume": 0.4924,
+        "overheat": 0.2878,
+        "rapidspin": 0.8026,
+        "solarbeam": 0.0784,
+        "stealthrock": 0.8465,
+        "sunnyday": 0.0132,
+        "weatherball": 0.0851,
+        "willowisp": 0.4634
+      },
+      "teraTypes": {
+        "fairy": 0.047,
+        "fighting": 0.0141,
+        "fire": 0.1101,
+        "flying": 0.2599,
+        "ghost": 0.216,
+        "grass": 0.1055,
+        "ground": 0.065,
+        "poison": 0.0395,
+        "water": 0.1343
+      }
+    },
+    "tornadustherian": {
+      "usage": 0.0426,
+      "abilities": {
+        "regenerator": 1
+      },
+      "items": {
+        "assaultvest": 0.5357,
+        "choicespecs": 0.1106,
+        "heavydutyboots": 0.1275,
+        "lifeorb": 0.1763,
+        "rockyhelmet": 0.0399
+      },
+      "moves": {
+        "bleakwindstorm": 0.8742,
+        "darkpulse": 0.0499,
+        "focusblast": 0.1581,
+        "grassknot": 0.1532,
+        "heatwave": 0.7859,
+        "hurricane": 0.1222,
+        "icywind": 0.0588,
+        "knockoff": 0.6517,
+        "nastyplot": 0.2204,
+        "taunt": 0.1125,
+        "uturn": 0.7385,
+        "weatherball": 0.0484
+      },
+      "teraTypes": {
+        "dark": 0.0499,
+        "fairy": 0.0645,
+        "fighting": 0.0503,
+        "fire": 0.0882,
+        "flying": 0.1166,
+        "ghost": 0.0183,
+        "grass": 0.0324,
+        "ice": 0.0415,
+        "normal": 0.0633,
+        "poison": 0.0247,
+        "steel": 0.2935,
+        "water": 0.1378
+      }
+    },
+    "toxapex": {
+      "usage": 0.0248,
+      "abilities": {
+        "regenerator": 0.9988
+      },
+      "items": {
+        "assaultvest": 0.0873,
+        "blacksludge": 0.0641,
+        "covertcloak": 0.0481,
+        "ejectbutton": 0.1608,
+        "heavydutyboots": 0.2086,
+        "leftovers": 0.3773,
+        "rockyhelmet": 0.0505
+      },
+      "moves": {
+        "acidspray": 0.0255,
+        "banefulbunker": 0.3805,
+        "chillingwater": 0.0169,
+        "haze": 0.5328,
+        "icebeam": 0.083,
+        "infestation": 0.4683,
+        "liquidation": 0.014,
+        "poisonjab": 0.3632,
+        "recover": 0.8869,
+        "sludgebomb": 0.1294,
+        "surf": 0.1974,
+        "toxic": 0.5876,
+        "toxicspikes": 0.288
+      },
+      "teraTypes": {
+        "dark": 0.0241,
+        "fairy": 0.1989,
+        "flying": 0.0277,
+        "ghost": 0.104,
+        "grass": 0.1222,
+        "ice": 0.0302,
+        "poison": 0.0182,
+        "steel": 0.4516,
+        "stellar": 0.0103
+      }
+    },
+    "tyranitar": {
+      "usage": 0.0397,
+      "abilities": {
+        "sandstream": 0.9996
+      },
+      "items": {
+        "assaultvest": 0.0612,
+        "choiceband": 0.2429,
+        "heavydutyboots": 0.0929,
+        "leftovers": 0.2955,
+        "smoothrock": 0.1946,
+        "weaknesspolicy": 0.0783
+      },
+      "moves": {
+        "dragondance": 0.018,
+        "dragontail": 0.0352,
+        "earthpower": 0.0238,
+        "earthquake": 0.0843,
+        "firepunch": 0.0123,
+        "heavyslam": 0.0174,
+        "icebeam": 0.4512,
+        "icepunch": 0.3317,
+        "knockoff": 0.9861,
+        "lowkick": 0.3652,
+        "roar": 0.2951,
+        "stealthrock": 0.6527,
+        "stoneedge": 0.419,
+        "taunt": 0.0504,
+        "thunderbolt": 0.1005,
+        "thunderwave": 0.1112
+      },
+      "teraTypes": {
+        "bug": 0.0476,
+        "dark": 0.0318,
+        "fairy": 0.0471,
+        "fighting": 0.0227,
+        "flying": 0.3154,
+        "ghost": 0.4244,
+        "ground": 0.0122,
+        "ice": 0.0108,
+        "rock": 0.0493
+      }
+    },
+    "umbreon": {
+      "usage": 0.0077,
+      "abilities": {
+        "innerfocus": 0.9145,
+        "synchronize": 0.0855
+      },
+      "items": {
+        "leftovers": 0.9927
+      },
+      "moves": {
+        "foulplay": 0.9991,
+        "protect": 0.9939,
+        "thunderwave": 0.9275,
+        "toxic": 0.0694,
+        "wish": 0.9971
+      },
+      "teraTypes": {
+        "fairy": 0.0262,
+        "ghost": 0.0104,
+        "grass": 0.0181,
+        "poison": 0.0203,
+        "water": 0.9176
+      }
+    },
+    "ursaluna": {
+      "usage": 0.027,
+      "abilities": {
+        "guts": 0.9926
+      },
+      "items": {
+        "assaultvest": 0.026,
+        "flameorb": 0.931,
+        "leftovers": 0.0229
+      },
+      "moves": {
+        "bodyslam": 0.0204,
+        "bulkup": 0.0329,
+        "closecombat": 0.0134,
+        "crunch": 0.1865,
+        "drainpunch": 0.0419,
+        "earthquake": 0.1584,
+        "facade": 0.9539,
+        "firepunch": 0.6665,
+        "headlongrush": 0.8423,
+        "icepunch": 0.1106,
+        "protect": 0.1865,
+        "supercellslam": 0.0546,
+        "swordsdance": 0.6349,
+        "trailblaze": 0.0454
+      },
+      "teraTypes": {
+        "fairy": 0.1205,
+        "fire": 0.0234,
+        "ghost": 0.0985,
+        "grass": 0.0224,
+        "ground": 0.0207,
+        "normal": 0.6418,
+        "poison": 0.0288,
+        "water": 0.0177
+      }
+    },
+    "venusaur": {
+      "usage": 0.0144,
+      "abilities": {
+        "chlorophyll": 0.9949
+      },
+      "items": {
+        "focussash": 0.023,
+        "leftovers": 0.0113,
+        "lifeorb": 0.9578
+      },
+      "moves": {
+        "earthpower": 0.1519,
+        "earthquake": 0.3664,
+        "gigadrain": 0.9451,
+        "growth": 0.9829,
+        "knockoff": 0.0102,
+        "sludgebomb": 0.5391,
+        "solarbeam": 0.0481,
+        "weatherball": 0.9354
+      },
+      "teraTypes": {
+        "dark": 0.014,
+        "fire": 0.638,
+        "ghost": 0.0408,
+        "grass": 0.02,
+        "ground": 0.2528,
+        "stellar": 0.0144
+      }
+    },
+    "volcanion": {
+      "usage": 0.021,
+      "abilities": {
+        "waterabsorb": 1
+      },
+      "items": {
+        "assaultvest": 0.2658,
+        "choicespecs": 0.2574,
+        "heavydutyboots": 0.2555,
+        "leftovers": 0.0998,
+        "shucaberry": 0.1071
+      },
+      "moves": {
+        "bodypress": 0.1773,
+        "earthpower": 0.5805,
+        "fireblast": 0.0371,
+        "firespin": 0.1905,
+        "flamethrower": 0.5779,
+        "haze": 0.0146,
+        "overheat": 0.019,
+        "sludgebomb": 0.7266,
+        "sludgewave": 0.0519,
+        "steameruption": 0.9993,
+        "substitute": 0.0109,
+        "taunt": 0.269,
+        "willowisp": 0.3109
+      },
+      "teraTypes": {
+        "bug": 0.0725,
+        "fairy": 0.1455,
+        "fire": 0.0119,
+        "flying": 0.0464,
+        "ghost": 0.0959,
+        "ground": 0.4282,
+        "poison": 0.1251,
+        "water": 0.0564
+      }
+    },
+    "walkingwake": {
+      "usage": 0.0617,
+      "abilities": {
+        "protosynthesis": 1
+      },
+      "items": {
+        "assaultvest": 0.0588,
+        "boosterenergy": 0.0999,
+        "choicescarf": 0.0492,
+        "choicespecs": 0.5156,
+        "heavydutyboots": 0.1058,
+        "lifeorb": 0.0186,
+        "mysticwater": 0.0694,
+        "wiseglasses": 0.0653
+      },
+      "moves": {
+        "agility": 0.079,
+        "dracometeor": 0.8532,
+        "dragonpulse": 0.5098,
+        "dragontail": 0.0156,
+        "flamethrower": 0.5491,
+        "flipturn": 0.3956,
+        "hurricane": 0.0142,
+        "hydropump": 0.0257,
+        "hydrosteam": 0.8023,
+        "knockoff": 0.2124,
+        "scald": 0.0319,
+        "substitute": 0.1094,
+        "surf": 0.1571,
+        "weatherball": 0.2271
+      },
+      "teraTypes": {
+        "dragon": 0.0372,
+        "fairy": 0.1816,
+        "fire": 0.0143,
+        "ghost": 0.0277,
+        "poison": 0.0125,
+        "steel": 0.0155,
+        "stellar": 0.0193,
+        "water": 0.6878
+      }
+    },
+    "weavile": {
+      "usage": 0.0244,
+      "abilities": {
+        "pickpocket": 0.2501,
+        "pressure": 0.7499
+      },
+      "items": {
+        "choiceband": 0.1908,
+        "focussash": 0.0259,
+        "heavydutyboots": 0.6732,
+        "lifeorb": 0.0668,
+        "nevermeltice": 0.0249
+      },
+      "moves": {
+        "beatup": 0.0387,
+        "iceshard": 0.9507,
+        "iciclecrash": 0.1366,
+        "knockoff": 0.9796,
+        "lowkick": 0.2933,
+        "substitute": 0.0233,
+        "swordsdance": 0.6824,
+        "tripleaxel": 0.8638
+      },
+      "teraTypes": {
+        "dark": 0.0559,
+        "fire": 0.0775,
+        "ghost": 0.2255,
+        "ice": 0.6273
+      }
+    },
+    "weezinggalar": {
+      "usage": 0.051,
+      "abilities": {
+        "levitate": 0.0417,
+        "mistysurge": 0.0649,
+        "neutralizinggas": 0.8934
+      },
+      "items": {
+        "ejectbutton": 0.0134,
+        "heavydutyboots": 0.4456,
+        "leftovers": 0.3445,
+        "rockyhelmet": 0.0448,
+        "shucaberry": 0.0719,
+        "terrainextender": 0.0624
+      },
+      "moves": {
+        "defog": 0.9474,
+        "flamethrower": 0.0381,
+        "memento": 0.0115,
+        "overheat": 0.0294,
+        "painsplit": 0.6572,
+        "protect": 0.2052,
+        "sludgebomb": 0.4878,
+        "sludgewave": 0.0557,
+        "strangesteam": 0.2741,
+        "taunt": 0.0236,
+        "toxic": 0.2494,
+        "toxicspikes": 0.079,
+        "willowisp": 0.899
+      },
+      "teraTypes": {
+        "dragon": 0.0856,
+        "flying": 0.0515,
+        "ghost": 0.1296,
+        "grass": 0.5005,
+        "poison": 0.0149,
+        "steel": 0.0245,
+        "water": 0.1584
+      }
+    },
+    "zamazenta": {
+      "usage": 0.2234,
+      "abilities": {
+        "dauntlessshield": 1
+      },
+      "items": {
+        "assaultvest": 0.012,
+        "chestoberry": 0.0398,
+        "choiceband": 0.0548,
+        "expertbelt": 0.011,
+        "heavydutyboots": 0.1354,
+        "leftovers": 0.4257,
+        "lifeorb": 0.1478,
+        "lightclay": 0.1564
+      },
+      "moves": {
+        "bodypress": 0.5195,
+        "closecombat": 0.4802,
+        "crunch": 0.7948,
+        "heavyslam": 0.4099,
+        "howl": 0.0101,
+        "icefang": 0.2107,
+        "irondefense": 0.4708,
+        "lightscreen": 0.1573,
+        "psychicfangs": 0.0181,
+        "reflect": 0.1572,
+        "rest": 0.0495,
+        "roar": 0.342,
+        "stoneedge": 0.2483,
+        "substitute": 0.1132
+      },
+      "teraTypes": {
+        "dark": 0.1921,
+        "electric": 0.0358,
+        "fighting": 0.0486,
+        "fire": 0.2497,
+        "ghost": 0.0209,
+        "ice": 0.0251,
+        "poison": 0.0121,
+        "steel": 0.3944,
+        "stellar": 0.0119
+      }
+    },
+    "zapdos": {
+      "usage": 0.0632,
+      "abilities": {
+        "pressure": 0.0105,
+        "static": 0.9895
+      },
+      "items": {
+        "assaultvest": 0.0174,
+        "choicespecs": 0.0803,
+        "heavydutyboots": 0.7737,
+        "rockyhelmet": 0.1106
+      },
+      "moves": {
+        "bravebird": 0.0135,
+        "discharge": 0.2633,
+        "heatwave": 0.2329,
+        "hurricane": 0.9714,
+        "roost": 0.8646,
+        "thunder": 0.0857,
+        "thunderbolt": 0.0634,
+        "thunderwave": 0.4166,
+        "uturn": 0.2338,
+        "voltswitch": 0.7347,
+        "weatherball": 0.1096
+      },
+      "teraTypes": {
+        "dragon": 0.0265,
+        "electric": 0.0409,
+        "fairy": 0.0833,
+        "fire": 0.0723,
+        "flying": 0.0568,
+        "ghost": 0.0189,
+        "grass": 0.217,
+        "steel": 0.3808,
+        "water": 0.0845
+      }
+    },
+    "zapdosgalar": {
+      "usage": 0.0071,
+      "abilities": {
+        "defiant": 1
+      },
+      "items": {
+        "choiceband": 0.3654,
+        "choicescarf": 0.048,
+        "covertcloak": 0.0777,
+        "heavydutyboots": 0.014,
+        "leftovers": 0.3528,
+        "lifeorb": 0.1191
+      },
+      "moves": {
+        "agility": 0.0689,
+        "bravebird": 0.5233,
+        "bulkup": 0.5684,
+        "closecombat": 0.5124,
+        "drillpeck": 0.3725,
+        "knockoff": 0.8532,
+        "substitute": 0.0161,
+        "taunt": 0.0362,
+        "thunderouskick": 0.5052,
+        "trailblaze": 0.0835,
+        "uturn": 0.4219
+      },
+      "teraTypes": {
+        "dark": 0.0568,
+        "fighting": 0.0895,
+        "fire": 0.4476,
+        "flying": 0.1966,
+        "ghost": 0.0406,
+        "ground": 0.0754,
+        "steel": 0.0686,
+        "stellar": 0.0146
+      }
+    },
+    "zarude": {
+      "usage": 0.0061,
+      "abilities": {
+        "leafguard": 1
+      },
+      "items": {
+        "choiceband": 0.0169,
+        "choicescarf": 0.0108,
+        "heavydutyboots": 0.177,
+        "leftovers": 0.5573,
+        "lifeorb": 0.0958,
+        "sitrusberry": 0.1116
+      },
+      "moves": {
+        "bulkup": 0.072,
+        "closecombat": 0.0403,
+        "drainpunch": 0.0115,
+        "junglehealing": 0.3189,
+        "knockoff": 0.9891,
+        "lowkick": 0.0187,
+        "powerwhip": 0.8335,
+        "rockslide": 0.0131,
+        "solarblade": 0.0908,
+        "swordsdance": 0.8869,
+        "synthesis": 0.5894,
+        "trailblaze": 0.0758,
+        "uturn": 0.0314
+      },
+      "teraTypes": {
+        "dark": 0.0799,
+        "fairy": 0.0955,
+        "fire": 0.0599,
+        "ghost": 0.0334,
+        "poison": 0.6898,
+        "rock": 0.0128
+      }
+    }
+  },
+  "moves": {
+    "acidarmor": 0.0046,
+    "acidspray": 0.0009,
+    "acrobatics": 0.0278,
+    "agility": 0.0515,
+    "airslash": 0.0059,
+    "alluringvoice": 0.0124,
+    "amnesia": 0.007,
+    "ancientpower": 0.0002,
+    "aquacutter": 0.0311,
+    "aquajet": 0.0568,
+    "aquastep": 0.0064,
+    "armorcannon": 0.0079,
+    "aurasphere": 0.0228,
+    "auroraveil": 0.015,
+    "avalanche": 0.0076,
+    "axekick": 0.0004,
+    "banefulbunker": 0.0094,
+    "beatup": 0.0099,
+    "bellydrum": 0.0012,
+    "bite": 0.0092,
+    "bitterblade": 0.0796,
+    "blazekick": 0.0004,
+    "bleakwindstorm": 0.0373,
+    "blizzard": 0.0333,
+    "bodypress": 0.2299,
+    "bodyslam": 0.0258,
+    "boomburst": 0.0021,
+    "bravebird": 0.0944,
+    "breakingswipe": 0.0005,
+    "brickbreak": 0.0028,
+    "bugbite": 0.0006,
+    "bugbuzz": 0.001,
+    "bulkup": 0.086,
+    "bulldoze": 0.001,
+    "bulletpunch": 0.021,
+    "burningjealousy": 0.0013,
+    "calmmind": 0.3774,
+    "ceaselessedge": 0.146,
+    "chargebeam": 0.0019,
+    "chillingwater": 0.0004,
+    "chillyreception": 0.1038,
+    "clangingscales": 0.0048,
+    "clangoroussoul": 0.0072,
+    "clearsmog": 0.0061,
+    "closecombat": 0.394,
+    "cosmicpower": 0.0053,
+    "counter": 0.0009,
+    "courtchange": 0.1198,
+    "crunch": 0.189,
+    "curse": 0.0564,
+    "darkpulse": 0.1179,
+    "dazzlinggleam": 0.1115,
+    "defog": 0.1365,
+    "destinybond": 0.0357,
+    "discharge": 0.0307,
+    "dracometeor": 0.2844,
+    "dragonclaw": 0.0055,
+    "dragondance": 0.1885,
+    "dragondarts": 0.0479,
+    "dragonpulse": 0.172,
+    "dragontail": 0.0652,
+    "drainingkiss": 0.1078,
+    "drainpunch": 0.0776,
+    "drillpeck": 0.0027,
+    "drillrun": 0.0004,
+    "dualwingbeat": 0.0027,
+    "earthpower": 0.4396,
+    "earthquake": 0.6903,
+    "electricterrain": 0.0001,
+    "electroball": 0.0027,
+    "encore": 0.2762,
+    "endeavor": 0.0283,
+    "endure": 0.0157,
+    "energyball": 0.0567,
+    "eruption": 0.0034,
+    "expandingforce": 0.0357,
+    "explosion": 0.0006,
+    "extremespeed": 0.145,
+    "facade": 0.0696,
+    "fairylock": 0.0012,
+    "ficklebeam": 0.0199,
+    "fierydance": 0.098,
+    "fierywrath": 0.0135,
+    "fireblast": 0.018,
+    "firefang": 0.0076,
+    "firepunch": 0.0749,
+    "firespin": 0.004,
+    "firstimpression": 0.0406,
+    "flamecharge": 0.0007,
+    "flamethrower": 0.1983,
+    "flareblitz": 0.0108,
+    "flashcannon": 0.0188,
+    "fling": 0.0046,
+    "flipturn": 0.2156,
+    "flowertrick": 0.0195,
+    "focusblast": 0.1843,
+    "focusenergy": 0.0008,
+    "foulplay": 0.0489,
+    "freezedry": 0.1419,
+    "futuresight": 0.0951,
+    "gigadrain": 0.0454,
+    "gigatonhammer": 0.0223,
+    "glare": 0.0076,
+    "grassknot": 0.0335,
+    "grassyglide": 0.0674,
+    "growth": 0.0141,
+    "gunkshot": 0.0297,
+    "haze": 0.0181,
+    "headlongrush": 0.3308,
+    "headsmash": 0.0224,
+    "healbell": 0.0025,
+    "healingwish": 0.1199,
+    "heatwave": 0.0488,
+    "heavyslam": 0.1118,
+    "hex": 0.0807,
+    "highhorsepower": 0.0178,
+    "highjumpkick": 0.0149,
+    "hornleech": 0.053,
+    "howl": 0.0022,
+    "hurricane": 0.1544,
+    "hydropump": 0.0113,
+    "hydrosteam": 0.0495,
+    "hyperbeam": 0.0008,
+    "hyperspacefury": 0.0258,
+    "hypervoice": 0.0015,
+    "icebeam": 0.257,
+    "icefang": 0.0495,
+    "icehammer": 0.004,
+    "icepunch": 0.0565,
+    "iceshard": 0.0232,
+    "icespinner": 0.3753,
+    "iciclecrash": 0.0033,
+    "iciclespear": 0.0351,
+    "icywind": 0.0087,
+    "infestation": 0.012,
+    "irondefense": 0.159,
+    "ironhead": 0.264,
+    "ivycudgel": 0.2563,
+    "junglehealing": 0.002,
+    "knockoff": 0.8451,
+    "kowtowcleave": 0.1944,
+    "lavaplume": 0.0154,
+    "leafstorm": 0.0136,
+    "leechlife": 0.0304,
+    "leechseed": 0.0039,
+    "lightscreen": 0.0691,
+    "liquidation": 0.0339,
+    "lowkick": 0.1924,
+    "lunarblessing": 0.0092,
+    "lunardance": 0.0155,
+    "lunge": 0.0131,
+    "lusterpurge": 0.0058,
+    "magmastorm": 0.0248,
+    "magnetrise": 0.0033,
+    "makeitrain": 0.2236,
+    "malignantchain": 0.0631,
+    "matchagotcha": 0.037,
+    "megahorn": 0.0002,
+    "memento": 0.0006,
+    "metalsound": 0.0009,
+    "meteorbeam": 0.0318,
+    "mightycleave": 0.0065,
+    "mirrorcoat": 0.048,
+    "mistball": 0.0006,
+    "mistyexplosion": 0.0021,
+    "mistyterrain": 0.0038,
+    "moonblast": 0.3622,
+    "moonlight": 0.1011,
+    "morningsun": 0.024,
+    "mortalspin": 0.1083,
+    "mudshot": 0.0059,
+    "mysticalfire": 0.0794,
+    "nastyplot": 0.2699,
+    "nuzzle": 0.0764,
+    "outrage": 0.0388,
+    "overheat": 0.0439,
+    "painsplit": 0.081,
+    "partingshot": 0.0663,
+    "payback": 0.0171,
+    "phantomforce": 0.0077,
+    "playrough": 0.1003,
+    "poisonjab": 0.0392,
+    "poltergeist": 0.0663,
+    "populationbomb": 0.0136,
+    "pounce": 0.0015,
+    "powergem": 0.0579,
+    "powertrip": 0.0024,
+    "powerwhip": 0.0819,
+    "protect": 0.251,
+    "psychic": 0.0477,
+    "psychicfangs": 0.0054,
+    "psychicnoise": 0.1956,
+    "psychoboost": 0.0288,
+    "psychocut": 0.0009,
+    "psyshock": 0.1306,
+    "pyroball": 0.132,
+    "quickattack": 0.0029,
+    "raindance": 0.0001,
+    "rapidspin": 0.4857,
+    "razorshell": 0.0826,
+    "recover": 0.3537,
+    "recycle": 0.0011,
+    "reflect": 0.068,
+    "rest": 0.0683,
+    "roar": 0.1286,
+    "rockblast": 0.0047,
+    "rockpolish": 0.004,
+    "rockslide": 0.0173,
+    "rocktomb": 0.0136,
+    "roost": 0.4092,
+    "ruination": 0.0859,
+    "sacredsword": 0.0294,
+    "saltcure": 0.0416,
+    "scald": 0.0455,
+    "scaleshot": 0.0569,
+    "scorchingsands": 0.0128,
+    "secretsword": 0.0141,
+    "seedbomb": 0.0005,
+    "seismictoss": 0.0227,
+    "shadowball": 0.477,
+    "shadowclaw": 0.0109,
+    "shadowsneak": 0.0707,
+    "skillswap": 0.0354,
+    "slackoff": 0.016,
+    "sleeptalk": 0.0355,
+    "sludgebomb": 0.2376,
+    "sludgewave": 0.1222,
+    "smackdown": 0.0058,
+    "snowscape": 0.0054,
+    "softboiled": 0.0302,
+    "solarbeam": 0.0101,
+    "solarblade": 0.0028,
+    "sparklingaria": 0.0055,
+    "spikes": 0.2123,
+    "spikyshield": 0.0018,
+    "spiritbreak": 0.0287,
+    "stealthrock": 0.7421,
+    "steameruption": 0.021,
+    "steelbeam": 0.0131,
+    "stickyweb": 0.0627,
+    "stockpile": 0.0022,
+    "stompingtantrum": 0.0013,
+    "stoneedge": 0.1567,
+    "storedpower": 0.0627,
+    "strangesteam": 0.014,
+    "strengthsap": 0.0373,
+    "stunspore": 0.0317,
+    "substitute": 0.1964,
+    "suckerpunch": 0.4299,
+    "sunnyday": 0.0003,
+    "supercellslam": 0.0195,
+    "superfang": 0.0019,
+    "superpower": 0.0192,
+    "surf": 0.113,
+    "swift": 0.0012,
+    "switcheroo": 0.0015,
+    "swordsdance": 0.749,
+    "synthesis": 0.0495,
+    "tachyoncutter": 0.0429,
+    "tailglow": 0.0119,
+    "tailslap": 0.0004,
+    "tailwind": 0.0017,
+    "takeheart": 0.0057,
+    "taunt": 0.237,
+    "teleport": 0.0062,
+    "temperflare": 0.0127,
+    "thief": 0.0001,
+    "throatchop": 0.0021,
+    "thunder": 0.0338,
+    "thunderbolt": 0.2465,
+    "thunderclap": 0.1807,
+    "thunderouskick": 0.0036,
+    "thunderpunch": 0.0074,
+    "thunderwave": 0.1897,
+    "tickle": 0.0212,
+    "tidyup": 0.0136,
+    "torchsong": 0.0056,
+    "toxic": 0.1564,
+    "toxicspikes": 0.0312,
+    "trailblaze": 0.0371,
+    "trick": 0.1726,
+    "trickroom": 0.0459,
+    "tripleaxel": 0.0388,
+    "upperhand": 0.001,
+    "uturn": 0.7263,
+    "vacuumwave": 0.0559,
+    "voltswitch": 0.1298,
+    "waterfall": 0.021,
+    "wavecrash": 0.0072,
+    "weatherball": 0.1553,
+    "whirlpool": 0.0108,
+    "whirlwind": 0.1096,
+    "wildcharge": 0.0063,
+    "willowisp": 0.2711,
+    "wish": 0.0747,
+    "woodhammer": 0.0362,
+    "workup": 0.0001,
+    "worryseed": 0.0009,
+    "xscissor": 0.0016,
+    "zenheadbutt": 0.0145
+  },
+  "items": {
+    "airballoon": 0.2033,
+    "assaultvest": 0.3133,
+    "blackglasses": 0.0811,
+    "blacksludge": 0.0122,
+    "boosterenergy": 0.5364,
+    "charcoal": 0.0002,
+    "chestoberry": 0.0109,
+    "choiceband": 0.1839,
+    "choicescarf": 0.2743,
+    "choicespecs": 0.2705,
+    "chopleberry": 0.0017,
+    "clearamulet": 0.006,
+    "colburberry": 0.0208,
+    "cornerstonemask": 0.023,
+    "covertcloak": 0.0374,
+    "custapberry": 0.0369,
+    "damprock": 0.0377,
+    "dragonfang": 0.0013,
+    "earthplate": 0.0074,
+    "ejectbutton": 0.0357,
+    "ejectpack": 0.0084,
+    "expertbelt": 0.0085,
+    "flameorb": 0.0253,
+    "focussash": 0.1697,
+    "grassyseed": 0.0309,
+    "heatrock": 0.0465,
+    "heavydutyboots": 0.9769,
+    "keeberry": 0.0008,
+    "lansatberry": 0.0002,
+    "leftovers": 0.8458,
+    "lifeorb": 0.2296,
+    "lightball": 0.0044,
+    "lightclay": 0.082,
+    "loadeddice": 0.0639,
+    "lumberry": 0.0204,
+    "magnet": 0.0039,
+    "mentalherb": 0.0082,
+    "metalcoat": 0.0078,
+    "metronome": 0.0014,
+    "miracleseed": 0.0008,
+    "mirrorherb": 0.0039,
+    "mistyseed": 0.0029,
+    "mysticwater": 0.009,
+    "nevermeltice": 0.0036,
+    "powerherb": 0.032,
+    "psychicseed": 0.0091,
+    "punchingglove": 0.0004,
+    "quickclaw": 0.0025,
+    "redcard": 0.0692,
+    "rockyhelmet": 0.4184,
+    "roseliberry": 0.0011,
+    "salacberry": 0.0001,
+    "scopelens": 0.006,
+    "shucaberry": 0.0313,
+    "silkscarf": 0.0097,
+    "silverpowder": 0.0019,
+    "sitrusberry": 0.0182,
+    "smoothrock": 0.015,
+    "softsand": 0.0045,
+    "souldew": 0.007,
+    "spelltag": 0.0012,
+    "splashplate": 0.0008,
+    "stickybarb": 0.0099,
+    "tangaberry": 0.0022,
+    "terrainextender": 0.0234,
+    "throatspray": 0.0017,
+    "toxicorb": 0.1138,
+    "weaknesspolicy": 0.0315,
+    "wellspringmask": 0.177,
+    "widelens": 0.014,
+    "wiseglasses": 0.004
+  },
+  "abilities": {
+    "baddreams": 0.0942,
+    "berserk": 0.0135,
+    "bigpecks": 0.0056,
+    "blaze": 0.0614,
+    "bulletproof": 0.0015,
+    "chlorophyll": 0.0143,
+    "clearbody": 0.0304,
+    "contrary": 0.0407,
+    "cutecharm": 0.0081,
+    "dauntlessshield": 0.2234,
+    "defiant": 0.0674,
+    "disguise": 0.0058,
+    "drizzle": 0.0402,
+    "drought": 0.0516,
+    "flamebody": 0.066,
+    "flashfire": 0.0311,
+    "goodasgold": 0.2697,
+    "gooey": 0.0026,
+    "grassysurge": 0.0649,
+    "guarddog": 0.0085,
+    "guts": 0.0268,
+    "heatproof": 0.0371,
+    "hugepower": 0.0075,
+    "hydration": 0.0165,
+    "infiltrator": 0.0768,
+    "innerfocus": 0.007,
+    "intimidate": 0.1304,
+    "justified": 0.0189,
+    "keeneye": 0.0005,
+    "leafguard": 0.0061,
+    "levitate": 0.1144,
+    "libero": 0.071,
+    "liquidvoice": 0.0177,
+    "magicbounce": 0.1248,
+    "magicguard": 0.0501,
+    "magician": 0.0355,
+    "mirrorarmor": 0.0051,
+    "mistysurge": 0.0033,
+    "moldbreaker": 0.0218,
+    "moxie": 0.0069,
+    "multiscale": 0.1946,
+    "naturalcure": 0.0299,
+    "neutralizinggas": 0.0456,
+    "overcoat": 0.0099,
+    "overgrow": 0.0041,
+    "pickpocket": 0.0133,
+    "poisonheal": 0.1138,
+    "poisonpuppeteer": 0.0833,
+    "prankster": 0.0186,
+    "pressure": 0.3171,
+    "protean": 0.0196,
+    "protosynthesis": 0.5924,
+    "psychicsurge": 0.0111,
+    "purifyingsalt": 0.0415,
+    "quarkdrive": 0.4993,
+    "regenerator": 0.3392,
+    "roughskin": 0.0467,
+    "sandrush": 0.0316,
+    "sandstream": 0.0478,
+    "sapsipper": 0.0033,
+    "sharpness": 0.1458,
+    "shellarmor": 0.0006,
+    "shielddust": 0.0336,
+    "sniper": 0.0003,
+    "snowwarning": 0.016,
+    "soundproof": 0.0061,
+    "speedboost": 0.0143,
+    "static": 0.0626,
+    "sturdy": 0.0624,
+    "supremeoverlord": 0.2648,
+    "sweetveil": 0.0007,
+    "swiftswim": 0.0326,
+    "synchronize": 0.0007,
+    "technician": 0.0346,
+    "tintedlens": 0.028,
+    "torrent": 0.028,
+    "toxicchain": 0.0105,
+    "toxicdebris": 0.1289,
+    "transistor": 0.008,
+    "unaware": 0.088,
+    "unburden": 0.0266,
+    "vesselofruin": 0.1102,
+    "waterabsorb": 0.204,
+    "waterbubble": 0.0288,
+    "weakarmor": 0.0842
+  },
+  "teraTypes": {
+    "bug": 0.103,
+    "dark": 0.3446,
+    "dragon": 0.1466,
+    "electric": 0.0678,
+    "fairy": 0.5868,
+    "fighting": 0.2102,
+    "fire": 0.3525,
+    "flying": 0.1688,
+    "ghost": 1.087,
+    "grass": 0.2778,
+    "ground": 0.2604,
+    "ice": 0.1435,
+    "normal": 0.2218,
+    "poison": 0.273,
+    "psychic": 0.0191,
+    "rock": 0.034,
+    "steel": 0.5616,
+    "stellar": 0.0088,
+    "water": 0.7942
+  },
+  "excluded": {
+    "species": {
+      "roaringmoon": {
+        "usage": 0.0239,
+        "reason": "banned in gen9ou (tier Uber)"
+      }
+    },
+    "moves": {},
+    "items": {},
+    "abilities": {}
+  }
+}
