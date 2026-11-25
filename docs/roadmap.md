@@ -27,6 +27,15 @@ Last updated 2026-11-25.
 - **Independent review** of slice 0. Its one blocking finding (Struggle was
   offered as a legal choice but crashed) is fixed, and a second pass found
   nothing blocking.
+- **Usage whitelist** for October 2026, from Smogon's `gen9ou` stats at the
+  1695 rating cutoff. A species is included at 0.5% weighted usage or more,
+  and a move, item, ability or Tera type when it is on at least 1% of a
+  whitelisted species' sets. Anything the pinned Showdown's `gen9ou` bans is
+  excluded. The result is 102 species, 300 moves, 71 items, 85 abilities and
+  19 Tera types. Roaring Moon is excluded as Uber. `whitelist-report` shows
+  the engine covers 88 of the species and 25 of the moves, and no abilities,
+  items or Terastallization. The 14 uncovered species are all alternate
+  formes, which slice 0 leaves out.
 
 ### Benchmark log
 
@@ -79,25 +88,26 @@ will be wrong once later mechanics arrive. Each is marked in the code with a
 Each step is gated by the parity test. See
 [oracle-testing.md](oracle-testing.md).
 
-1. **Usage whitelist.** Generate the list of species, moves, abilities and
-   items from the monthly Gen 9 OU usage statistics. Regenerate it each month
-   so newly needed mechanics show up as a report.
-2. **Rule vocabulary.** A closed rule type for the declarative move fields the
+1. **Rule vocabulary.** A closed rule type for the declarative move fields the
    export already carries: secondary effects, stat changes, status, drain,
    recoil, multi-hit, healing.
-3. **Status conditions and stat stages**, with their end-of-turn effects.
-4. **Field state:** weather, terrain, hazards, screens.
-5. **Abilities and items** as rules, in usage order. Each one is a small task
+2. **Status conditions and stat stages**, with their end-of-turn effects.
+3. **Field state:** weather, terrain, hazards, screens.
+4. **Abilities and items** as rules, in usage order. Each one is a small task
    with an objective pass or fail, which suits delegation.
-6. **Terastallization.**
-7. **Escape hatches** for the mechanics that resist the rule vocabulary, such
+5. **Terastallization.**
+6. **Escape hatches** for the mechanics that resist the rule vocabulary, such
    as Substitute and Transform.
-8. **Per-player view.** What each side can observe, as a first-class value.
-9. **Showdown seed compatibility.** Implement Showdown's own generators so a
+7. **Per-player view.** What each side can observe, as a first-class value.
+8. **Showdown seed compatibility.** Implement Showdown's own generators so a
    battle can be reproduced from its seed alone.
 
 Alongside:
 
+- **Monthly whitelist refresh.** Regenerate the whitelist when each month's
+  stats appear and rerun `whitelist-report`. Teams are not yet rejected for
+  being outside the whitelist, because the slice 0 traces use species from
+  outside it. That check is added once the engine covers the whitelist.
 - **Scenario generation from rules.** For each rule, generate battles that
   exercise it with each random outcome forced both ways, and report coverage
   per rule.
