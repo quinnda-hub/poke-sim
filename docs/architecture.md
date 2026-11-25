@@ -135,7 +135,12 @@ The trace generator takes its pool from the engine (`engine-pool`). That is the
 "rule data generates test scenarios" half. The expected results still come only
 from Showdown.
 
-Abilities and items are not built yet.
+Abilities and items are not built yet. The design for them is in
+[handlers.md](handlers.md). Showdown dispatches them through sorted events, so
+the engine uses one generic dispatcher that mirrors Showdown's collection and
+sort, including the draws its tie shuffles make. Handler bodies are either data
+rules or named Haskell handlers. A new rule kind needs at least three
+whitelisted users.
 
 ### 7. Format differences are parameters
 

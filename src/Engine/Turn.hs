@@ -534,6 +534,9 @@ runMove fmt dx user@(Actor p _) slot = do
     (True, _) ->
       -- pokemon.deductPP finds no Struggle slot and returns 0, which runMove allows for struggle
       go target (dxStruggle dx) (pure ())
+    -- LATENT: Showdown runs BeforeMove (with its frz/par draws) before the PP check (battle-actions.ts runMove
+    -- ~312, then deductPP ~339); here a move at 0 PP returns before BeforeMove. Unreachable while a chosen move
+    -- always has PP; it goes live with PP drain mid-turn (Pressure, Spite, Eerie Spell).
     (False, Just ms)
       | msPP ms > 0 ->
           -- pokemon.deductPP

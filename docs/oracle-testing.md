@@ -96,8 +96,9 @@ node tools/oracle/gen-slice1.js local/traces/slice1 600 local/traces/slice1-pool
 `engine-pool` prints the moves and species the engine accepts. Only the
 choice of battles comes from the engine. The expected draws and states still
 come from Showdown, so a wrong rule cannot agree with itself. When the engine
-accepts more moves, this set must be recorded again: the parity test fails
-until every accepted move has a trace. A third of the move slots are drawn from
+accepts more moves, this set must be recorded again. Until then the parity
+test fails, because some accepted move is in no set's pool list. The long tier
+also requires every accepted move and species to appear in some trace's teams. A third of the move slots are drawn from
 moves with the slice's mechanics, so that rare cases are reached. The coverage
 tally (multi-hit counts, drain at full HP, recoil knockouts, a failed heal,
 spread moves into an immunity, every pool move used) should show none at zero.

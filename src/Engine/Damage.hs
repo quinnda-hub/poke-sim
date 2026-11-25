@@ -50,6 +50,9 @@ typeIsNamed dx t name = t >= 0 && t < V.length (dxTypeNames dx) && dxTypeNames d
 -- | The natural status immunity of @pokemon.runStatusImmunity@ / @dex.getImmunity@ (pokemon.ts @setStatus@;
 -- @tox@ is checked as @psn@): data/typechart.ts gives @brn@ to Fire, @par@ to Electric, @psn@ to Poison and
 -- Steel, @frz@ to Ice.
+-- REVISIT: this table is hand-copied from data/typechart.ts (the status keys of @damageTaken@), because
+-- tools/oracle/export-dex.js does not export them; a re-pin would not regenerate it. Export them and load
+-- them from data/gen9/types.json when the export is next changed (slice 2a).
 -- LATENT: abilities (Limber, Immunity, Water Veil, ...), Misty Terrain, Safeguard and the @Immunity@ event
 -- are not modelled; nothing in the engine can attach to them yet.
 statusImmune :: Dex -> StatusId -> Mon -> Bool
@@ -107,5 +110,5 @@ modifyDamage f dx attacker defender mv crit roll16 base0 =
   where
     -- battle.modify(value, m) with the modifier already scaled by 4096.
     -- LATENT: Showdown accumulates ability/item modifiers with chainModify (battle.ts ~2337) before one modify();
-    -- here STAB is the only modifier, so a single modifyBy is equivalent.
+    -- here STAB and burn are separate modify() calls in Showdown too, so modifyBy per step is equivalent.
     modifyBy m v = trunc f ((trunc f (v * m) + 2048 - 1) `quot` 4096)

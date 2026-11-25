@@ -61,9 +61,12 @@ by nothing else.
 - Every merge into main is a PR. A stack of PRs needs one long-tier run, at the
   top of the stack. If it fails, find the PR in the stack that broke it and fix
   that PR.
-- A new test goes in both tiers, with a smaller count or sample in fast. The
-  fast tier never skips a check that the long tier makes, it only runs fewer
-  cases.
+- A new test goes in both tiers, with a smaller count or sample in fast. Within
+  a trace or property, the fast tier never skips a check that the long tier
+  makes, it only runs fewer cases. The one exception is a check over the whole
+  corpus, which a sample cannot make. That check runs in the long tier only.
+  Today that is the requirement that every accepted move and species appears
+  in some trace's teams.
 - `cabal.project` sets `tests: True`. Without it the solver cannot fit hedgehog
   into the plan.
 

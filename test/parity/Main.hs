@@ -77,22 +77,38 @@ main = do
     let sampled = if tier == "fast" then [f | (i, f) <- zip [0 :: Int ..] files, i `mod` 10 == 0] else files
     modifyIORef' counts ((set, (length sampled, length files)) :)
     forM sampled $ \f -> do
-      r <- runFile dex f
+      (r, used) <- runFile dex f
       case r of
         Left e -> do
           hPutStrLn stderr (render f e)
           hFlush stderr
         Right _ -> pure ()
-      pure (set, r)
+      pure (set, r, used)
+  -- Long tier: every move and species the engine accepts must appear in some trace's teams, not only in a
+  -- pool list. This is a check over the whole corpus, so the fast tier, which reads a sample, cannot make it.
+  coverageOk <- if tier == "fast"
+    then putStrLn "parity: trace coverage of the pool is checked in the long tier only" >> pure True
+    else do
+      let usedMoves = Set.unions [ms | (_, _, (ms, _)) <- results]
+          usedSpecies = Set.unions [ss | (_, _, (_, ss)) <- results]
+          unusedMoves = Set.toList (Set.fromList (supportedMoves dex) `Set.difference` usedMoves)
+          unusedSpecies = Set.toList (Set.fromList (supportedSpecies dex) `Set.difference` usedSpecies)
+      when (not (null unusedMoves)) $
+        hPutStrLn stderr ("parity: the engine accepts moves no trace's teams use (untested): " ++ show unusedMoves)
+      when (not (null unusedSpecies)) $
+        hPutStrLn stderr ("parity: the engine accepts species no trace's teams use (untested): " ++ show unusedSpecies)
+      putStrLn ("parity: trace coverage: " ++ show (Set.size usedMoves) ++ " moves and " ++ show (Set.size usedSpecies)
+        ++ " species used by the traces' teams")
+      pure (null unusedMoves && null unusedSpecies)
   forM_ sets $ \set -> do
-    let rs = [r | (s, r) <- results, s == set]
+    let rs = [r | (s, r, _) <- results, s == set]
         oks = [x | Right x <- rs]
     putStrLn $
       "parity: set " ++ set ++ ": " ++ show (length oks) ++ "/" ++ show (length rs) ++ " traces passed, "
         ++ show (sum (map fst oks)) ++ " decision points, " ++ show (sum (map snd oks)) ++ " draws checked"
   cs <- reverse <$> readIORef counts
-  let oks = [x | (_, Right x) <- results]
-      bad = length [() | (_, Left _) <- results]
+  let oks = [x | (_, Right x, _) <- results]
+      bad = length [() | (_, Left _, _) <- results]
   putStrLn $
     "parity: tier " ++ tier ++ ", sampled/total per set: "
       ++ unwords [set ++ " " ++ show a ++ "/" ++ show t | (set, (a, t)) <- cs] ++ "; "
@@ -101,6 +117,9 @@ main = do
       ++ show (sum (map snd oks)) ++ " draws checked"
   when (bad > 0) $ do
     putStrLn ("parity: " ++ show bad ++ " trace(s) FAILED")
+    exitFailure
+  when (not coverageOk) $ do
+    putStrLn "parity: trace coverage FAILED"
     exitFailure
   where
     -- traces are named <profile>-<seed>.json; the list files (slice0-moves.json, ...) are not traces
@@ -140,13 +159,19 @@ checkPool what actual sets = do
       hPutStrLn stderr ("parity: the engine accepts " ++ what ++ "s no trace set lists (untested): " ++ show untested)
     exitFailure
 
--- | Load and check one trace; on success returns (decision points, draws).
-runFile :: Dex -> FilePath -> IO (Either Failure (Int, Int))
+-- | Load and check one trace; on success returns (decision points, draws). Also returns the move and
+-- species ids its teams use (as ids, whatever the trace's spelling), for the coverage check.
+runFile :: Dex -> FilePath -> IO (Either Failure (Int, Int), (Set.Set T.Text, Set.Set T.Text))
 runFile dex f = do
   r <- eitherDecodeFileStrict' f
   case r of
-    Left e -> pure (Left (Failure "load" Nothing 0 e))
-    Right v -> checkTrace dex v
+    Left e -> pure (Left (Failure "load" Nothing 0 e), (Set.empty, Set.empty))
+    Right v -> do
+      res <- checkTrace dex v
+      let sets' = concatMap arr (arr (v .: "teams"))
+          ids k = Set.fromList [toId t | s <- sets', String t <- [s .: k]]
+          moveIds = Set.fromList [toId t | s <- sets', String t <- arr (s .: "moves")]
+      pure (res, (moveIds, ids "species"))
 
 -- ---------------------------------------------------------------------------
 -- JSON helpers (missing data yields Null, which then shows up as a mismatch)
