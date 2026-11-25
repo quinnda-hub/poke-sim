@@ -10,6 +10,7 @@ module Engine.Damage
   , typeMod
   , baseDamage
   , modifyDamage
+  , finalDamage
   ) where
 
 import qualified Data.Text as T
@@ -85,8 +86,8 @@ baseDamage f level power atk def =
     -- JS division by zero yields Infinity, which truncates to 0.
     quotZ a b = if b == 0 then 0 else a `quot` b
 
--- | @modifyDamage@ for a plain move: crit, random factor, STAB, type effectiveness, minimum 1, 16-bit truncation.
--- @roll16@ is the already drawn value of @random(16)@.
+-- | @modifyDamage@ (battle-actions.ts ~1790-1890) up to the @ModifyDamage@ event: crit, random factor, STAB, type
+-- effectiveness and the burn. 'finalDamage' is the rest. @roll16@ is the already drawn value of @random(16)@.
 modifyDamage :: Format -> Dex -> Mon -> Mon -> MoveData -> Bool -> Int -> Int -> Int
 modifyDamage f dx attacker defender mv crit roll16 base0 =
   let base1 = base0 + 2
@@ -107,4 +108,9 @@ modifyDamage f dx attacker defender mv crit roll16 base0 =
       -- supported): `modify(baseDamage, 0.5)` (a modify() of its own, not a chainModify), after the type step and
       -- before the final ModifyDamage event
       base6 = if monStatus attacker == StatusBrn && mvPhysical mv then modify f base5 2048 else base5
-   in if base6 == 0 then 1 else truncBits f 16 base6
+   in base6
+
+-- | The end of @modifyDamage@ after @runEvent('ModifyDamage')@: `if (this.battle.gen !== 5 && !baseDamage) return 1`,
+-- then 16-bit truncation, which can truncate to 0 (battle-actions.ts 1895-1899).
+finalDamage :: Format -> Int -> Int
+finalDamage f d = if d == 0 then 1 else truncBits f 16 d

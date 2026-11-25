@@ -69,6 +69,7 @@ back to `local/showdown`.
 | `record.js <scenario.json> [out.json]` | Play one battle on Showdown and write its trace. |
 | `gen-slice0.js <outDir> <count> [firstSeed] [format] [profile]` | Generate random slice-0 battles and record each. Deterministic per seed. |
 | `gen-slice1.js <outDir> <count> <poolFile> [firstSeed]` | Generate random slice-1 battles from the engine's own pool and record each, then print a coverage tally from Showdown's log. Deterministic per seed and pool. |
+| `gen-slice2.js <outDir> <count> <poolFile> [firstSeed] [profile]` | Slice 1's teams (or, with `struggle`, slice 0's Struggle teams) with abilities and items from the engine's pool, recorded, then a tally of the outcomes that distinguish each handler, observed by wrapping Showdown's event methods. Deterministic per seed and pool. |
 | `export-dex.js [outDir] [mod]` | Export species, moves, abilities, items, types and natures to `data/gen9/`. |
 
 ### Recording traces
@@ -98,14 +99,37 @@ choice of battles comes from the engine. The expected draws and states still
 come from Showdown, so a wrong rule cannot agree with itself. When the engine
 accepts more moves, this set must be recorded again. Until then the parity
 test fails, because some accepted move is in no set's pool list. The long tier
-also requires every accepted move and species to appear in some trace's teams. A third of the move slots are drawn from
+also requires every accepted move, species, ability and item to appear in some trace's teams. A third of the move slots are drawn from
 moves with the slice's mechanics, so that rare cases are reached. The coverage
 tally (multi-hit counts, drain at full HP, recoil knockouts, a failed heal,
 spread moves into an immunity, every pool move used) should show none at zero.
 
-Traces live under `local/` and are not committed: slice 0's 800 battles take
-about 280 MB and slice 1's 600 about 320 MB. They are reproducible from the
-seeds.
+Slice 2 adds abilities and items, drawn from the pool, to the same teams:
+
+```sh
+cabal run -v0 engine-pool > local/traces/slice2-pool.json
+node tools/oracle/gen-slice2.js local/traces/slice2 600 local/traces/slice2-pool.json
+node tools/oracle/gen-slice2.js local/traces/slice2 300 local/traces/slice2-pool.json 1 struggle
+```
+
+The set writes four lists: `slice2-moves.json`, `slice2-species.json`,
+`slice2-abilities.json` and `slice2-items.json`. A set without the last two
+draws only "No Ability" and no item. The pool check and the long tier's
+coverage check cover abilities and items as well as moves and species.
+
+The two profiles reach different things:
+- **`random`:** biases ability draws toward observable cases (a pinch ability
+  with a move of its type, Technician with a weak move) and item draws
+  toward the residual items, so that two of them tie on speed.
+- **`struggle`:** puts the items and abilities that act on Struggle in play:
+  Rocky Helmet (Struggle makes contact), Life Orb, Technician and Huge Power.
+
+The tally should show no counter at zero. The wrappers only observe: they
+pass every argument through and run nothing Showdown would not run.
+
+Traces live under `local/` and are not committed. Slice 0's 800 battles take
+about 280 MB, slice 1's 600 about 320 MB and slice 2's 900 about 340 MB. They
+are reproducible from the seeds.
 
 To isolate one behaviour, write a scenario by hand and give it explicit choices:
 

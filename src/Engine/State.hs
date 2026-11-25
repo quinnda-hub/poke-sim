@@ -15,6 +15,7 @@ module Engine.State
   , setBoostOf
   , MoveSlot (..)
   , MonStatus (..)
+  , noItem
   , EffectState (..)
   , noEffectState
   , Volatile (..)
@@ -115,6 +116,10 @@ data MoveSlot = MoveSlot
   { msMove :: !Int
   , msPP :: !Int
   , msMaxPP :: !Int
+  , msDisabled :: !Bool
+  -- ^ @moveSlot.disabled@ (true; never @'hidden'@). Set by @DisableMove@ handlers at @endTurn@. The slot object is
+  -- shared with @baseMoveSlots@, so @clearVolatile@ does not reset it: a benched Pokemon keeps its flags until it
+  -- is active at an @endTurn@.
   }
   deriving (Eq, Show)
 
@@ -145,6 +150,10 @@ noEffectState = EffectState 0 0 (-1) (-1)
 data Volatile = Volatile !Int !EffectState
   deriving (Eq, Show)
 
+-- | @pokemon.item === ''@.
+noItem :: Int
+noItem = -1
+
 -- | One Pokemon.
 data Mon = Mon
   { monSpecies :: !Int
@@ -173,6 +182,12 @@ data Mon = Mon
   -- builds a fresh state (absent), toxic's @onStart@ sets the stage to 0, its @onSwitchIn@ resets it to 0 and each
   -- residual increments it. @fnt@ and the @status = ''@ of a replaced faint are plain assignments that leave
   -- @statusState@ alone, so a Pokemon that fainted badly poisoned keeps its stage.
+  , monAbility :: !Int
+  -- ^ An index into the @Dex@ ability table (@pokemon.ability@).
+  , monAbilityState :: !EffectState
+  , monItem :: !Int
+  -- ^ An index into the @Dex@ item table, or 'noItem'.
+  , monItemState :: !EffectState
   , monVolatiles :: !(SV.Vector Volatile)
   -- ^ @pokemon.volatiles@ in insertion order (flinch, duration 1: set by a flinch secondary, removed by the next
   -- @Residual@ and by @clearVolatile@).

@@ -26,7 +26,8 @@ import System.Random.SplitMix (mkSMGen)
 import Engine
 import Engine.Chance (runSample)
 import Engine.Dex (Condition (..), Dex (..), supportedMoves)
-import Engine.Event (CondId (..), condName)
+import Engine.Effects (abilityBodies, itemBodies)
+import Engine.Event (CondId (..), HandlerSpec (..), condName)
 import Engine.Format (trunc, truncBits)
 import Engine.Rule (executable, moveRule)
 import Engine.State
@@ -55,6 +56,8 @@ main = do
             withTests 1 (translation dex movesJson))
         , ("every condition the engine runs is supported: a body for each handler the export lists",
             withTests 1 (conditionsSupported dex))
+        , ("an ability or item is supported exactly when it has bodies, one for each handler the export lists and no others",
+            withTests 1 (effectsSupported dex))
         ]
     , checkSequential $ Group "arithmetic (against JavaScript semantics)"
         [ ("roundDiv is Math.round(n / d)", withTests (fromIntegral n) propRoundDiv)
@@ -260,3 +263,25 @@ conditionsSupported dex = withTests 1 $ property $ do
     assert (cnSupported cn)) [minBound .. maxBound :: CondId]
   -- flinch has duration 1 (conditions.ts); the statuses have none
   map (\c -> cnDuration (dxConditions dex V.! fromEnum c)) [minBound .. maxBound :: CondId] === [0, 0, 0, 0, 0, 1]
+
+-- | An ability or item is supported exactly when "Engine.Effects" has bodies for it, and then the handlers the
+-- engine runs are exactly those bodies: one for each handler the export lists, and no body for a handler the export
+-- does not list (which would be dead code under a name Showdown never calls).
+effectsSupported :: Dex -> Property
+effectsSupported dex = withTests 1 $ property $ do
+  let ty name = V.findIndex (== name) (dxTypeNames dex)
+      checkTable what bodiesOf table = mapM_ (\c -> case bodiesOf ty (cnId c) of
+        Nothing -> do
+          footnote (what ++ " " ++ T.unpack (cnId c) ++ " is supported without bodies")
+          assert (not (cnSupported c))
+        Just bs -> do
+          footnote (what ++ " " ++ T.unpack (cnId c) ++ " has bodies but is not supported: "
+            ++ maybe "" T.unpack (cnReject c))
+          assert (cnSupported c)
+          let run = [(p, e) | (p, e, spec) <- cnHandlers c, Just _ <- [hsBody spec]]
+              written = [(p, e) | (p, e, _) <- bs]
+          footnote (what ++ " " ++ T.unpack (cnId c) ++ ": bodies " ++ show written ++ ", run " ++ show run)
+          assert (all (`elem` run) written && all (`elem` written) run && length run == length written))
+        (V.toList table)
+  checkTable "ability" abilityBodies (dxAbilities dex)
+  checkTable "item" itemBodies (dxItems dex)

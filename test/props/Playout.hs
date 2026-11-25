@@ -25,7 +25,7 @@ import qualified Hedgehog.Range as Range
 
 import Engine
 import Engine.Chance (Sample)
-import Engine.Dex (Dex (..), supportedMoves, supportedSpecies)
+import Engine.Dex (Dex (..), supportedAbilities, supportedItems, supportedMoves, supportedSpecies)
 import Engine.Event (CondId (..))
 import Engine.State
 
@@ -40,6 +40,9 @@ genTeams dx = (,) <$> genTeam <*> genTeam
   where
     species = supportedSpecies dx
     moves = supportedMoves dx
+    -- every ability and item the engine accepts ("noability" and the empty item among them)
+    abilities = supportedAbilities dx
+    items = supportedItems dx
     natures = M.keys (dxNatureIx dx)
     genTeam = do
       n <- Gen.int (Range.linear 1 6)
@@ -53,8 +56,10 @@ genTeams dx = (,) <$> genTeam <*> genTeam
       nat <- Gen.element natures
       lvl <- Gen.int (Range.linear 1 100)
       evs <- Gen.list (Range.singleton 6) (Gen.int (Range.linear 0 252))
+      ab <- Gen.element abilities
+      it <- Gen.element items
       pure (object
-        [ "species" .= sp, "moves" .= ms, "nature" .= nat, "level" .= lvl
+        [ "species" .= sp, "moves" .= ms, "nature" .= nat, "level" .= lvl, "ability" .= ab, "item" .= it
         , "evs" .= object [K.fromText k .= v | (k, v) <- zip ["hp", "atk", "def", "spa", "spd", "spe"] evs]
         ])
 

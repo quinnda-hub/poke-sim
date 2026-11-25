@@ -17,6 +17,7 @@ module Engine.Dispatch
   , getActionSpeed
   , updateSpeedAll
   , addVolatile
+  , trySetStatus
   , clearStatus
   , resolveFaints
   , checkWin
@@ -33,11 +34,11 @@ import qualified Data.Vector.Strict as SV
 import qualified Data.Vector.Unboxed as U
 
 import Engine.Chance
-import Engine.Damage (typeIsNamed)
+import Engine.Damage (hasTypeNamed, statusImmune, typeIsNamed, typeMod)
 import Engine.Dex
 import Engine.Event
-import Engine.Modifier (baseMod, modify)
-import Engine.Rule (MoveRule (..))
+import Engine.Modifier (baseMod, chainModify, modify)
+import Engine.Rule (MoveRule (..), StatusId (..))
 import Engine.State
 import Engine.Stats (boostedStat, finalSpeed, parSpe)
 
@@ -58,12 +59,6 @@ statusCond s = case s of
   StatusNone -> Nothing
   StatusFainted -> Nothing
 
--- | The condition with an id of the state.
-condIdOf :: Int -> Maybe CondId
-condIdOf i = case [c | c <- [minBound .. maxBound], fromEnum c == i] of
-  (c : _) -> Just c
-  [] -> Nothing
-
 -- | The state of an effect a Pokemon currently has, or 'Nothing' when it does not (the status is another one, the
 -- volatile is gone).
 effectState :: Mon -> EffectKey -> Maybe EffectState
@@ -74,12 +69,16 @@ effectState m (EffectKey kind i) = case kind of
   EffVolatile -> case [st | Volatile j st <- SV.toList (monVolatiles m), j == i] of
     (st : _) -> Just st
     [] -> Nothing
+  EffAbility -> if monAbility m == i then Just (monAbilityState m) else Nothing
+  EffItem -> if monItem m == i then Just (monItemState m) else Nothing
 
 -- | Replace the state of an effect a Pokemon has.
 setEffectState :: EffectKey -> EffectState -> Mon -> Mon
 setEffectState (EffectKey kind i) st m = case kind of
   EffStatus -> if fmap fromEnum (statusCond (monStatus m)) == Just i then m {monStatusState = st} else m
   EffVolatile -> m {monVolatiles = SV.map (\v@(Volatile j _) -> if j == i then Volatile j st else v) (monVolatiles m)}
+  EffAbility -> if monAbility m == i then m {monAbilityState = st} else m
+  EffItem -> if monItem m == i then m {monItemState = st} else m
 
 -- | @pokemon.removeVolatile@: the @End@ event of the volatile has no handler here.
 removeVolatile :: Int -> Mon -> Mon
@@ -110,6 +109,36 @@ addVolatile dx a c = do
   where
     key = EffectKey EffVolatile (fromEnum c)
 
+-- | @pokemon.trySetStatus(status)@ -> @setStatus(this.status || status)@ (pokemon.ts) of a Pokemon, with no
+-- ability or field effect: fails with no HP, off the field, with any status already (including the same
+-- one) or when the type is immune; otherwise sets the status and its fresh @statusState@ (toxic's @onStart@
+-- sets the stage to 0). @SetStatus@ and @AfterSetStatus@ have no handlers (draw nothing).
+trySetStatus :: MonadChance m => Dex -> Actor -> StatusId -> Eng m Bool
+trySetStatus dx a st = do
+  b <- get
+  let m = monOf b a
+      has = monStatus m `elem` [StatusBrn, StatusPar, StatusPsn, StatusTox, StatusFrz]
+  if monHp m <= 0 || not (monActive m) || has || statusImmune dx st m
+    then pure False
+    else do
+      -- this.status = status.id; this.statusState = initEffectState({id}); `if (status.duration) duration`
+      modify' (modifyMon a (\x -> x {monStatus = monStatusOf st, monStatusState = noEffectState {esDuration = cnDuration (conditionOf dx (condOf st))}}))
+      -- singleEvent('Start', status, statusState, this, source, sourceEffect): toxic's onStart sets the stage to 0
+      relayTruthy <$> singleEvent dx EvStart (EffectKey EffStatus (fromEnum (condOf st))) a Nothing Nothing RNone
+  where
+    monStatusOf s = case s of
+      Brn -> StatusBrn
+      Par -> StatusPar
+      Psn -> StatusPsn
+      Tox -> StatusTox
+      Frz -> StatusFrz
+    condOf s = case s of
+      Brn -> CBrn
+      Par -> CPar
+      Psn -> CPsn
+      Tox -> CTox
+      Frz -> CFrz
+
 -- ---------------------------------------------------------------------------
 -- Collection and keys
 
@@ -135,21 +164,24 @@ getAllActive includeFainted b =
 -- | @findPokemonEventHandlers@ (battle.ts 1111): the status, then the volatiles in insertion order. With
 -- @byDuration@ (@getKey = 'duration'@, @Residual@) an effect whose state has a duration is collected even when it has
 -- no callback.
--- Hook: the ability, item, species and slot-condition handlers of the Pokemon are collected here, in that order,
--- once the state holds them.
+-- Then the ability and the item. Hook: the species and slot-condition handlers are collected here once the state
+-- holds them.
 -- Keys are those of @resolvePriority@ (957-1032): order, priority and subOrder from the spec, the holder's cached
 -- speed (scaled), and for @SwitchIn@ the holder's @effectOrder@ and the half-speed step by its position in
 -- @battle.speedOrder@ (an absent position is -1, as @indexOf@).
+-- LATENT: battle.ts getCallback runs an ability's or item's @onStart@ as its @onSwitchIn@ handler when it has none
+-- (abilities with onStart: Intimidate, the weather setters, ...). No supported ability or item has onStart yet.
 pokemonHandlers :: Dex -> Battle -> Bool -> Prefix -> EventId -> Actor -> [Handler]
-pokemonHandlers dx b byDuration pfx ev a@(Actor p _)
-  | null (monVolatiles m) && monStatus m == StatusNone = []
-  | otherwise = statusPart ++ concat [one (EffectKey EffVolatile i) c st | Volatile i st <- SV.toList (monVolatiles m), Just c <- [condIdOf i]]
+pokemonHandlers dx b byDuration pfx ev a@(Actor p _) =
+  statusPart ++ volatilePart ++ one (EffectKey EffAbility (monAbility m)) (monAbilityState m) ++ itemPart
   where
     m = monOf b a
     statusPart = case statusCond (monStatus m) of
-      Just c -> one (EffectKey EffStatus (fromEnum c)) c (monStatusState m)
+      Just c -> one (EffectKey EffStatus (fromEnum c)) (monStatusState m)
       Nothing -> []
-    one key c st = case condSpec (conditionOf dx c) pfx ev of
+    volatilePart = concat [one (EffectKey EffVolatile i) st | Volatile i st <- SV.toList (monVolatiles m)]
+    itemPart = if monItem m == noItem then [] else one (EffectKey EffItem (monItem m)) (monItemState m)
+    one key st = case effectOf dx key >>= \cn -> condSpec cn pfx ev of
       Just spec | isJust (hsBody spec) || (byDuration && esDuration st /= 0) -> [Handler key a spec (sortKey spec st)]
       _ -> []
     switchIn = ev == EvSwitchIn
@@ -211,9 +243,12 @@ stop = Replace (RBool False)
 -- | A handler's result and the event's modifier after it (@chainModify@ / @finalModify@ change it).
 data Res = Res !Outcome !Int
 
--- | The context a handler runs in: its holder, the event's source effect (the move) and the event's modifier.
+-- | The context a handler runs in: its holder, the event's source Pokemon, its source effect (the move) and the
+-- event's modifier. (The event's target is the holder, except for the @onSource@ handlers of @ModifyDamage@,
+-- whose holder is the event's source; the natives that care know which.)
 data Ctx = Ctx
   { cHolder :: !Actor
+  , cSource :: !(Maybe Actor)
   , cMove :: !(Maybe MoveData)
   , cMod :: !Int
   }
@@ -224,9 +259,11 @@ data Ctx = Ctx
 --
 -- Arguments: the event, the target, the source Pokemon and the source effect (the move, for @BeforeMove@,
 -- @ModifyMove@, @DamagingHit@, @AfterMoveSecondary@) and the relay value.
--- A call-time gate skips a handler: its status is no longer the holder's (battle.ts 872). The @breakable@ ability
--- (Mold Breaker), @ignoringItem@, @ignoringAbility@ and Air Lock gates (881-914) join with abilities, items and
--- weather.
+-- Call-time gates skip a handler (battle.ts 870-914): its status is no longer the holder's; a @breakable@
+-- ability while the holder's ability is suppressed (Mold Breaker; nothing can suppress yet); an item of a
+-- holder that is not active, except for @Start@ and @SwitchIn@ (@ignoringItem@: Klutz, Embargo and Magic Room
+-- cannot happen yet); an ability of a holder that is not active (@ignoringAbility@: Gastro Acid and
+-- Neutralizing Gas cannot happen yet). The Air Lock gate joins with weather.
 -- LATENT: the move's own callbacks (@onEffect@, 787-795), array targets (@AfterMoveSecondary@ and @DamagingHit@
 -- pass the target as a one-element array; in singles that is the same as the single target) and @fastExit@ are not
 -- modelled.
@@ -245,44 +282,56 @@ runEvent dx ev target source mv relay0 = do
     go fmt (h : hs) r md = do
       b <- get
       let m = monOf b (hHolder h)
-          gone = case hKey h of
-            EffectKey EffStatus _ -> not (isJust (effectState m (hKey h)))
-            EffectKey EffVolatile _ -> False
-      if gone
-        then go fmt hs r md -- `effect.effectType === 'Status' && effectHolder.status !== effect.id`: it's changed
+      if skipped dx ev b h m
+        then go fmt hs r md
         else case hsBody (hSpec h) of
           Nothing -> go fmt hs r md
           Just body -> do
-            Res out md' <- runBody dx body (Ctx (hHolder h) mv md) r
+            Res out md' <- runBody dx body (Ctx (hHolder h) source mv md) r
             case out of
               Keep -> go fmt hs r md'
               Replace r'
                 | relayTruthy r' -> go fmt hs r' md'
                 | otherwise -> pure (finish fmt r' md')
 
--- | @battle.singleEvent@ (battle.ts 578-656): run one effect's handler for an event on its holder. Returns the relay
--- value, which a handler may replace. Gated on the status still being the holder's (601); the ability, item and
--- weather gates (606-628) join with those effects.
-singleEvent :: MonadChance m => Dex -> EventId -> EffectKey -> Actor -> Maybe Actor -> Maybe MoveData -> Relay -> Eng m Relay
-singleEvent dx ev key holder _source mv relay = case effectBody dx key ev of
-  Nothing -> pure relay
-  Just body -> singleBody dx body key holder mv relay
+-- | The call-time gates of @runEvent@ (battle.ts 870-914), as documented there.
+skipped :: Dex -> EventId -> Battle -> Handler -> Mon -> Bool
+skipped dx ev b h m = case hKey h of
+  EffectKey EffStatus _ -> not (isJust (effectState m (hKey h))) -- it's changed
+  EffectKey EffVolatile _ -> False
+  EffectKey EffAbility _ ->
+    (maybe False cnBreakable (effectOf dx (hKey h)) && suppressingAbility b (hHolder h))
+      || not (monActive m) -- ignoringAbility, gen >= 5
+  EffectKey EffItem _ -> ev /= EvStart && ev /= EvSwitchIn && not (monActive m) -- ignoringItem, gen >= 5
 
--- | The body of an effect's own handler for an event.
-effectBody :: Dex -> EffectKey -> EventId -> Maybe Body
-effectBody dx (EffectKey _ i) ev = do
-  c <- condIdOf i
-  spec <- condSpec (conditionOf dx c) POwn ev
-  hsBody spec
+-- | @battle.suppressingAbility(target)@: Mold Breaker and its kin. No ability that suppresses exists yet.
+suppressingAbility :: Battle -> Actor -> Bool
+suppressingAbility _ _ = False
+
+-- | @battle.singleEvent@ (battle.ts 578-656): run one effect's handler for an event on its holder. Returns the relay
+-- value, which a handler may replace. Gates (601-628): the status is no longer the holder's; an item of a holder
+-- that is not active, except for @Start@ (@TakeItem@ is not an event here); an ability of an inactive holder,
+-- except for @End@. The weather gate joins with weather.
+singleEvent :: MonadChance m => Dex -> EventId -> EffectKey -> Actor -> Maybe Actor -> Maybe MoveData -> Relay -> Eng m Relay
+singleEvent dx ev key holder source mv relay = case effectOf dx key >>= \cn -> condSpec cn POwn ev >>= hsBody of
+  Nothing -> pure relay
+  Just body -> singleBody dx ev body key holder source mv relay
 
 -- | The part of @singleEvent@ after finding the callback.
-singleBody :: MonadChance m => Dex -> Body -> EffectKey -> Actor -> Maybe MoveData -> Relay -> Eng m Relay
-singleBody dx body key holder mv relay = do
+singleBody :: MonadChance m => Dex -> EventId -> Body -> EffectKey -> Actor -> Maybe Actor -> Maybe MoveData -> Relay -> Eng m Relay
+singleBody dx ev body key holder source mv relay = do
   m <- gets (`monOf` holder)
-  case key of
-    EffectKey EffStatus _ | not (isJust (effectState m key)) -> pure relay -- it's changed; call it off
-    _ -> do
-      Res out _ <- runBody dx body (Ctx holder mv baseMod) relay
+  let off = case key of
+        EffectKey EffStatus _ -> not (isJust (effectState m key)) -- it's changed; call it off
+        EffectKey EffVolatile _ -> False
+        EffectKey EffItem _ -> ev /= EvStart && not (monActive m)
+        -- LATENT: battle.ts 621 exempts @End@ (`eventid !== 'End'`); there is no End event yet, so an ability's End
+        -- handler would be wrongly skipped on an inactive holder once one exists.
+        EffectKey EffAbility _ -> not (monActive m)
+  if off
+    then pure relay
+    else do
+      Res out _ <- runBody dx body (Ctx holder source mv baseMod) relay
       pure (case out of Keep -> relay; Replace r -> r)
 
 -- | @battle.eachEvent@ (battle.ts 470), for @Update@ and @BeforeTurn@: speed-sort the active Pokemon by their cached
@@ -351,7 +400,7 @@ fieldEvent dx ev targets = do
           | otherwise -> callback h >> after rest
     -- `if (handler.callback) singleEvent(...)`
     callback h = forM_ (hsBody (hSpec h)) $ \body ->
-      void (singleBody dx body (hKey h) (hHolder h) Nothing RNone)
+      void (singleBody dx ev body (hKey h) (hHolder h) Nothing Nothing RNone)
     after rest = do
       resolveFaints False True -- this.resolveFaints() (checkWin defaults to true)
       ended <- gets ((/= Ongoing) . bResult)
@@ -359,13 +408,21 @@ fieldEvent dx ev targets = do
     endEffect key = case key of
       EffectKey EffStatus _ -> \x -> if monHp x > 0 then clearStatus x else x
       EffectKey EffVolatile i -> removeVolatile i
+      EffectKey _ _ -> id -- abilities and items have no duration, so never end here
 
 -- ---------------------------------------------------------------------------
 -- Handler bodies
 
 runBody :: MonadChance m => Dex -> Body -> Ctx -> Relay -> Eng m Res
 runBody dx body c relay = case body of
-  -- BRule: no rule kind exists yet ('HandlerRule' has no constructor)
+  -- chainModify(n, d) of the event's modifier when every condition holds
+  BRule (RChainModify n d conds) -> do
+    b <- get
+    let m = monOf b (cHolder c)
+        holds cond = case cond of
+          CMoveType t -> maybe False ((== t) . mvType) (cMove c)
+          CHolderHpAtMost x y -> monHp m * y <= monMaxHp m * x
+    pure (Res Keep (if all holds conds then chainModify (bFormat b) (cMod c) (n, d) else cMod c))
   BConst r -> pure (Res (Replace r) (cMod c))
   BNative n -> runNative dx n c relay
 
@@ -425,8 +482,66 @@ runNative dx n c relay = do
       keep
     -- flinch.onBeforeMove: `cant`, runEvent('Flinch') (no handlers), return false
     NFlinchBeforeMove -> returning stop
+    -- data/abilities.ts technician.onBasePower: `basePowerAfterMultiplier = this.modify(basePower, this.event.modifier)`;
+    -- `if (basePowerAfterMultiplier <= 60) return this.chainModify(1.5)`
+    NTechnician -> case relay of
+      RInt bp | modify fmt bp (cMod c) <= 60 -> pure (Res Keep (chainModify fmt (cMod c) (3, 2)))
+      _ -> keep
+    -- data/items.ts wiseglasses.onBasePower: `move.category === 'Special'` -> chainModify([4505, 4096])
+    NWiseGlasses
+      | Just mv <- cMove c, not (mvPhysical mv), not (mvStatus mv) -> chained (4505, 4096)
+      | otherwise -> keep
+    -- expertbelt.onModifyDamage(damage, source, target, move): `move && target.getMoveHitData(move).typeMod > 0`
+    -- -> chainModify([4915, 4096]); the target is the event's source (the defender), whose hit data holds the
+    -- clamped effectiveness 'typeMod'
+    NExpertBelt -> do
+      b <- get
+      case (cMove c, cSource c) of
+        (Just mv, Just d) | typeMod dx (mvType mv) (monOf b d) > 0 -> chained (4915, 4096)
+        _ -> keep
+    -- filter, solidrock, prismarmor .onSourceModifyDamage(damage, source, target, move): the holder is the target
+    -- (the event's source): `typeMod > 0` -> chainModify(0.75)
+    NFilterLike -> case cMove c of
+      Just mv | typeMod dx (mvType mv) m > 0 -> chained (3, 4)
+      _ -> keep
+    -- leftovers.onResidual: this.heal(pokemon.baseMaxhp / 16); battle.heal turns an amount in (0, 1] into 1 and
+    -- truncates, so the amount is floor(maxhp / 16), at least 1
+    NLeftovers -> modify' (healMon holder (max 1 (monMaxHp m `quot` 16))) >> keep
+    -- blacksludge.onResidual: a Poison-type heals baseMaxhp / 16, anything else takes this.damage(baseMaxhp / 8)
+    NBlackSludge
+      | hasTypeNamed dx "Poison" m -> modify' (healMon holder (max 1 (monMaxHp m `quot` 16))) >> keep
+      | otherwise -> modify' (applyDamage holder (max 1 (monMaxHp m `quot` 8))) >> keep
+    -- lifeorb.onAfterMoveSecondarySelf(source, target, move): `source && source !== target && move &&
+    -- move.category !== 'Status' && !source.forceSwitchFlag` -> this.damage(source.baseMaxhp / 10, source, source,
+    -- lifeorb); the holder is the user, and the move category is never Status where the event is run (a
+    -- damaging move); forceSwitchFlag cannot be set (no force-switch moves)
+    NLifeOrbRecoil
+      | Just mv <- cMove c, not (mvStatus mv), cSource c /= Just holder ->
+          modify' (applyDamage holder (max 1 (monMaxHp m `quot` 10))) >> keep
+      | otherwise -> keep
+    -- rockyhelmet.onDamagingHit(damage, target, source, move): `this.checkMoveMakesContact(move, source, target)`
+    -- (no Protective Pads) -> this.damage(source.baseMaxhp / 6, source, target); the source is the attacker
+    NRockyHelmet -> do
+      b <- get
+      case (cMove c, cSource c) of
+        (Just mv, Just src) | mrContact (mvRule mv) ->
+          modify' (applyDamage src (max 1 (monMaxHp (monOf b src) `quot` 6))) >> keep
+        _ -> keep
+    -- flameorb, toxicorb .onResidual: pokemon.trySetStatus('brn' / 'tox', pokemon)
+    NFlameOrb -> void (trySetStatus dx holder Brn) >> keep
+    NToxicOrb -> void (trySetStatus dx holder Tox) >> keep
+    -- assaultvest.onDisableMove: every Status move except Me First is disabled (pokemon.disableMove)
+    NAssaultVestDisable -> do
+      modify' (modifyMon holder (\x -> x {monMoves = SV.map disableStatus (monMoves x)}))
+      keep
   where
     defrost = maybe False (mrDefrost . mvRule) (cMove c)
+    chained nd = do
+      fmt <- gets bFormat
+      pure (Res Keep (chainModify fmt (cMod c) nd))
+    disableStatus ms =
+      let mv = moveData dx (msMove ms)
+       in if mvStatus mv && mvId mv /= "mefirst" then ms {msDisabled = True} else ms
     setStage holder v = modify' (modifyMon holder (\x -> x {monStatusState = (monStatusState x) {esA = v}}))
 
 -- ---------------------------------------------------------------------------

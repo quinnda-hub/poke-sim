@@ -12,6 +12,11 @@ module Engine.Dex
   , Condition (..)
   , conditionOf
   , condSpec
+  , effectOf
+  , abilityId
+  , itemId
+  , supportedAbilities
+  , supportedItems
   , FixedGender (..)
   , supportedMoves
   , supportedSpecies
@@ -37,6 +42,7 @@ import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as U
 import System.FilePath ((</>))
 
+import Engine.Effects
 import Engine.Event
 import Engine.Rule
 
@@ -65,6 +71,8 @@ data MoveData = MoveData
   { mvId :: !T.Text
   , mvType :: !Int
   , mvPhysical :: !Bool
+  , mvStatus :: !Bool
+  -- ^ @category === 'Status'@.
   , mvPower :: !Int
   , mvAccuracy :: !Int
   -- ^ Percent, or 'neverMisses' when Showdown's accuracy is @true@.
@@ -90,14 +98,20 @@ data NatureData = NatureData
   }
   deriving (Show)
 
--- | Static data of a condition the engine supports (conditions.json, data/conditions.ts).
+-- | Static data of an effect: a condition the engine runs (conditions.json, data/conditions.ts), an ability or an
+-- item (abilities.json, items.json).
 data Condition = Condition
   { cnDuration :: !Int
   -- ^ @condition.duration@; 0 when it has none.
   , cnHandlers :: ![(Prefix, EventId, HandlerSpec)]
   -- ^ The handlers the engine runs, with their metadata from the export.
   , cnSupported :: !Bool
-  -- ^ Every handler the export lists for the condition has a body ('nativeBody').
+  -- ^ The engine implements the effect and every handler the export lists for it has a body.
+  , cnReject :: !(Maybe T.Text)
+  -- ^ Why not, when 'cnSupported' is false.
+  , cnBreakable :: !Bool
+  -- ^ @flags.breakable@ (Mold Breaker suppresses the effect's handlers).
+  , cnId :: !T.Text
   }
   deriving (Show)
 
@@ -115,6 +129,10 @@ data Dex = Dex
   -- @frz@, @powder@, @prankster@, @sandstorm@, @hail@. @runStatusImmunity@ reads them.
   , dxConditions :: !(V.Vector Condition)
   -- ^ Indexed by 'CondId'.
+  , dxAbilities :: !(V.Vector Condition)
+  , dxItems :: !(V.Vector Condition)
+  , dxAbilityIx :: !(M.Map T.Text Int)
+  , dxItemIx :: !(M.Map T.Text Int)
   -- ^ @defendingType * typeCount + attackingType@, Showdown codes: 0 neutral, 1 super effective, 2 resisted, 3 immune.
   , dxSpeciesIx :: !(M.Map T.Text Int)
   , dxMoveIx :: !(M.Map T.Text Int)
@@ -152,6 +170,31 @@ conditionOf :: Dex -> CondId -> Condition
 conditionOf dx c = dxConditions dx V.! fromEnum c
 {-# INLINE conditionOf #-}
 
+-- | The static data of an effect (a status or volatile, an ability or an item), if its id is valid.
+effectOf :: Dex -> EffectKey -> Maybe Condition
+effectOf dx (EffectKey kind i) = case kind of
+  EffStatus -> dxConditions dx V.!? i
+  EffVolatile -> dxConditions dx V.!? i
+  EffAbility -> dxAbilities dx V.!? i
+  EffItem -> dxItems dx V.!? i
+{-# INLINE effectOf #-}
+
+-- | The id (@toID@ name) of an ability.
+abilityId :: Dex -> Int -> T.Text
+abilityId dx i = maybe "" cnId (dxAbilities dx V.!? i)
+
+-- | The id of an item, @""@ for none.
+itemId :: Dex -> Int -> T.Text
+itemId dx i = maybe "" cnId (dxItems dx V.!? i)
+
+-- | Ids of the abilities 'Engine.Team.parseTeam' accepts.
+supportedAbilities :: Dex -> [T.Text]
+supportedAbilities dx = [cnId a | a <- V.toList (dxAbilities dx), cnSupported a]
+
+-- | Ids of the items 'Engine.Team.parseTeam' accepts, including @""@ (no item).
+supportedItems :: Dex -> [T.Text]
+supportedItems dx = "" : [cnId a | a <- V.toList (dxItems dx), cnSupported a]
+
 -- | The handler of a condition for a prefix and event (@on<Prefix><Event>@), if the engine has one.
 condSpec :: Condition -> Prefix -> EventId -> Maybe HandlerSpec
 condSpec cn p e = go (cnHandlers cn)
@@ -176,17 +219,31 @@ loadDex dir = do
   typesV <- load "types.json"
   naturesV <- load "natures.json"
   conditionsV <- load "conditions.json"
+  abilitiesV <- load "abilities.json"
+  itemsV <- load "items.json"
   either (ioError . userError) pure $ do
     tnames <- typeNamesOf typesV
     let tix = M.fromList (zip (V.toList tnames) [0 ..])
     chart <- chartOf tnames typesV
     immune <- immunityOf tnames typesV
     conds <- traverse (conditionFor conditionsV) [minBound .. maxBound]
+    let tyOf n = M.lookup n tix
+    abilityEntries <- objectEntries abilitiesV
+    abilityL <- traverse (\(k, v) -> effectFor k 7 v (abilityBodies tyOf k)) abilityEntries
+    itemEntries <- objectEntries itemsV
+    itemL <- traverse (\(k, v) -> effectFor k 8 v (itemBodies tyOf k)) itemEntries
     speciesL <- objectEntries speciesV >>= traverse (speciesOf tix . snd)
     moveEntries <- objectEntries movesV
     movesL <- traverse (moveOf tix . snd) moveEntries
     struggleV <- maybe (Left "moves.json has no struggle") Right (lookup "struggle" moveEntries)
-    struggle <- (\m -> m {mvType = noType, mvSupported = False}) <$> moveOf tix struggleV
+    -- Struggle's onModifyMove makes 'moveRule' reject it, so 'moveOf' gives it 'plainRule'. Its flags still apply:
+    -- data/moves.ts struggle `flags: {contact: 1, ...}`, read by checkMoveMakesContact (Rocky Helmet). Its other
+    -- flags are inert ('inertFlags').
+    let struggleContact = case struggleV of
+          Object o | Just (Object fl) <- KM.lookup "flags" o -> KM.member "contact" fl
+          _ -> False
+    struggle <- (\m -> m {mvType = noType, mvSupported = False, mvRule = (mvRule m) {mrContact = struggleContact}})
+      <$> moveOf tix struggleV
     natureEntries <- objectEntries naturesV
     natureL <- traverse (natureOf . snd) natureEntries
     pure Dex
@@ -198,6 +255,10 @@ loadDex dir = do
       , dxTypeChart = chart
       , dxTypeImmune = immune
       , dxConditions = V.fromList conds
+      , dxAbilities = V.fromList abilityL
+      , dxItems = V.fromList itemL
+      , dxAbilityIx = M.fromList (zip (map fst abilityEntries) [0 ..])
+      , dxItemIx = M.fromList (zip (map fst itemEntries) [0 ..])
       , dxSpeciesIx = M.fromList (zip (map spId speciesL) [0 ..])
       , dxMoveIx = M.fromList (zip (map mvId movesL) [0 ..])
       , dxNatureIx = M.fromList (zip (map fst natureEntries) [0 ..])
@@ -250,22 +311,11 @@ immunityOf names v = do
       Right [K.toText k | (k, Number x) <- KM.toList ks, x == 3]
     _ -> Right []) names
 
--- | A condition from @conditions.json@. Its handlers are the exported handler names that the engine knows
--- ('parseHandlerName') and has a body for ('nativeBody'); order, priority and subOrder come from the entry's
--- @on<Prefix><Event>Order|Priority|SubOrder@ fields, and subOrder otherwise from the @effectType@
--- (battle.ts @resolvePriority@ 973-1011: @Condition@ 2; the statuses, @effectType@ @Status@, 0). A condition with
--- a duration also gets a @Residual@ entry without a body when it has no @onResidual@: Showdown collects it
--- (@getKey = 'duration'@) to count the duration down.
+-- | A condition from @conditions.json@, with the bodies of 'nativeBody'. See 'effectFor'.
 conditionFor :: Value -> CondId -> Either String Condition
 conditionFor conditionsV c = do
   v <- field (condName c) conditionsV
   effectType <- field "effectType" v >>= asText
-  names <- case v of
-    Object o | Just hs <- KM.lookup "handlers" o -> asArray hs >>= traverse asText
-    _ -> Right []
-  duration <- case v of
-    Object o | Just d <- KM.lookup "duration" o -> asInt d
-    _ -> Right 0
   let typeOrder = case effectType of
         "Condition" -> 2
         "Weather" -> 5
@@ -275,9 +325,33 @@ conditionFor conditionsV c = do
         "Ability" -> 7
         "Item" -> 8
         _ -> 0 :: Int
-      parsed = [(n, parseHandlerName n) | n <- names]
-      bodies = [(n, pe, nativeBody c p e) | (n, Just pe@(p, e)) <- parsed]
-      supported = all (\(_, mpe) -> maybe False (\(p, e) -> nativeBody c p e /= Nothing) mpe) parsed
+      bodies = [(p, e, b) | p <- [minBound .. maxBound], e <- [minBound .. maxBound], Just b <- [nativeBody c p e]]
+  effectFor (condName c) typeOrder v (Just bodies)
+
+-- | An effect from its export entry and its hand-written bodies ('Nothing': the engine does not implement it).
+-- Its handlers are the exported handler names that the engine knows ('parseHandlerName') and has a body for;
+-- order, priority and subOrder come from the entry's @on<Prefix><Event>Order|Priority|SubOrder@ fields, and
+-- subOrder otherwise from the effect type (battle.ts @resolvePriority@ 973-1011: @Condition@ 2, the statuses
+-- (@effectType@ @Status@) 0, abilities 7, items 8; the exceptions Poison Touch, Perish Body and Stall are not
+-- supported). An effect with a duration also gets a @Residual@ entry without a body when it has no
+-- @onResidual@: Showdown collects it (@getKey = 'duration'@) to count the duration down.
+effectFor :: T.Text -> Int -> Value -> Maybe [(Prefix, EventId, Body)] -> Either String Condition
+effectFor ident typeOrder v mbodies = do
+  names <- case v of
+    Object o | Just hs <- KM.lookup "handlers" o -> asArray hs >>= traverse asText
+    _ -> Right []
+  duration <- case v of
+    Object o | Just d <- KM.lookup "duration" o -> asInt d
+    _ -> Right 0
+  let parsed = [(n, parseHandlerName n) | n <- names]
+      bodyOf p e = mbodies >>= \bs -> case [b | (p', e', b) <- bs, p' == p, e' == e] of
+        (b : _) -> Just b
+        [] -> Nothing
+      missing = [n | (n, mpe) <- parsed, maybe True (\(p, e) -> bodyOf p e == Nothing) mpe]
+      reject = case (mbodies, missing) of
+        (Nothing, _) -> Just "the engine does not implement it"
+        (_, n : _) -> Just ("handler " <> n <> " has no body")
+        _ -> Nothing
       spec (p, e) body = do
         let key suffix = "on" <> prefixName p <> eventName e <> suffix
             num suffix = case v of
@@ -287,11 +361,16 @@ conditionFor conditionsV c = do
         prio <- maybe (Right 0) (maybe (Left (T.unpack (key "Priority") ++ " times 10 is not an integer")) Right . toBoundedInteger . (* 10)) (num "Priority")
         sub <- maybe (Right 0) (maybe (Left (T.unpack (key "SubOrder") ++ " is not an integer")) Right . toBoundedInteger) (num "SubOrder")
         pure (p, e, HandlerSpec order prio (if sub /= 0 then sub else typeOrder) body)
-  specs <- traverse (\(pe, b) -> spec pe (Just b)) [(pe, b) | (_, pe, Just b) <- bodies]
-  residual <- if duration /= 0 && null [() | (POwn, EvResidual, _) <- specs]
+  specs <- if reject == Nothing
+    then traverse (\(pe, b) -> spec pe (Just b)) [((p, e), b) | (_, Just (p, e)) <- parsed, Just b <- [bodyOf p e]]
+    else Right []
+  residual <- if reject == Nothing && duration /= 0 && null [() | (POwn, EvResidual, _) <- specs]
     then (: []) <$> spec (POwn, EvResidual) Nothing
     else Right []
-  pure (Condition duration (specs ++ residual) supported)
+  let breakable = case v of
+        Object o | Just (Object fl) <- KM.lookup "flags" o -> maybe False truthy (KM.lookup "breakable" fl)
+        _ -> False
+  pure (Condition duration (specs ++ residual) (reject == Nothing) reject breakable ident)
 
 speciesOf :: M.Map T.Text Int -> Value -> Either String SpeciesData
 speciesOf tix v = do
@@ -341,7 +420,7 @@ moveOf tix v = do
         Left why -> (plainRule, Just why)
         Right r -> (r, Nothing)
       supported = isNothing rejected && executable rule
-  pure (MoveData ident ty (cat == "Physical") bp acc prio crit pp noBoost (truthyField "struggleRecoil" v) rule rejected supported)
+  pure (MoveData ident ty (cat == "Physical") (cat == "Status") bp acc prio crit pp noBoost (truthyField "struggleRecoil" v) rule rejected supported)
 
 natureOf :: Value -> Either String NatureData
 natureOf v = do

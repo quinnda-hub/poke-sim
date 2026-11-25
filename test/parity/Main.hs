@@ -58,15 +58,20 @@ main = do
     Just "fast" -> pure "fast"
     Just o -> hPutStrLn stderr ("parity: POKESIM_TIER must be fast or long, got " ++ show o) >> exitFailure
   dex <- loadDex dexDir
-  -- Every set lists the moves and species it draws from (<set>-moves.json, <set>-species.json). Each list
-  -- must be accepted by the engine, and together the lists must cover everything the engine accepts, so
-  -- that every accepted move and species has been tested.
+  -- Every set lists the moves, species, abilities and items it draws from (<set>-moves.json,
+  -- <set>-species.json, <set>-abilities.json, <set>-items.json). A set without the last two draws only "No
+  -- Ability" and no item. Each list must be accepted by the engine, and together the lists must cover
+  -- everything the engine accepts, so that every accepted move, species, ability and item has been tested.
   lists <- forM sets $ \set -> do
     ms <- readIdList (root </> set </> (set ++ "-moves.json"))
     ss <- readIdList (root </> set </> (set ++ "-species.json"))
-    pure (set, ms, ss)
-  checkPool "move" (supportedMoves dex) [(set, ms) | (set, ms, _) <- lists]
-  checkPool "species" (supportedSpecies dex) [(set, ss) | (set, _, ss) <- lists]
+    as <- readIdListOr ["noability"] (root </> set </> (set ++ "-abilities.json"))
+    is <- readIdListOr [""] (root </> set </> (set ++ "-items.json"))
+    pure (set, ms, ss, as, is)
+  checkPool "move" (supportedMoves dex) [(set, ms) | (set, ms, _, _, _) <- lists]
+  checkPool "species" (supportedSpecies dex) [(set, ss) | (set, _, ss, _, _) <- lists]
+  checkPool "ability" (supportedAbilities dex) [(set, as) | (set, _, _, as, _) <- lists]
+  checkPool "item" (supportedItems dex) [(set, is) | (set, _, _, _, is) <- lists]
   counts <- newIORef []
   results <- fmap concat $ forM sets $ \set -> do
     names <- listDirectory (root </> set)
@@ -85,22 +90,27 @@ main = do
           hFlush stderr
         Right _ -> pure ()
       pure (set, r, used)
-  -- Long tier: every move and species the engine accepts must appear in some trace's teams, not only in a
+  -- Long tier: every move, species, ability and item the engine accepts must appear in some trace's teams, not only in a
   -- pool list. This is a check over the whole corpus, so the fast tier, which reads a sample, cannot make it.
   coverageOk <- if tier == "fast"
     then putStrLn "parity: trace coverage of the pool is checked in the long tier only" >> pure True
     else do
-      let usedMoves = Set.unions [ms | (_, _, (ms, _)) <- results]
-          usedSpecies = Set.unions [ss | (_, _, (_, ss)) <- results]
+      let used f = Set.unions [f u | (_, _, u) <- results]
+          usedMoves = used usedMovesOf
+          usedSpecies = used usedSpeciesOf
+          usedAbilities = used usedAbilitiesOf
+          usedItems = used usedItemsOf
           unusedMoves = Set.toList (Set.fromList (supportedMoves dex) `Set.difference` usedMoves)
           unusedSpecies = Set.toList (Set.fromList (supportedSpecies dex) `Set.difference` usedSpecies)
-      when (not (null unusedMoves)) $
-        hPutStrLn stderr ("parity: the engine accepts moves no trace's teams use (untested): " ++ show unusedMoves)
-      when (not (null unusedSpecies)) $
-        hPutStrLn stderr ("parity: the engine accepts species no trace's teams use (untested): " ++ show unusedSpecies)
-      putStrLn ("parity: trace coverage: " ++ show (Set.size usedMoves) ++ " moves and " ++ show (Set.size usedSpecies)
-        ++ " species used by the traces' teams")
-      pure (null unusedMoves && null unusedSpecies)
+          unusedAbilities = Set.toList (Set.fromList (supportedAbilities dex) `Set.difference` usedAbilities)
+          unusedItems = Set.toList (Set.fromList (supportedItems dex) `Set.difference` usedItems)
+      forM_ [("moves", unusedMoves), ("species", unusedSpecies), ("abilities", unusedAbilities), ("items", unusedItems)] $ \(w, xs) ->
+        when (not (null xs)) $
+          hPutStrLn stderr ("parity: the engine accepts " ++ w ++ " no trace's teams use (untested): " ++ show xs)
+      putStrLn ("parity: trace coverage: " ++ show (Set.size usedMoves) ++ " moves, " ++ show (Set.size usedSpecies)
+        ++ " species, " ++ show (Set.size usedAbilities) ++ " abilities and " ++ show (Set.size usedItems)
+        ++ " items used by the traces' teams")
+      pure (all null [unusedMoves, unusedSpecies, unusedAbilities, unusedItems])
   forM_ sets $ \set -> do
     let rs = [r | (s, r, _) <- results, s == set]
         oks = [x | Right x <- rs]
@@ -133,11 +143,24 @@ main = do
 
 -- | Read a trace set's list of ids.
 readIdList :: FilePath -> IO [T.Text]
-readIdList f = do
+readIdList = readIdListOr' Nothing
+
+-- | Read a trace set's list of ids, or the default when the set has no such file.
+readIdListOr :: [T.Text] -> FilePath -> IO [T.Text]
+readIdListOr = readIdListOr' . Just
+
+readIdListOr' :: Maybe [T.Text] -> FilePath -> IO [T.Text]
+readIdListOr' dflt f = do
   ok <- doesFileExist f
-  when (not ok) $ do
-    hPutStrLn stderr ("parity: " ++ f ++ " is missing (the generator writes it)")
-    exitFailure
+  case (ok, dflt) of
+    (False, Just d) -> pure d
+    (False, Nothing) -> do
+      hPutStrLn stderr ("parity: " ++ f ++ " is missing (the generator writes it)")
+      exitFailure
+    _ -> readIds f
+
+readIds :: FilePath -> IO [T.Text]
+readIds f = do
   r <- eitherDecodeFileStrict' f
   case r of
     Right (Array xs) | Just ids <- traverse str (V.toList xs) -> pure ids
@@ -160,19 +183,32 @@ checkPool what actual sets = do
       hPutStrLn stderr ("parity: the engine accepts " ++ what ++ "s no trace set lists (untested): " ++ show untested)
     exitFailure
 
--- | Load and check one trace; on success returns (decision points, draws). Also returns the move and
--- species ids its teams use (as ids, whatever the trace's spelling), for the coverage check.
-runFile :: Dex -> FilePath -> IO (Either Failure (Int, Int), (Set.Set T.Text, Set.Set T.Text))
+-- | The ids a trace's teams use (as ids, whatever the trace's spelling), for the coverage check.
+-- The fields are strict, and 'runFile' forces every element, so that a trace's decoded JSON is freed once the
+-- trace is checked. Lazy sets would each keep their whole trace alive until the coverage check at the end
+-- (about 7 MB a trace, more than this laptop's memory over the long tier).
+data Used = Used
+  { usedMovesOf :: !(Set.Set T.Text)
+  , usedSpeciesOf :: !(Set.Set T.Text)
+  , usedAbilitiesOf :: !(Set.Set T.Text)
+  , usedItemsOf :: !(Set.Set T.Text)
+  }
+
+-- | Load and check one trace; on success returns (decision points, draws). Also returns the ids its teams use.
+runFile :: Dex -> FilePath -> IO (Either Failure (Int, Int), Used)
 runFile dex f = do
   r <- eitherDecodeFileStrict' f
   case r of
-    Left e -> pure (Left (Failure "load" Nothing 0 e), (Set.empty, Set.empty))
+    Left e -> pure (Left (Failure "load" Nothing 0 e), Used Set.empty Set.empty Set.empty Set.empty)
     Right v -> do
       res <- checkTrace dex v
       let sets' = concatMap arr (arr (v .: "teams"))
           ids k = Set.fromList [toId t | s <- sets', String t <- [s .: k]]
           moveIds = Set.fromList [toId t | s <- sets', String t <- arr (s .: "moves")]
-      pure (res, (moveIds, ids "species"))
+      let forced xs = Set.foldr' seq () xs `seq` xs
+      u <- evaluate (Used (forced moveIds) (forced (ids "species")) (forced (ids "ability")) (forced (ids "item")))
+      res' <- evaluate (case res of Right (a, b) -> a `seq` b `seq` res; Left _ -> res)
+      pure (res', u)
 
 -- ---------------------------------------------------------------------------
 -- JSON helpers (missing data yields Null, which then shows up as a mismatch)
@@ -399,6 +435,8 @@ diffMon dex path orig m ev =
                    (n : _) -> n
                    [] -> T.pack ("<volatile " ++ show i ++ ">")
            ]))
+    ++ cmp (path ++ ".ability") (txt (ev .: "ability")) (T.unpack (abilityId dex (monAbility m)))
+    ++ cmp (path ++ ".item") (txt (ev .: "item")) (T.unpack (itemId dex (monItem m)))
     ++ cmp (path ++ ".fainted") (ev .: "fainted") (Bool (monFainted m))
     ++ cmp (path ++ ".active") (ev .: "active") (Bool (monActive m))
     ++ concat
@@ -417,6 +455,7 @@ diffMon dex path orig m ev =
       [ cmp (mp ++ ".id") (txt (mv .: "id")) (T.unpack (mvId (moveData dex (msMove ms))))
           ++ cmp (mp ++ ".pp") (int (mv .: "pp")) (Just (msPP ms))
           ++ cmp (mp ++ ".maxpp") (int (mv .: "maxpp")) (Just (msMaxPP ms))
+          ++ cmp (mp ++ ".disabled") (mv .: "disabled") (Bool (msDisabled ms))
       | (i, mv, ms) <- zip3 [0 :: Int ..] (arr (ev .: "moves")) (SV.toList (monMoves m))
       , let mp = path ++ ".moves[" ++ show i ++ "]"
       ]
@@ -448,9 +487,6 @@ unmodelled st =
             [ let pp = sp ++ ".pokemon[" ++ show j ++ "]"
                in isEmptyObj (pp ++ ".statusState (keys other than stage)") (dropKey "stage" (pk .: "statusState"))
                     ++ isEmptyStr (pp ++ ".terastallized") (pk .: "terastallized")
-                    ++ cmp (pp ++ ".ability") (txt (pk .: "ability")) "noability"
-                    ++ isEmptyStr (pp ++ ".item") (pk .: "item")
-                    ++ concat [cmp (pp ++ ".moves[" ++ show m ++ "].disabled") (mv .: "disabled") (Bool False) | (m, mv) <- zip [0 :: Int ..] (arr (pk .: "moves"))]
             | (j, pk) <- zip [0 :: Int ..] (arr (sd .: "pokemon"))
             ]
       | (i, sd) <- zip [0 :: Int ..] (arr (st .: "sides"))

@@ -3,9 +3,11 @@
 This describes the new engine core under `src/Engine/` and the decisions behind
 it. The older simulator under `src/Pokemon/` is described at the end.
 
-Status: slices 0 and 1 are built and replay 1,400 recorded Showdown battles
-with identical draws and state. Decisions 1 to 5 and 7 are implemented. Rules
-as data (decision 6) cover moves, but not yet abilities or items. The usage
+Status: slices 0, 1 and 2 (2a and 2b) are built and replay 2,300 recorded
+Showdown battles with identical draws and state. Decisions 1 to 5 and 7 are
+implemented. Rules as data (decision 6) cover moves, and the first abilities
+and items run on the event dispatcher (docs/handlers.md), with data rules where
+they fit and native handlers where they don't. The usage
 whitelist (decision 8) is generated, but teams are not yet checked against it.
 See [roadmap.md](roadmap.md).
 

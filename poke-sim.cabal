@@ -105,6 +105,7 @@ library
                       Engine.Choice,
                       Engine.Damage,
                       Engine.Dex,
+                      Engine.Effects,
                       Engine.Dispatch,
                       Engine.Event,
                       Engine.Format,

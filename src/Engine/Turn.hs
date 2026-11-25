@@ -139,7 +139,7 @@ turnLoop dx = do
       q <- gets bQueue
       case SV.uncons q of
         Nothing -> do
-          endTurn
+          endTurn dx
           modify' (\b -> b {bMidTurn = False, bQueue = SV.empty})
         Just (a, rest) -> do
           modify' (\b -> b {bQueue = rest})
@@ -150,9 +150,18 @@ turnLoop dx = do
 
 -- | @battle.endTurn@ (battle.ts): advance the turn counter, apply the 1000-turn limit and request moves.
 {-# INLINABLE endTurn #-}
-endTurn :: Monad m => Eng m ()
-endTurn = do
+endTurn :: MonadChance m => Dex -> Eng m ()
+endTurn dx = do
   modify' (\b -> b {bTurn = bTurn b + 1})
+  -- for (const side of this.sides) for (const pokemon of side.active): every move slot is enabled again, then
+  -- runEvent('DisableMove', pokemon) lets handlers (Assault Vest) disable some. This is the only place
+  -- DisableMove runs (battle.ts 1702-1708); the move's own onDisableMove (singleEvent, 1711) has no supported user.
+  forM_ [P1, P2] $ \p -> do
+    b <- get
+    when (sHasActive (sideOf p b)) $ do
+      let a = activeActor p b
+      modify' (modifyMon a (\m -> m {monMoves = SV.map (\ms -> ms {msDisabled = False}) (monMoves m)}))
+      void (runEvent dx EvDisableMove a Nothing Nothing RNone)
   t <- gets bTurn
   -- maybeTriggerEndlessBattleClause: turn limit (staleness cannot arise in slice 0)
   if t > 1000
@@ -426,7 +435,14 @@ useMove fmt dx user target mv = case mrTarget rule of
         hits <- if mvAccuracy mv == neverMisses || (isToxic && hasTypeNamed dx "Poison" um) then pure True
           else randomChance (stagedAccuracy fmt (mvAccuracy mv) (monBoosts um) (monBoosts tm)) 100
         when hits $
-          if mrDamaging rule then hitLoop fmt dx user target mv else statusMove dx user target mv
+          if mrDamaging rule
+            then do
+              hitLoop fmt dx user target mv
+              -- useMoveInner: the move succeeded (`moveResult`), the user is queued to faint if it has no HP, then
+              -- runEvent('AfterMoveSecondarySelf', pokemon, target, move): Life Orb's recoil. A status move
+              -- raises it too, but no supported handler acts on one.
+              void (runEvent dx EvAfterMoveSecondarySelf user (Just target) (Just mv) RNone)
+            else statusMove dx user target mv
   where
     rule = mvRule mv
     -- ID-SPECIAL: battle-actions.ts hitStepAccuracy ~797 (and hitStepInvulnerabilityEvent ~693): in gen >= 8 Toxic
@@ -570,36 +586,6 @@ applyEffect dx a e = case e of
   EFlinch -> void (addVolatile dx a CFlinch)
   EHeal _ _ -> pure () -- not executable as a secondary
 
--- | @pokemon.trySetStatus(status)@ -> @setStatus(this.status || status)@ (pokemon.ts) of a Pokemon, with no
--- ability, item or field effect: fails with no HP, off the field, with any status already (including the same
--- one) or when the type is immune; otherwise sets the status and its fresh @statusState@ (toxic's @onStart@
--- sets the stage to 0). @runStatusImmunity@, @SetStatus@ and @AfterSetStatus@ draw nothing.
-trySetStatus :: MonadChance m => Dex -> Actor -> StatusId -> Eng m Bool
-trySetStatus dx a st = do
-  b <- get
-  let m = monOf b a
-      has = monStatus m `elem` [StatusBrn, StatusPar, StatusPsn, StatusTox, StatusFrz]
-  if monHp m <= 0 || not (monActive m) || has || statusImmune dx st m
-    then pure False
-    else do
-      -- this.status = status.id; this.statusState = initEffectState({id}); `if (status.duration) duration`
-      modify' (modifyMon a (\x -> x {monStatus = monStatusOf st, monStatusState = noEffectState {esDuration = cnDuration (conditionOf dx (condOf st))}}))
-      -- singleEvent('Start', status, statusState, this, source, sourceEffect): toxic's onStart sets the stage to 0
-      relayTruthy <$> singleEvent dx EvStart (EffectKey EffStatus (fromEnum (condOf st))) a Nothing Nothing RNone
-  where
-    monStatusOf s = case s of
-      Brn -> StatusBrn
-      Par -> StatusPar
-      Psn -> StatusPsn
-      Tox -> StatusTox
-      Frz -> StatusFrz
-    condOf s = case s of
-      Brn -> CBrn
-      Par -> CPar
-      Psn -> CPsn
-      Tox -> CTox
-      Frz -> CFrz
-
 -- | One @spreadMoveHit@ of a damaging move: crit roll, random factor, damage, drain. Returns the damage
 -- actually dealt (@move.totalDamage@ accumulates it).
 {-# INLINABLE hitMove #-}
@@ -612,9 +598,12 @@ hitMove fmt dx user target mv = do
   crit <- case critDenominator (mvCritRatio mv) of
     Nothing -> pure False
     Just d -> randomChance 1 d
-  -- getDamage: `basePower = this.battle.clampIntRange(basePower, 1)` (also after the BasePower event)
-  let power = max 1 (mvPower mv)
-      st = monStats
+  -- getDamage: `basePower = this.battle.clampIntRange(basePower, 1)`, then (after the crit roll)
+  -- runEvent('BasePower', source, target, move, basePower, true) and the same clamp again; a handler only ever raises
+  -- the power here, so the `!basePower` early return (damage 0, no further draw) is unreachable
+  -- LATENT: the move's own BasePower callback (onEffect) is not run; moves with handlers are rejected.
+  power <- (\r -> case r of RInt p -> max 1 p; _ -> max 1 (mvPower mv)) <$> runEvent dx EvBasePower user (Just target) (Just mv) (RInt (max 1 (mvPower mv)))
+  let st = monStats
       (atkStat, defStat, atkStage0, defStage0)
         | mvPhysical mv = (stAtk (st um), stDef (st tm), bsAtk (monBoosts um), bsDef (monBoosts tm))
         | otherwise = (stSpa (st um), stSpd (st tm), bsSpa (monBoosts um), bsSpd (monBoosts tm))
@@ -622,12 +611,19 @@ hitMove fmt dx user target mv = do
       -- attacker's negative offensive stage and the defender's positive defensive stage
       atkStage = if crit && atkStage0 < 0 then 0 else atkStage0
       defStage = if crit && defStage0 > 0 then 0 else defStage0
-      attack = boostedStat atkStat atkStage
-      defense = boostedStat defStat defStage
-      base = baseDamage fmt (monLevel um) power attack defense
+      attack0 = boostedStat atkStat atkStage
+      defense0 = boostedStat defStat defStage
+      (atkEv, defEv) = if mvPhysical mv then (EvModifyAtk, EvModifyDef) else (EvModifySpA, EvModifySpD)
+  -- getDamage: attack = runEvent('ModifyAtk' | 'ModifySpA', source, target, move, attack) and the defender's
+  -- runEvent('ModifyDef' | 'ModifySpD', target, source, move, defense)
+  attack <- fromRelay attack0 <$> runEvent dx atkEv user (Just target) (Just mv) (RInt attack0)
+  defense <- fromRelay defense0 <$> runEvent dx defEv target (Just user) (Just mv) (RInt defense0)
+  let base = baseDamage fmt (monLevel um) power attack defense
   r <- roll 0 16
-  let dmg = modifyDamage fmt dx um tm mv crit r base
-      -- spreadDamage: clamp to at least 1 unless 0, then Pokemon.damage; `dealt` is the damage returned
+  -- modifyDamage: ... runEvent('ModifyDamage', pokemon, target, move, baseDamage), then the minimum 1 and the 16-bit truncation
+  let pre = modifyDamage fmt dx um tm mv crit r base
+  dmg <- finalDamage fmt . fromRelay pre <$> runEvent dx EvModifyDamage user (Just target) (Just mv) (RInt pre)
+  let -- spreadDamage: clamp to at least 1 unless 0, then Pokemon.damage; `dealt` is the damage returned
       requested = if dmg == 0 then 0 else max 1 dmg
       dealt = min requested (monHp tm)
   modify' (applyDamage target requested)
@@ -637,6 +633,12 @@ hitMove fmt dx user target mv = do
     Just (n, d) | dealt > 0 -> modify' (healMon user (roundDiv (dealt * n) d))
     _ -> pure ()
   pure dealt
+
+-- | The integer an event returned, or the one it started with.
+fromRelay :: Int -> Relay -> Int
+fromRelay dflt r = case r of
+  RInt v -> v
+  _ -> dflt
 
 -- | @Math.round(n / d)@ for non-negative @n@ and positive @d@ (exact: ties round up, as in JavaScript).
 roundDiv :: Int -> Int -> Int

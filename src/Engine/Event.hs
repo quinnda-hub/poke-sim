@@ -1,4 +1,3 @@
-{-# LANGUAGE EmptyCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 -- | The vocabulary of the event dispatcher (docs/handlers.md sections 1-3): events, effects, handler metadata
 -- and handler bodies, as plain data. The dispatcher itself is "Engine.Dispatch".
@@ -20,7 +19,8 @@ module Engine.Event
     -- * Handlers
   , HandlerSpec (..)
   , Body (..)
-  , HandlerRule
+  , HandlerRule (..)
+  , RuleCond (..)
   , NativeId (..)
   , Relay (..)
   , relayTruthy
@@ -49,6 +49,14 @@ data EventId
   | EvModifyMove
   | EvDamagingHit
   | EvAfterMoveSecondary
+  | EvBasePower
+  | EvModifyAtk
+  | EvModifySpA
+  | EvModifyDef
+  | EvModifySpD
+  | EvModifyDamage
+  | EvAfterMoveSecondarySelf
+  | EvDisableMove
   | EvUpdate
   | EvBeforeTurn
   deriving (Eq, Show, Enum, Bounded)
@@ -89,6 +97,14 @@ eventName e = case e of
   EvModifyMove -> "ModifyMove"
   EvDamagingHit -> "DamagingHit"
   EvAfterMoveSecondary -> "AfterMoveSecondary"
+  EvBasePower -> "BasePower"
+  EvModifyAtk -> "ModifyAtk"
+  EvModifySpA -> "ModifySpA"
+  EvModifyDef -> "ModifyDef"
+  EvModifySpD -> "ModifySpD"
+  EvModifyDamage -> "ModifyDamage"
+  EvAfterMoveSecondarySelf -> "AfterMoveSecondarySelf"
+  EvDisableMove -> "DisableMove"
   EvUpdate -> "Update"
   EvBeforeTurn -> "BeforeTurn"
 
@@ -132,12 +148,13 @@ condName c = case c of
   CFrz -> "frz"
   CFlinch -> "flinch"
 
--- | What kind of effect holds a handler. Showdown's other kinds (ability, item, side and slot conditions,
--- weather, terrain, pseudo-weather, the move itself) join when their holders exist in the state.
-data EffectKind = EffStatus | EffVolatile
+-- | What kind of effect holds a handler. Showdown's other kinds (side and slot conditions, weather, terrain,
+-- pseudo-weather, the move itself) join when their holders exist in the state.
+data EffectKind = EffStatus | EffVolatile | EffAbility | EffItem
   deriving (Eq, Show)
 
--- | An effect: its kind and its id (a 'CondId' index for both kinds so far).
+-- | An effect: its kind and its id (a 'CondId' index for statuses and volatiles; an index into the @Dex@
+-- ability or item table for the others).
 data EffectKey = EffectKey !EffectKind !Int
   deriving (Eq, Show)
 
@@ -158,15 +175,19 @@ data HandlerSpec = HandlerSpec
   }
   deriving (Eq, Show)
 
--- | The vocabulary of data rules for handlers. Empty: a rule kind is added when at least three whitelisted
--- effects need it (docs/handlers.md section 3), and none do yet.
-data HandlerRule
+-- | The vocabulary of data rules for handlers: @chainModify(n, d)@ of the event's modifier when every
+-- condition holds (docs/handlers.md section 3). A rule kind or condition kind exists only when at least three
+-- whitelisted effects are expressed by it exactly; the justification is in "Engine.Effects".
+data HandlerRule = RChainModify !Int !Int ![RuleCond]
+  deriving (Eq, Show)
 
-instance Eq HandlerRule where
-  a == _ = case a of {}
-
-instance Show HandlerRule where
-  show a = case a of {}
+-- | A condition of a rule, on the event's move or the handler's holder.
+data RuleCond
+  = -- | @move.type === T@ (the type id).
+    CMoveType !Int
+  | -- | @holder.hp <= holder.maxhp * n / d@.
+    CHolderHpAtMost !Int !Int
+  deriving (Eq, Show)
 
 -- | What a handler does.
 data Body
@@ -205,6 +226,17 @@ data NativeId
   | NFrzAfterMoveSecondary
   | NFrzDamagingHit
   | NFlinchBeforeMove
+  | NTechnician
+  | NWiseGlasses
+  | NExpertBelt
+  | NFilterLike
+  | NLeftovers
+  | NBlackSludge
+  | NLifeOrbRecoil
+  | NRockyHelmet
+  | NFlameOrb
+  | NToxicOrb
+  | NAssaultVestDisable
   deriving (Eq, Show)
 
 -- | The body of each handler the engine implements (written by hand: Showdown's handlers are code). A condition
