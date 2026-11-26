@@ -10,12 +10,15 @@ import Control.Exception (SomeException, evaluate, try)
 import Data.Aeson (Value (..), eitherDecodeFileStrict')
 import qualified Data.Aeson.Key as K
 import qualified Data.Aeson.KeyMap as KM
-import Control.Monad.Trans.State.Strict (evalStateT)
+import Control.Monad (foldM)
+import Control.Monad.Trans.State.Strict (evalStateT, runStateT)
 import Data.Functor.Identity (runIdentity)
 import Data.Either (isLeft)
 import Data.List (sortOn)
+import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe)
 import qualified Data.Vector as V
+import qualified Data.Vector.Strict as SV
 import qualified Data.Text as T
 import Hedgehog
 import qualified Hedgehog.Gen as Gen
@@ -29,7 +32,7 @@ import System.Random.SplitMix (mkSMGen)
 import Engine
 import Engine.Chance (runSample)
 import Engine.Dex (Condition (..), Dex (..), MoveData (..), SpeciesData (..), dexCondLookup, supportedMoves)
-import Engine.Dispatch (basePowerCallback)
+import Engine.Dispatch (HitResult (..), addSideCondition, basePowerCallback, moveFieldHit)
 import Engine.Effects (abilityBodies, fieldCondBodies, itemBodies, moveBodies)
 import Engine.Event (CondId (..), EventId (..), HandlerSpec (..), Prefix (..), condName, parseHandlerName)
 import Engine.Format (trunc, truncBits)
@@ -76,6 +79,8 @@ main = do
             withTests 1 (damageFields dex))
         , ("a move's own BasePower handler sorts after every other BasePower handler, so it never ties with one",
             withTests 1 (moveBasePowerSortsLast dex))
+        , ("Court Change and Haze: the sides exchange the listed conditions with their states and nothing else changes; Haze clears the stages in play",
+            withTests (fromIntegral n) (fieldMoves dex))
         , ("a weight-based base power never decreases as the target gets heavier or the user lighter",
             withTests (fromIntegral n) (weightBands dex))
         , ("a base-power callback never lowers the move's own base power below what its condition adds",
@@ -405,7 +410,7 @@ movesSupported dex movesV = withTests 1 $ property $ do
 -- only when every handler the export lists for it has a body, so none may have a body for these.
 moveEventsOnlyOfMoves :: Dex -> Property
 moveEventsOnlyOfMoves dex = withTests 1 $ property $ do
-  let moveOnly = [EvEffectiveness, EvModifyPriority, EvModifyType, EvBasePowerCallback, EvDamageCallback]
+  let moveOnly = [EvEffectiveness, EvModifyPriority, EvModifyType, EvBasePowerCallback, EvDamageCallback, EvTry, EvAfterHit, EvAfterSubDamage, EvHitField]
       tables = [("ability", dxAbilities dex), ("item", dxItems dex), ("condition", dxConditions dex), ("field condition", dxFieldConds dex)]
   mapM_ (\(what, table) -> mapM_ (\c -> do
     footnote (what ++ " " ++ T.unpack (cnId c) ++ " listens to an event only moves run")
@@ -523,3 +528,69 @@ callbacksRaise dex = property $ do
         assert (got >= mvPower mv)
         assert (name == "acrobatics" || got == mvPower mv)
       Nothing -> footnote (T.unpack name ++ " is not in the dex") >> failure) ["hex", "storedpower", "powertrip", "risingvoltage", "acrobatics"]
+
+-- | Court Change (data/moves.ts 3035-3101) and Haze (8162-8181) on states reached by random playouts, with side conditions
+-- added through 'addSideCondition' and random stages.
+--
+-- Court Change takes the conditions of its list out of each side (`delete`), then appends the user's to the foe's side and the foe's
+-- to the user's, as the same state objects. So, for each side, the result is the conditions it keeps (those not in the list, in their
+-- order) followed by the other side's listed conditions in theirs, every state unchanged (duration, layers and effectOrder, so the
+-- battle's effect-order counter is untouched), and the move fails exactly when neither side held a listed condition. It makes no
+-- draw and changes nothing else. The list is the one in the source; a supported condition missing from it would stay behind.
+-- Haze calls `clearBoosts()` on every Pokemon in play that has not fainted (`getAllActive()`): their stages are 0 afterwards and
+-- nothing else, nor any other Pokemon, changes.
+fieldMoves :: Dex -> Property
+fieldMoves dex = property $ do
+  (t1, t2) <- forAll (genTeams dex)
+  seed <- forAll (Gen.word64 Range.linearBounded)
+  steps <- forAll (Gen.int (Range.linear 0 120))
+  let sideNames = ["stealthrock", "spikes", "toxicspikes", "stickyweb", "reflect", "lightscreen", "tailwind", "auroraveil"]
+      listed = [ "mist", "lightscreen", "reflect", "spikes", "safeguard", "tailwind", "toxicspikes", "stealthrock", "waterpledge", "firepledge"
+               , "grasspledge", "stickyweb", "auroraveil", "luckychant", "gmaxsteelsurge", "gmaxcannonade", "gmaxvinelash", "gmaxwildfire"
+               , "gmaxvolcalith" ] :: [T.Text]
+      ids = [i | n <- sideNames, Just i <- [M.lookup n (dxFieldIx dex)]]
+  adds <- forAll (Gen.list (Range.linear 0 14) ((,) <$> Gen.element [P1, P2] <*> Gen.element ids))
+  stages <- forAll (Gen.list (Range.singleton 84) (Gen.int (Range.linear (-6) 6)))
+  who <- forAll Gen.enumBounded
+  b0 <- evalEither (fst (runSample (mkSMGen seed) (startBattle dex t1 t2 >>= advanceWhile dex steps (const True))))
+  let moveNamed name = V.find ((== name) . mvId) (dxMoves dex)
+      -- stages for every Pokemon of both sides, from the generated list (7 each, up to 6 per side)
+      withStages b = foldr (\p -> modifySide p (\sd -> sd {sMons = SV.imap (\i m -> m {monBoosts = boostsAt (7 * (i + 6 * playerIx p))}) (sMons sd)})) b [P1, P2]
+      boostsAt k = case take 7 (drop k stages) of
+        [a, b', c, d, e, f, g] -> Boosts a b' c d e f g
+        _ -> noBoosts
+      user = activeActor who b0
+  let ((_, bs), _) = runCounter (runStateT (foldM (\() (p, i) -> () <$ addSideCondition dex p i (activeActor p b0)) () adds) b0)
+  let b = withStages bs
+      conds p bb = [(i, st) | CondEntry i st <- SV.toList (sConds (sideOf p bb))]
+      listedHere p bb = [e | e@(i, _) <- conds p bb, maybe False (\c -> cnId c `elem` listed) (dxFieldConds dex V.!? i)]
+      kept p bb = [e | e <- conds p bb, e `notElem` listedHere p bb]
+      foe = other who
+  -- Court Change
+  case moveNamed "courtchange" of
+    Nothing -> footnote "courtchange is not in the dex" >> failure
+    Just mv -> do
+      let ((res, b'), draws) = runCounter (runStateT (moveFieldHit dex user mv) b)
+      draws === 0
+      conds who b' === kept who b ++ listedHere foe b
+      conds foe b' === kept foe b ++ listedHere who b
+      bEffectOrder b' === bEffectOrder b
+      assert ((res == HitFail) == (null (listedHere who b) && null (listedHere foe b)))
+      -- nothing else changed
+      let reset p src = modifySide p (\sd -> sd {sConds = sConds (sideOf p src)})
+      reset P1 b (reset P2 b b') === b
+  -- Haze
+  case moveNamed "haze" of
+    Nothing -> footnote "haze is not in the dex" >> failure
+    Just mv -> do
+      let ((_, b'), draws) = runCounter (runStateT (moveFieldHit dex user mv) b)
+          inPlay = [(a, True) | p <- [P1, P2], sHasActive (sideOf p b), let a = activeActor p b, not (monFainted (monOf b a))]
+          cleared bb = foldr (\(a, _) -> modifyMon a (\m -> m {monBoosts = noBoosts})) bb inPlay
+      draws === 0
+      mapM_ (\(a, _) -> monBoosts (monOf b' a) === noBoosts) inPlay
+      -- only those stages: with them cleared, the states are equal
+      cleared b' === cleared b
+      -- (a Pokemon that is not in play keeps its stages)
+      mapM_ (\p -> mapM_ (\i -> let a = Actor p i in
+                if a `elem` map fst inPlay then success else monBoosts (monOf b' a) === monBoosts (monOf b a))
+              [0 .. SV.length (sMons (sideOf p b)) - 1]) [P1, P2]

@@ -38,6 +38,21 @@
 //     what it changes in the turn (a Ground move, the terrains, effectiveness);
 //   - levels come from slice 1's generator (one Pokemon in five has a level between 1 and 100), for Seismic Toss.
 //
+// Slice 4c adds the moves that remove, move or set field state: Rapid Spin, Mortal Spin and Ice Spinner (`onAfterHit`), Defog and Tidy Up
+// and Clear Smog (`onHit`), Court Change and Haze (`onHitField`), Ceaseless Edge and Stone Axe (`onAfterHit` sets a hazard), Aurora Veil
+// (`onTry`, and its condition), and the screen breakers Brick Break, Psychic Fangs and Raging Bull (`onTryHit`). On top of the above,
+// from a stream of random draws of its own (so the 4a and 4b choices are the same for a seed):
+//   - a share of the Pokemon set hazards (two or three of Stealth Rock, Spikes, Toxic Spikes and Sticky Web, and Ceaseless Edge or
+//     Stone Axe) and a share carry a remover or a swapper (the Spins, Ice Spinner, Defog, Tidy Up, Court Change, Haze, Clear Smog), so
+//     that a removal move meets one, two, three or four hazards on either side;
+//   - a share carry the screens (Reflect, Light Screen, Aurora Veil, Tailwind) with Light Clay, Snowscape or Snow Warning, so that
+//     Aurora Veil is used in and out of snow and with Reflect or Light Screen up, Court Change moves screens and durations, Defog
+//     removes the foe's screens, and the screen breakers meet each screen;
+//   - a share of the Pokemon are Shedinja holding Heavy-Duty Boots with a Spin, so that a user that faints of the foe's Rocky Helmet
+//     in the same hit (one HP, a helmet that deals at least 1) makes the HP gate of `AfterHit` matter;
+//   - the removers come with boost moves, terrain moves and Light Clay, so that Haze and Clear Smog meet boosts, and Ice Spinner and
+//     Defog meet each terrain.
+//
 // Usage:
 //   node gen-slice4.js <outDir> <count> <poolFile> [firstSeed=1]
 //
@@ -109,6 +124,25 @@ const HURTERS = ['tackle', 'quickattack', 'shadowball', 'flamethrower', 'icebeam
 const SELF_DEF_DROPS = ['closecombat', 'superpower'];
 const ATK_DROPS = ['growl', 'charm', 'featherdance', 'tickle', 'scaryface'];
 const RECOIL_MOVES = ['bravebird', 'flareblitz', 'doubleedge', 'headsmash', 'woodhammer', 'wildcharge', 'volttackle', 'takedown', 'submission'];
+
+// Slice 4c
+const HAZARDS = ['stealthrock', 'spikes', 'toxicspikes', 'stickyweb'];
+const HAZARD_ATTACKS = ['ceaselessedge', 'stoneaxe'];
+const SPINS = ['rapidspin', 'mortalspin'];
+const REMOVERS = [...SPINS, 'icespinner', 'defog', 'tidyup', 'courtchange', 'haze', 'clearsmog'];
+const BREAKERS = ['brickbreak', 'psychicfangs', 'ragingbull'];
+const SCREENS = ['reflect', 'lightscreen', 'auroraveil', 'tailwind'];
+const MOVES_4C = [...REMOVERS, ...HAZARD_ATTACKS, ...BREAKERS, 'auroraveil'];
+// the conditions of the state a Pokemon can hold (the entry hazards, the screens and Tailwind) and what Showdown's own lists include
+const HAZ_IDS = ['spikes', 'toxicspikes', 'stealthrock', 'stickyweb'];
+const SCREEN_IDS = ['reflect', 'lightscreen', 'auroraveil'];
+const COURT_CHANGE_IDS = [
+	'mist', 'lightscreen', 'reflect', 'spikes', 'safeguard', 'tailwind', 'toxicspikes', 'stealthrock', 'waterpledge', 'firepledge',
+	'grasspledge', 'stickyweb', 'auroraveil', 'luckychant', 'gmaxsteelsurge', 'gmaxcannonade', 'gmaxvinelash', 'gmaxwildfire', 'gmaxvolcalith',
+];
+const TERRAIN_IDS = ['electricterrain', 'grassyterrain', 'mistyterrain', 'psychicterrain'];
+// listed but rejected or not whitelisted: nothing to report (Substitute, Leech Seed, Safeguard, Mist, Knock Off and partial trapping are
+// not moves of the pool, so their branches in the bodies above are structurally zero)
 
 function assign(scenario, pool, seed) {
 	assignSlice3(scenario, pool, seed);
@@ -255,8 +289,73 @@ function assign(scenario, pool, seed) {
 		// Psyshock against an Assault Vest holder (its Special Defense boost is not the Defense Psyshock reads)
 		if (pool.items.includes('assaultvest') && !final.includes('acrobatics') && !final.includes('facade') && int(100) < 9) s.item = dex.items.get('assaultvest').name;
 	};
+	// slice 4c: a stream of draws of its own, so that the choices above are those of slice 4b for a seed
+	const rnd4 = mulberry32(seed * 3266489917 + 668265263);
+	const int4 = (n) => Math.floor(rnd4() * n);
+	const pick4 = (xs) => xs[int4(xs.length)];
+	const has = (ids) => ids.filter(id => pool.moves.includes(id));
+	const hazards = has(HAZARDS), hazardAttacks = has(HAZARD_ATTACKS), removers = has(REMOVERS), breakers = has(BREAKERS);
+	const screens = has(SCREENS), spins = has(SPINS);
+	const boostsAll = has([...BOOST_MOVES, ...DEFENSIVE_BOOSTS]);
+	const terrains = has(TERRAIN_MOVES), weathers = has(WEATHER_MOVES);
+	const shedinja = pool.species.includes('shedinja') ? dex.species.get('shedinja').name : null;
+	const set4c = (s) => {
+		const slots = [0, 1, 2, 3].filter(i => !keep.includes(idOf(s.moves[i])));
+		const put = (id) => { if (id && slots.length && !s.moves.map(idOf).includes(id)) s.moves[slots.splice(int4(slots.length), 1)[0]] = id; };
+		const item = (id) => { if (pool.items.includes(id)) s.item = dex.items.get(id).name; };
+		const r = int4(100);
+		if (r < 20 && hazards.length) {
+			// a hazard setter: two or three hazards (Spikes more often: three layers), and a hazard attack now and then
+			put(int4(100) < 70 && hazards.includes('spikes') ? 'spikes' : pick4(hazards));
+			put(pick4(hazards));
+			if (int4(100) < 50) put(pick4(hazards));
+			if (hazardAttacks.length && int4(100) < 40) put(pick4(hazardAttacks));
+		} else if (r < 52 && removers.length) {
+			// a remover, with a hazard move now and then (its own side's hazards come from the foe's setters)
+			const m = pick4(removers);
+			put(m);
+			if (int4(100) < 30) put(pick4(removers));
+			if (hazards.length && int4(100) < 30) put(pick4(hazards));
+			if (m === 'icespinner' && terrains.length && int4(100) < 55) put(pick4(terrains));
+			if ((m === 'haze' || m === 'clearsmog') && boostsAll.length && int4(100) < 60) put(pick4(boostsAll));
+			if (m === 'defog' && screens.length && int4(100) < 40) put(pick4(screens));
+			if (m === 'courtchange') { if (screens.length) put(pick4(screens)); if (hazards.length && int4(100) < 60) put(pick4(hazards)); }
+			if (m === 'rapidspin' || m === 'mortalspin') { if (int4(100) < 25) item('lifeorb'); else if (int4(100) < 15) item('toxicorb'); }
+		} else if (r < 66 && screens.length) {
+			// screens: Aurora Veil with snow (Snowscape or Snow Warning), Light Clay, Reflect or Light Screen beside it, Tailwind
+			put(pick4(screens));
+			if (int4(100) < 50) put(pick4(screens));
+			if (pool.moves.includes('auroraveil') && int4(100) < 55) put('auroraveil');
+			if (weathers.length && int4(100) < 50) put(pool.moves.includes('snowscape') && int4(100) < 70 ? 'snowscape' : pick4(weathers));
+			if (int4(100) < 22 && pool.abilities.includes('snowwarning')) s.ability = dex.abilities.get('snowwarning').name;
+			if (int4(100) < 45) item('lightclay');
+		} else if (r < 80 && breakers.length) {
+			// a screen breaker, with a screen setter of its own sometimes (a breaker into its own side's screens is not a case)
+			put(pick4(breakers));
+			if (int4(100) < 25) put(pick4(breakers));
+		} else if (r < 88 && shedinja && spins.length) {
+			// Shedinja: one HP, so the foe's Rocky Helmet always faints it in the hit; Heavy-Duty Boots keep it alive into hazards
+			s.species = shedinja;
+			s.ability = 'No Ability';
+			put(pick4(spins));
+			item('heavydutyboots');
+		} else if (r < 97) {
+			// the rarer cases of 4a and 4b, which a thousand battles of random teams meet only now and then (a critical hit that
+			// ignores a stage: Body Press after a Defense drop, Foul Play against an Attack drop, Psyshock against a raised Defense;
+			// Fickle Beam with another modifier; a raised evasion for the moves that ignore it; Hex against a frozen target)
+			const k = int4(6);
+			if (k === 0) { put('bodypress'); put(pick4(has(SELF_DEF_DROPS))); }
+			else if (k === 1) { put('foulplay'); put(pick4(has(ATK_DROPS))); put('strengthsap'); }
+			else if (k === 2) { put(pick4(has(['psyshock', 'psystrike', 'secretsword']))); put(pick4(has(DEFENSIVE_BOOSTS))); }
+			else if (k === 3) { put('ficklebeam'); item('dragonfang'); if (int4(100) < 50) put(pick4(terrains)); }
+			else if (k === 4) { put(pick4(has(EVASION_MOVES))); put(pick4(has(['sacredsword', 'darkestlariat']))); }
+			else { put('hex'); put(pick4(has(FREEZERS))); put(pick4(has(FREEZERS))); }
+		}
+		// Rocky Helmet is the foe's side of the HP gate
+		if (int4(100) < 12 && !['lifeorb', 'heavydutyboots', 'lightclay'].some(i => s.item === dex.items.get(i).name)) item('rockyhelmet');
+	};
 	// a mirror match keeps its two teams identical (the two sides tie on speed and priority)
-	for (const s of scenario.teams[0]) set(s);
+	for (const s of scenario.teams[0]) { set(s); set4c(s); }
 	// a Grassy Glide duel in about one battle in eight: a mirror match whose lead sets Grassy Terrain and carries Grassy Glide
 	// and a priority move, so the two leads tie on speed at the priority Grassy Terrain gives them (an equal-priority tie
 	// is shuffled by a draw)
@@ -272,7 +371,54 @@ function assign(scenario, pool, seed) {
 		scenario.choices = [['team 123456', 'team 123456']];
 	}
 	if (mirror || duel) scenario.teams[1] = JSON.parse(JSON.stringify(scenario.teams[0]));
-	else for (const s of scenario.teams[1]) set(s);
+	else for (const s of scenario.teams[1]) { set(s); set4c(s); }
+	// slice 4c, scripted openings (`scenario.choices`, a pair per decision point, then the random policy): about one battle in ten
+	//  - a hazard stack: one lead sets Stealth Rock, three layers of Spikes, two of Toxic Spikes and Sticky Web on the foe's side
+	//    (all four kinds, at their limits) while the foe lead boosts; then either the foe lead uses a remover or swapper on its own
+	//    side's stack (Rapid Spin, Defog, Tidy Up, Court Change, Haze, Clear Smog, Mortal Spin), or the setter switches to its second
+	//    Pokemon, which uses one on the stack it set (hazards on the foe's side: Defog, Tidy Up, Court Change, Ice Spinner);
+	//  - a Defog that fails: three Sweet Scents take the foe's evasion to -6, and Defog finds nothing else to do.
+	const script = int4(100);
+	const kinds = script < 4 ? 'stackSelf' : script < 7 ? 'stackFoe' : script < 9 ? 'defogFails' : null;
+	const lead = (s, moves) => {
+		const neutral = pool.species.filter(id => { const ty = dex.species.get(id).types; return !ty.includes('Ghost') && !ty.includes('Steel'); });
+		s.species = dex.species.get(pick4(neutral)).name; s.ability = 'No Ability'; s.item = ''; s.moves = moves;
+	};
+	const present = (ids) => ids.every(id => pool.moves.includes(id));
+	if (kinds && !duel && present(['stealthrock', 'spikes', 'toxicspikes', 'stickyweb', 'calmmind', 'swordsdance', 'nastyplot', 'agility', 'sweetscent', 'defog'])) {
+		const setter = int4(2), foe = 1 - setter;
+		const pair = (a, b) => (setter === 0 ? [a, b] : [b, a]);
+		const idle = 'move 1';
+		const boosts = ['calmmind', 'swordsdance', 'nastyplot', 'agility'];
+		if (kinds === 'defogFails') {
+			lead(scenario.teams[setter][0], ['sweetscent', 'defog', 'calmmind', 'tackle'].filter(id => pool.moves.includes(id)));
+			lead(scenario.teams[foe][0], boosts);
+			if (scenario.teams[setter][0].moves.length === 4) {
+				scenario.choices = [['team 123456', 'team 123456'], ...[1, 1, 1, 2].map(m => pair(`move ${m}`, idle))];
+			}
+		} else {
+			const removers = REMOVERS.filter(id => pool.moves.includes(id));
+			const x = pick4(removers);
+			lead(scenario.teams[setter][0], ['stealthrock', 'spikes', 'toxicspikes', 'stickyweb']);
+			const slots = [1, 2, 2, 2, 3, 3, 4];
+			const turns = slots.map(m => pair(`move ${m}`, idle));
+			if (kinds === 'stackSelf') {
+				// the foe lead removes from its own side: its first move is the remover; it boosts with the others until then
+				lead(scenario.teams[foe][0], [x, 'calmmind', 'swordsdance', 'nastyplot']);
+				const boostTurns = slots.map(m => pair(`move ${m}`, 'move 2'));
+				scenario.choices = [['team 123456', 'team 123456'], ...boostTurns, pair(null, 'move 1')];
+			} else {
+				// the setter's second Pokemon comes in and uses the remover on the stack its lead set
+				lead(scenario.teams[foe][0], boosts);
+				const bench = scenario.teams[setter][1];
+				bench.species = dex.species.get(pick4(pool.species.filter(id => { const ty = dex.species.get(id).types; return !ty.includes('Ghost') && !ty.includes('Steel'); }))).name;
+				bench.ability = 'No Ability'; bench.item = '';
+				bench.moves = [x, 'calmmind', 'swordsdance', 'nastyplot'];
+				const boostTurns = slots.map(m => pair(`move ${m}`, 'move 1'));
+				scenario.choices = [['team 123456', 'team 123456'], ...boostTurns, pair('switch 2', 'move 1'), pair('move 1', 'move 1')];
+			}
+		}
+	}
 	return scenario;
 }
 
@@ -351,6 +497,46 @@ function newTally() {
 		selfBoostAfterMultiHit: 0,
 		// seismic toss, night shade
 		levelDamage: z(['seismictoss', 'nightshade']), levelDamageUserLevel: z(['1', '2 to 99', '100']), levelDamageAtLeastTargetHp: 0,
+		// ---- slice 4c ----
+		moveUsed4c: z(MOVES_4C),
+		// onAfterHit of Rapid Spin and Mortal Spin: the hazards on the user's side (removed) and on the foe's (kept) at the hit, and
+		// the HP gate: a user that is down at the end of the hit (the helmet, in the same hit) with hazards still on its side
+		spinHazardsOnUserSide: z(['0', '1', '2', '3', '4']), spinHazardKindOnUserSide: z(HAZ_IDS), spinHazardsOnFoeSide: z(['0', '1 or more']),
+		spinUserFaintedInHit: 0, spinUserFaintedToRockyHelmet: 0, spinGateSuppressedRemoval: 0, spinUserFaintedNoHazards: 0,
+		spinSpikesLayers: z(['1', '2', '3']), toxicSpikesLayersOnSpinSide: z(['1', '2']),
+		// icespinner: the terrain it clears
+		iceSpinnerTerrain: z(['none', ...TERRAIN_IDS]),
+		// ceaselessedge and stoneaxe: the layers on the foe's side before the hit; the user's own side is not touched
+		ceaselessEdgeSpikesBefore: z(['0', '1', '2', '3']), stoneAxeRockBefore: z(['0', '1']),
+		hazardAttackUserSideHadHazards: 0, hazardAttackUserFainted: 0,
+		// defog: what each side holds, the terrain, the evasion stage, and the result
+		defogHazardsOnTarget: z(['0', '1', '2', '3', '4']), defogHazardsOnUser: z(['0', '1', '2', '3', '4']),
+		defogScreensOnTarget: z([...SCREEN_IDS, 'none']), defogScreensOnUser: z([...SCREEN_IDS, 'none']),
+		defogTerrain: z(['none', ...TERRAIN_IDS]), defogTargetEvasion: z(['minus six', 'other']),
+		defogResult: z(['ok', 'fails']), defogOkByBoostOnly: 0, defogOkByHazardOnly: 0, defogScreensOnlyNoBoost: 0,
+		// tidyup: the hazards on each side and the result
+		tidyUpHazardsOnUser: z(['0', '1 or more']), tidyUpHazardsOnFoe: z(['0', '1 or more']),
+		tidyUpResult: z(['ok', 'fails']), tidyUpOkByHazardsOnly: 0, tidyUpUserStagesAtMax: 0,
+		// clearsmog: the target's stages at the hit
+		clearSmogTargetStages: z(['boosted', 'lowered', 'both', 'none']), clearSmogFaintedTarget: 0,
+		// courtchange: which sides hold swappable conditions, layers, durations, and what the order of the states becomes
+		courtChangeSides: z(['both', 'user side only', 'foe side only', 'neither (fails)']),
+		courtChangeMultiLayerHazard: 0, courtChangeTimedCondition: 0, courtChangeSameConditionOnBothSides: 0, courtChangeTailwind: 0,
+		courtChangeOrdersNotIncreasing: 0, courtChangeScreen: z(SCREEN_IDS),
+		// haze: the stages it clears
+		hazeUserStages: z(['boosted', 'lowered', 'none']), hazeFoeStages: z(['boosted', 'lowered', 'none']),
+		// auroraveil: onTry (snow or not), Light Clay, Reflect and Light Screen up, and the damage it halves
+		auroraVeilTry: z(['snow', 'no snow (fails)']), auroraVeilWithLightClay: 0, auroraVeilAlreadyUp: 0,
+		auroraVeilWithReflect: 0, auroraVeilWithLightScreen: 0,
+		veilVsPhysical: z(['alone', 'with reflect']), veilVsSpecial: z(['alone', 'with light screen']), veilCritNotHalved: 0,
+		// brickbreak, psychicfangs, ragingbull: the screens on the target's side before the damage
+		screenBreakScreens: z([...SCREEN_IDS, 'none']), screenBreakReflectOnPhysical: 0, screenBreakMove: z(BREAKERS),
+		// structurally zero: no species of the pool is a Tauros forme, so Raging Bull never changes type; Safeguard, Mist, Leech Seed,
+		// partial trapping, Substitute and G-Max Steelsurge are not conditions here, so the removals of the bodies never meet them;
+		// and Court Change takes every condition a side can hold (all of them are in its list), so each side ends with the other's
+		// whole list, in the order it had, and the effect orders along a side stay increasing (a state that stayed behind would be
+		// followed by arrivals with lower orders)
+		ragingBullTypeChanged: 0,
 	};
 }
 
@@ -369,6 +555,7 @@ function install() {
 		if (c && id in REJECTED_MOVES) c.structurallyZero[id]++;
 		if (c && id === 'ivycudgel') c.ivyCudgelUsed++;
 		if (c && id in c.moveUsed4b) c.moveUsed4b[id]++;
+		if (c && id in c.moveUsed4c) c.moveUsed4c[id]++;
 		if (c && id === 'roost') {
 			const flying = pokemon.types.includes('Flying');
 			c.roostUser[!flying ? 'not Flying' : pokemon.types.length === 1 ? 'pure Flying' : 'dual Flying']++;
@@ -398,6 +585,30 @@ function install() {
 		const r = hitLoop.call(this, targets, pokemon, move);
 		const c = t();
 		if (c && move.id === 'scaleshot' && move.hit in c.scaleShotHits) c.scaleShotHits[move.hit]++;
+		return r;
+	};
+
+
+	// ---- slice 4c ----
+	const haz = (side) => HAZ_IDS.filter(id => side.sideConditions[id]);
+	const scr = (side) => SCREEN_IDS.filter(id => side.sideConditions[id]);
+	const terrainName = (b) => b.field.terrain || 'none';
+	const stages = (p) => { const v = Object.values(p.boosts); return v.some(x => x > 0) ? (v.some(x => x < 0) ? 'both' : 'boosted') : v.some(x => x < 0) ? 'lowered' : 'none'; };
+	const spreadMoveHit = BattleActions.prototype.spreadMoveHit;
+	BattleActions.prototype.spreadMoveHit = function (targets, pokemon, moveOrMoveName, hitEffect, isSecondary, isSelf) {
+		const c = t();
+		const id = moveOrMoveName && moveOrMoveName.id;
+		const watched = c && !isSecondary && !isSelf && (SPINS.includes(id) || HAZARD_ATTACKS.includes(id));
+		const r = spreadMoveHit.call(this, targets, pokemon, moveOrMoveName, hitEffect, isSecondary, isSelf);
+		if (watched && pokemon.hp === 0) {
+			// the HP gate of AfterHit: the user is down at the end of the hit (its faint is only queued)
+			const target = targets[0];
+			if (SPINS.includes(id)) {
+				c.spinUserFaintedInHit++;
+				if (target && target.item === 'rockyhelmet') c.spinUserFaintedToRockyHelmet++;
+				if (haz(pokemon.side).length) c.spinGateSuppressedRemoval++; else c.spinUserFaintedNoHazards++;
+			} else c.hazardAttackUserFainted++;
+		}
 		return r;
 	};
 
@@ -501,6 +712,15 @@ function install() {
 			default:
 			}
 		}
+		if (c && eventid === 'ModifyDamage' && source && rest[0] && rest[0].id && source.side.sideConditions.auroraveil) {
+			// modifyDamage: runEvent('ModifyDamage', attacker, defender, move, baseDamage); the veil's handler is onAnyModifyDamage
+			const move = rest[0], def = source, physical = move.category === 'Physical';
+			if (move.category !== 'Status') {
+				if (def.getMoveHitData(move).crit) c.veilCritNotHalved++;
+				else if (physical) c.veilVsPhysical[def.side.sideConditions.reflect ? 'with reflect' : 'alone']++;
+				else c.veilVsSpecial[def.side.sideConditions.lightscreen ? 'with light screen' : 'alone']++;
+			}
+		}
 		if (c && eventid === 'SetStatus' && target && target.volatiles && target.volatiles.roost && target.baseSpecies.types.includes('Flying')) {
 			c.statusOnRoostedFlying++;
 			if (this.field.terrain === 'mistyterrain') c.mistyTerrainStatusBlockOnRoosted++;
@@ -526,6 +746,105 @@ function install() {
 	const singleEvent = Battle.prototype.singleEvent;
 	Battle.prototype.singleEvent = function (eventid, effect, state, target, source, ...rest) {
 		const c = t();
+		if (c && effect && effect.id && target) {
+			const id = effect.id;
+			// onTryHit of the screen breakers: the screens on the target's side, before the damage
+			if (eventid === 'TryHit' && BREAKERS.includes(id)) {
+				c.screenBreakMove[id]++;
+				const sc = scr(target.side);
+				if (sc.length) for (const x of sc) c.screenBreakScreens[x]++; else c.screenBreakScreens.none++;
+				if (sc.includes('reflect') && effect.category === 'Physical') c.screenBreakReflectOnPhysical++;
+				if (id === 'ragingbull' && effect.type !== 'Normal') c.ragingBullTypeChanged++;
+			}
+			// onTry of Aurora Veil (the user is the event's target): snow or not
+			if (eventid === 'Try' && id === 'auroraveil') {
+				const r = singleEvent.call(this, eventid, effect, state, target, source, ...rest);
+				c.auroraVeilTry[r ? 'snow' : 'no snow (fails)']++;
+				if (r) {
+					if (target.hasItem('lightclay')) c.auroraVeilWithLightClay++;
+					if (target.side.sideConditions.auroraveil) c.auroraVeilAlreadyUp++;
+					if (target.side.sideConditions.reflect) c.auroraVeilWithReflect++;
+					if (target.side.sideConditions.lightscreen) c.auroraVeilWithLightScreen++;
+				}
+				return r;
+			}
+			// onAfterHit: target is the foe that was hit and source the user
+			if (eventid === 'AfterHit' && source) {
+				if (SPINS.includes(id)) {
+					const mine = haz(source.side);
+					c.spinHazardsOnUserSide[String(mine.length)]++;
+					for (const x of mine) c.spinHazardKindOnUserSide[x]++;
+					if (source.side.sideConditions.spikes) c.spinSpikesLayers[String(source.side.sideConditions.spikes.layers)]++;
+					if (source.side.sideConditions.toxicspikes) c.toxicSpikesLayersOnSpinSide[String(source.side.sideConditions.toxicspikes.layers)]++;
+					c.spinHazardsOnFoeSide[haz(target.side).length ? '1 or more' : '0']++;
+				} else if (id === 'icespinner') {
+					c.iceSpinnerTerrain[terrainName(this)]++;
+				} else if (id === 'ceaselessedge') {
+					const l = target.side.sideConditions.spikes ? target.side.sideConditions.spikes.layers : 0;
+					c.ceaselessEdgeSpikesBefore[String(l)]++;
+					if (haz(source.side).length) c.hazardAttackUserSideHadHazards++;
+				} else if (id === 'stoneaxe') {
+					c.stoneAxeRockBefore[target.side.sideConditions.stealthrock ? '1' : '0']++;
+					if (haz(source.side).length) c.hazardAttackUserSideHadHazards++;
+				}
+			}
+			if (eventid === 'Hit' && source && id === 'defog') {
+				const th = haz(target.side).length, uh = haz(source.side).length;
+				const ts = scr(target.side), us = scr(source.side);
+				c.defogHazardsOnTarget[String(th)]++;
+				c.defogHazardsOnUser[String(uh)]++;
+				if (ts.length) for (const x of ts) c.defogScreensOnTarget[x]++; else c.defogScreensOnTarget.none++;
+				if (us.length) for (const x of us) c.defogScreensOnUser[x]++; else c.defogScreensOnUser.none++;
+				c.defogTerrain[terrainName(this)]++;
+				const ev = target.boosts.evasion;
+				c.defogTargetEvasion[ev === -6 ? 'minus six' : 'other']++;
+				const r = singleEvent.call(this, eventid, effect, state, target, source, ...rest);
+				c.defogResult[r ? 'ok' : 'fails']++;
+				if (r && th + uh === 0 && ev > -6) c.defogOkByBoostOnly++;
+				if (r && th + uh > 0 && ev === -6) c.defogOkByHazardOnly++;
+				if (ts.length && th + uh === 0 && ev === -6) c.defogScreensOnlyNoBoost++;
+				return r;
+			}
+			if (eventid === 'Hit' && source && id === 'tidyup') {
+				const uh = haz(source.side).length, fh = haz(target.side.foe).length;
+				c.tidyUpHazardsOnUser[uh ? '1 or more' : '0']++;
+				c.tidyUpHazardsOnFoe[fh ? '1 or more' : '0']++;
+				const maxed = target.boosts.atk === 6 && target.boosts.spe === 6;
+				if (maxed) c.tidyUpUserStagesAtMax++;
+				const r = singleEvent.call(this, eventid, effect, state, target, source, ...rest);
+				c.tidyUpResult[r ? 'ok' : 'fails']++;
+				if (r && maxed) c.tidyUpOkByHazardsOnly++;
+				return r;
+			}
+			if (eventid === 'Hit' && source && id === 'clearsmog') {
+				c.clearSmogTargetStages[stages(target)]++;
+				if (target.hp === 0) c.clearSmogFaintedTarget++;
+			}
+			if (eventid === 'HitField' && id === 'haze') {
+				for (const p of this.getAllActive()) {
+					const who = p === source ? c.hazeUserStages : c.hazeFoeStages;
+					const st = stages(p);
+					who[st === 'both' ? 'boosted' : st]++;
+				}
+			}
+			if (eventid === 'HitField' && id === 'courtchange' && source) {
+				const mine = COURT_CHANGE_IDS.filter(x => source.side.sideConditions[x]);
+				const theirs = COURT_CHANGE_IDS.filter(x => source.side.foe.sideConditions[x]);
+				c.courtChangeSides[mine.length && theirs.length ? 'both' : mine.length ? 'user side only' : theirs.length ? 'foe side only' : 'neither (fails)']++;
+				const all = [...mine.map(x => source.side.sideConditions[x]), ...theirs.map(x => source.side.foe.sideConditions[x])];
+				const ids = [...mine, ...theirs];
+				if (all.some(st => (st.id === 'spikes' || st.id === 'toxicspikes') && st.layers > 1)) c.courtChangeMultiLayerHazard++;
+				if (all.some(st => st.duration)) c.courtChangeTimedCondition++;
+				if (ids.includes('tailwind')) c.courtChangeTailwind++;
+				for (const x of SCREEN_IDS) if (ids.includes(x)) c.courtChangeScreen[x]++;
+				if (mine.some(x => theirs.includes(x))) c.courtChangeSameConditionOnBothSides++;
+				const r = singleEvent.call(this, eventid, effect, state, target, source, ...rest);
+				// each state kept its effectOrder: the order along a side is no longer increasing once states of the other side arrive
+				const inc = (side) => { const o = Object.values(side.sideConditions).map(st => st.effectOrder); return o.every((v, i) => i === 0 || o[i - 1] < v); };
+				if (!inc(source.side) || !inc(source.side.foe)) c.courtChangeOrdersNotIncreasing++;
+				return r;
+			}
+		}
 		if (c && eventid === 'Hit' && effect && effect.id && target && source) {
 			const id = effect.id, w = this.field.effectiveWeather();
 			const wname = w === 'sunnyday' ? 'sun' : w === 'raindance' ? 'rain' : w === 'sandstorm' ? 'sand' : (w === 'snowscape' || w === 'hail') ? 'snow' : w === '' ? 'none' : 'other';

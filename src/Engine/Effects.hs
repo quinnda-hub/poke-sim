@@ -68,6 +68,11 @@
 -- bands (lowkick, grassknot), Stored Power's boost count (storedpower, powertrip), the rain accuracy (thunder, hurricane),
 -- the halving (ruination, superfang), the poisoned-target doubling (venoshock, barbbarrage) and the Dynamax check of
 -- onTryHit (lowkick, grassknot, heavyslam).
+--
+-- Slice 4c's bodies are native for the same reason: each of Rapid Spin and Mortal Spin (the hazard sweep), Ice Spinner,
+-- Ceaseless Edge, Stone Axe, Defog, Tidy Up, Clear Smog, Court Change, Haze, Aurora Veil's @onTry@ and the screen breakers'
+-- @onTryHit@ is one move's own handler or shared by two or three whitelisted moves, and none is "a modifier under a condition".
+-- Aurora Veil's @onAnyModifyDamage@ joins Reflect's and Light Screen's: one more native, each used by one condition.
 module Engine.Effects
   ( abilityBodies
   , itemBodies
@@ -245,6 +250,9 @@ fieldCondBodies name = case name of
   -- the countdown is the duration key of onSideResidual
   "reflect" -> screen NReflectDamage
   "lightscreen" -> screen NLightScreenDamage
+  -- auroraveil: durationCallback (the same Light Clay rule), onAnyModifyDamage (halve a non-critical hit unless Reflect or
+  -- Light Screen already covers its category), onSideStart and onSideEnd (log lines)
+  "auroraveil" -> screen NAuroraVeilDamage
   -- tailwind: durationCallback (4), onModifySpe chainModify(2), onSideStart and onSideEnd (log lines)
   "tailwind" ->
     Just [ (POwn, EvDurationCallback, BNative NTailwindDuration), (POwn, EvModifySpe, BRule (RChainModify 2 1 []))
@@ -362,4 +370,27 @@ moveBodies name = case name of
   "strengthsap" -> Just [(POwn, EvHit, BNative NStrengthSapHit)]
   -- painsplit (13133): onHit averages the two HPs
   "painsplit" -> Just [(POwn, EvHit, BNative NPainSplitHit)]
+  -- Slice 4c. rapidspin (14699), mortalspin (12324): onAfterHit removes Leech Seed and the user's hazards and trapping;
+  -- onAfterSubDamage does the same only while the user has HP, where a hit landed on a Substitute
+  "rapidspin" -> Just [(POwn, EvAfterHit, BNative NHazardSweepAfterHit), (POwn, EvAfterSubDamage, BNative NInertAfterSubDamage)]
+  "mortalspin" -> Just [(POwn, EvAfterHit, BNative NHazardSweepAfterHit), (POwn, EvAfterSubDamage, BNative NInertAfterSubDamage)]
+  -- icespinner (9422): onAfterHit clears the terrain
+  "icespinner" -> Just [(POwn, EvAfterHit, BNative NIceSpinnerAfterHit), (POwn, EvAfterSubDamage, BNative NInertAfterSubDamage)]
+  -- ceaselessedge (2223), stoneaxe (18076): onAfterHit sets Spikes / Stealth Rock on the foe's side
+  "ceaselessedge" -> Just [(POwn, EvAfterHit, BNative NCeaselessEdgeAfterHit), (POwn, EvAfterSubDamage, BNative NInertAfterSubDamage)]
+  "stoneaxe" -> Just [(POwn, EvAfterHit, BNative NStoneAxeAfterHit), (POwn, EvAfterSubDamage, BNative NInertAfterSubDamage)]
+  -- defog (3450), tidyup (19632), clearsmog (2557): onHit
+  "defog" -> Just [(POwn, EvHit, BNative NDefogHit)]
+  "tidyup" -> Just [(POwn, EvHit, BNative NTidyUpHit)]
+  "clearsmog" -> Just [(POwn, EvHit, BNative NClearSmogHit)]
+  -- courtchange (3035), haze (8162): onHitField
+  "courtchange" -> Just [(POwn, EvHitField, BNative NCourtChangeHitField)]
+  "haze" -> Just [(POwn, EvHitField, BNative NHazeHitField)]
+  -- brickbreak (1825), psychicfangs (14065): onTryHit shatters the target's screens before the damage; ragingbull (14638) the
+  -- same, and its onModifyType changes the type only for Tauros's Paldean forms
+  "brickbreak" -> Just [(POwn, EvTryHit, BNative NScreenBreakTryHit)]
+  "psychicfangs" -> Just [(POwn, EvTryHit, BNative NScreenBreakTryHit)]
+  "ragingbull" -> Just [(POwn, EvTryHit, BNative NScreenBreakTryHit), (POwn, EvModifyType, BNative NRagingBullType)]
+  -- auroraveil (830): onTry needs snow (its condition is in 'fieldCondBodies')
+  "auroraveil" -> Just [(POwn, EvTry, BNative NAuroraVeilTry)]
   _ -> Nothing
