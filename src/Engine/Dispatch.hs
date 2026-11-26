@@ -1224,6 +1224,8 @@ runNative dx n c relay = do
     NStrengthSapHit -> keep
     NPainSplitHit -> keep
     -- roost.condition.onType is applied by 'Engine.Damage.monTypes' at every read of the types, not run here
+    -- roost.onStart(target): `if (target.terastallized) { ...; return false }`, else only a message
+    NRoostStart -> if monTerastallized m then returning stop else keep
     NRoostType -> keep
     -- slice 4c: the moves' own bodies are run by 'moveAfterHit', 'moveOwnHit', 'moveFieldHit', 'moveTryHit', 'moveTry' and
     -- 'singleMoveEvent', each at its own call site
@@ -1579,6 +1581,15 @@ runNative dx n c relay = do
           , maybe True ((< 2) . esA) (ownerState b (OwnSide sp) (EffectKey EffSideCond ts)) ->
               void (addSideCondition dx sp ts holder) >> keep
         _ -> keep
+    -- embodyaspectteal.onStart(pokemon) (data/abilities.ts 1225-1231): `pokemon.baseSpecies.name === 'Ogerpon-Teal-Tera' &&
+    -- pokemon.terastallized && !this.effectState.embodied` -> embodied = true, boost({spe: 1}). baseSpecies is the species:
+    -- only a Tera forme change (permanent, to this species) differs from it, and a fainted one is back to Ogerpon
+    NEmbodyAspectTeal
+      | spId (speciesData dx (monSpecies m)) == "ogerpontealtera", monTerastallized m
+      , esA (monAbilityState m) /= 1 -> do
+          modify' (modifyMon holder (\x -> x {monAbilityState = (monAbilityState x) {esA = 1}}))
+          void (boostMon holder [(BSpe, 1)]) >> keep
+      | otherwise -> keep
   where
     duration d = pure (Res (Replace (RInt d)) (cMod c))
     -- the weather this handler belongs to is the effective weather as the Pokemon sees it
@@ -2127,17 +2138,33 @@ resolveFaints dx checkWinIfNoFaints checkWin' = do
             -- singleEvent('End', ability) and singleEvent('End', item) (battle.ts 2605-2606), before the volatiles go
             endAbilityAndItem dx a
             -- pokemon.clearVolatile(false) resets the stat stages, the volatiles and the cached speed (setSpecies)
-            modify' (modifyMon a (\mm -> mm
+            modify' (modifyMon a (regressForme dx . \mm -> mm
               { monSpeed = stSpe (monStats mm)
               , monBoosts = noBoosts
               , monVolatiles = SV.empty
               , monFainted = True
               , monActive = False
+              , monTerastallized = False -- delete pokemon.terastallized (battle.ts 2617)
               }))
         modify' (\bb -> bb {bFaintQueue = SV.empty})
         case reverse q of
           (lastFaint : _) | checkWin' -> void (checkWin (Just lastFaint))
           _ -> pure ()
+
+-- | The formeRegression branch of the faint path (battle.ts 2607-2611, 2618-2623) and @clearVolatile@'s @ability = baseAbility@
+-- and @setSpecies(baseSpecies)@ (pokemon.ts 1544, 1581), for a Pokemon that fainted. A Pokemon in a Tera forme (a battle-only
+-- Ogerpon forme: @formeRegression@ is set by its permanent Tera forme change) has its @baseSpecies@ set back to the set's
+-- species (the forme's @battleOnly@) and its @baseAbility@ to the set's ability; then its species and ability follow them.
+-- LATENT: @updateMaxHp@ (2621) changes nothing, since every Ogerpon forme has the same base stats.
+regressForme :: Dex -> Mon -> Mon
+regressForme dx m
+  | spBaseSpecies sp == "Ogerpon", spBattleOnly sp /= "" =
+      m { monSpecies = M.findWithDefault (monSpecies m) (spBattleOnly sp) (dxSpeciesIx dx)
+        , monBaseAbility = monSetAbility m
+        , monAbility = monSetAbility m }
+  | otherwise = m {monAbility = monBaseAbility m}
+  where
+    sp = speciesData dx (monSpecies m)
 
 -- | @battle.checkWin@: end the battle if a side has no Pokemon left. Returns whether it ended.
 checkWin :: Monad m => Maybe Actor -> Eng m Bool

@@ -189,8 +189,23 @@ Last updated 2026-11-25.
     Pokémon-targeted moves. 5 more moves (399 in all). The slice-4 set is
     re-recorded at 1,500 battles. Parity checks 5,300 traces, 391,683
     decision points and 785,342 draws.
+- **Slice 5a: Terastallization without Stellar.**
+  - The `MoveTera` choice, legal until the side has terastallized and never
+    while locked into a move (Struggle included); its action runs at order
+    106, after switches and before every move, and two of them sort by speed.
+  - Types become the Tera type, STAB counts the original types too (2x when
+    the Tera type is one of them), the 60 base-power floor, Roost failing,
+    and Tera cleared on faint but kept through switches.
+  - Ogerpon's Tera forme change to Ogerpon-Teal-Tera with Embody Aspect
+    (Teal), which re-boosts on every switch-in, and its reversion on faint.
+    The state gains `monBaseAbility` and `monSetAbility` for it.
+  - The trace contract: a `tera: true` flag, `teraType` and `terastallized`
+    compared everywhere, and `teraChance` in the recorder. A Stellar Tera type
+    is rejected until 5b.
+  - A new set, slice 5, of 1,000 battles with Tera offered. Parity checks
+    6,300 traces, 476,038 decision points and 942,236 draws.
 - **Test tiers.** The fast tier (`POKESIM_TIER=fast`) replays every 10th trace
-  and runs the hedgehog properties at 100 tests each, in about 20 s. The long
+  and runs the hedgehog properties at 100 tests each, in about 25 s. The long
   tier, which gates merges into main, replays everything and runs the
   properties at 2000 tests each.
 
@@ -376,6 +391,7 @@ Gen 9 OU battles simulated sooner, and each makes the later ones cheaper.
    |---|---|---|
    | 2026-11-26 | Slice 4c | Baseline |
    | 2026-11-26 | Slice 4d | On pace: step 1 done the day it was estimated |
+   | 2026-11-26 | Slice 5a | Ahead: most of step 2 done the same day |
 6. **Per-player view.** What each side can observe, as a first-class value.
 7. **Showdown seed compatibility.** Implement Showdown's own generators so a
    battle can be reproduced from its seed alone.
@@ -423,7 +439,7 @@ Alongside:
 - **Scenario generation from rules.** For each rule, generate battles that
   exercise it with each random outcome forced both ways, and report coverage
   per rule.
-- **Trace size.** 5,300 battles take about 2.9 GB. Snapshots should become
+- **Trace size.** 6,300 battles take about 3.6 GB. Snapshots should become
   deltas.
 - **Benchmark tracking.** Record throughput at each slice so slowdowns are
   measured when they appear.

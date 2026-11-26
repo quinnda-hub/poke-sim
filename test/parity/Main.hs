@@ -306,7 +306,10 @@ checkTrace dex tr = case prepare of
             (d : _) -> failWith ("state differs at " ++ showDiff d)
             [] -> pure ()
           let legalExpected = map (map txt . arr) (arr (s .: "legal"))
-              legalActual = [nub (map renderLegal (legalChoices b p)) | p <- [P1, P2]]
+              -- record.js lists `move N terastallize` only when the trace was recorded with `tera: true`; without it the
+              -- policy was never offered Tera (Showdown still allowed it), so the recorded list is the engine's without those
+              legalActual = [nub (map renderLegal (filter offered (legalChoices b p))) | p <- [P1, P2]]
+              offered c = teraOffered || not (isTera c)
           when (legalExpected /= legalActual) $
             failWith ("legal choices differ: expected " ++ show legalExpected ++ ", engine " ++ show legalActual)
           chosen <- case map parseChoice (arr (s .: "chosen")) of
@@ -374,12 +377,17 @@ checkTrace dex tr = case prepare of
     renderLegal c = case c of
       Team _ -> "team"
       _ -> renderChoice c
+    teraOffered = tr .: "tera" == Bool True
+    isTera c = case c of
+      MoveTera _ -> True
+      _ -> False
 
 parseChoice :: Value -> Either String (Maybe Choice)
 parseChoice Null = Right Nothing
 parseChoice (String t) = case words (T.unpack t) of
   ["team", ds] | all isDigit ds -> Right (Just (Team (map (\c -> fromEnum c - fromEnum '0') ds)))
   ["move", n] | all isDigit n -> Right (Just (Move (read n)))
+  ["move", n, "terastallize"] | all isDigit n -> Right (Just (MoveTera (read n)))
   ["switch", n] | all isDigit n -> Right (Just (Switch (read n)))
   _ -> Left (T.unpack t)
 parseChoice v = Left (show v)
@@ -493,6 +501,8 @@ diffMon dex path orig m ev =
       ]
     ++ cmp (path ++ ".boosts key count") (length (objEntries (ev .: "boosts"))) 7
     ++ cmp (path ++ ".types") (map txt (arr (ev .: "types"))) types
+    ++ cmp (path ++ ".teraType") (txt (ev .: "teraType")) (typeName (monTeraType m))
+    ++ cmp (path ++ ".terastallized") (txt (ev .: "terastallized")) (if monTerastallized m then typeName (monTeraType m) else "")
     ++ cmp (path ++ ".moves.count") (length (arr (ev .: "moves"))) (SV.length (monMoves m))
     ++ concat
       [ cmp (mp ++ ".id") (txt (mv .: "id")) (T.unpack (mvId (moveData dex (msMove ms))))
@@ -527,14 +537,12 @@ unmodelled st =
       [ concat
             [ let pp = sp ++ ".pokemon[" ++ show j ++ "]"
                in isEmptyObj (pp ++ ".statusState (keys other than stage)") (dropKey "stage" (pk .: "statusState"))
-                    ++ isEmptyStr (pp ++ ".terastallized") (pk .: "terastallized")
             | (j, pk) <- zip [0 :: Int ..] (arr (sd .: "pokemon"))
             ]
       | (i, sd) <- zip [0 :: Int ..] (arr (st .: "sides"))
       , let sp = "sides[" ++ show i ++ "]"
       ]
   where
-    isEmptyStr path v = cmp path (txt v) ""
     dropKey k (Object o) = Object (KM.delete (K.fromText k) o)
     dropKey _ v = v
     isEmptyObj path v = case v of

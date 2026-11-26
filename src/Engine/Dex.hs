@@ -69,6 +69,12 @@ data SpeciesData = SpeciesData
   -- ^ @weighthg@: the weight in tenths of a kilogram (@pokemon.weighthg@ before @ModifyWeight@).
   , spParadox :: !Bool
   -- ^ @tags@ includes @"Paradox"@ (data/pokedex.ts), which Booster Energy's @onTakeItem@ reads.
+  , spBaseSpecies :: !T.Text
+  -- ^ @species.baseSpecies@ (the name, not an id): "Ogerpon" for every Ogerpon forme.
+  , spAbility0 :: !T.Text
+  -- ^ @toID(species.abilities['0'])@: what a permanent forme change gives.
+  , spBattleOnly :: !T.Text
+  -- ^ @toID(species.battleOnly)@, or "" (a battle-only forme's base: Ogerpon-Teal-Tera's is "ogerpon").
   }
   deriving (Show)
 
@@ -522,7 +528,16 @@ speciesOf tix v = do
   let supported =
         ident == "shedinja"
           || (num > 0 && not (truthyField "isNonstandard" v) && not (truthyField "forme" v) && not (truthyField "battleOnly" v))
-  pure (SpeciesData ident t1 t2 (U.fromList base) gender maxHp supported weight paradox)
+  baseSp <- case v of
+    Object o | Just (String b) <- KM.lookup "baseSpecies" o -> Right b
+    _ -> Right ""
+  let ability0 = case v of
+        Object o | Just (Object ab) <- KM.lookup "abilities" o, Just (String a0) <- KM.lookup "0" ab -> T.filter isAlphaNum (T.toLower a0)
+        _ -> ""
+      battleOnly = case v of
+        Object o | Just (String b) <- KM.lookup "battleOnly" o -> T.filter isAlphaNum (T.toLower b)
+        _ -> ""
+  pure (SpeciesData ident t1 t2 (U.fromList base) gender maxHp supported weight paradox baseSp ability0 battleOnly)
 
 typeIx :: M.Map T.Text Int -> T.Text -> Either String Int
 typeIx tix t = maybe (Left ("unknown type " ++ T.unpack t)) Right (M.lookup t tix)
