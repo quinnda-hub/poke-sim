@@ -65,6 +65,11 @@ data EventId
   | EvPrepareHit
   | EvTryHitSide
   | EvTryHitField
+  | EvEnd
+  -- ^ @SideEnd@ / @FieldEnd@ (the handler is @onSideEnd@ / @onFieldEnd@).
+  | EvDurationCallback
+  -- ^ Not an event: the export lists a condition's @durationCallback@ as a handler, and the engine keeps it as the
+  -- handler @(POwn, EvDurationCallback)@, run where side.ts @addSideCondition@ and field.ts @addPseudoWeather@ call it.
   deriving (Eq, Show, Enum, Bounded)
 
 -- | How @runEvent@ orders the handlers of an event (battle.ts 797-803).
@@ -117,6 +122,8 @@ eventName e = case e of
   EvPrepareHit -> "PrepareHit"
   EvTryHitSide -> "TryHitSide"
   EvTryHitField -> "TryHitField"
+  EvEnd -> "End"
+  EvDurationCallback -> "DurationCallback"
 
 -- | Which Pokemon a handler reacts to: the holder (@onX@), its allies (@onAllyX@), its foes (@onFoeX@), the
 -- source of the event (@onSourceX@) or anyone (@onAnyX@).
@@ -142,6 +149,7 @@ prefixName p = case p of
 -- | Split a handler name of the export (@onBeforeMove@, @onFoeBeforeMove@) into its prefix and event, when the
 -- engine knows the event.
 parseHandlerName :: T.Text -> Maybe (Prefix, EventId)
+parseHandlerName "durationCallback" = Just (POwn, EvDurationCallback)
 parseHandlerName n = case T.stripPrefix "on" n of
   Nothing -> Nothing
   Just rest -> case [(p, e) | p <- [minBound .. maxBound], e <- [minBound .. maxBound], prefixName p <> eventName e == rest] of
@@ -284,6 +292,13 @@ data NativeId
   | NToxicSpikesSwitchIn
   | NStickyWebSwitchIn
   | NToxicDebris
+  | NLightClayDuration
+  -- ^ reflect, lightscreen @durationCallback@: 8 with a Light Clay user, else 5.
+  | NTailwindDuration
+  | NTrickRoomDuration
+  | NReflectDamage
+  | NLightScreenDamage
+  | NTrickRoomRestart
   deriving (Eq, Show)
 
 -- | The body of each handler the engine implements (written by hand: Showdown's handlers are code). A condition

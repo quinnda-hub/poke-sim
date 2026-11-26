@@ -1,13 +1,18 @@
 #!/usr/bin/env node
 'use strict';
-// Generates random battles for "slice 3" (field state: phase 3a, entry hazards) and records each on Showdown.
+// Generates random battles for "slice 3" (field state: 3a entry hazards, 3b screens, Tailwind and Trick Room) and
+// records each on Showdown.
 //
 // Slice 3a adds side conditions (Stealth Rock, Spikes, Toxic Spikes, Sticky Web), Heavy-Duty Boots and Toxic Debris,
-// and with them the effect order (`battle.effectOrder`) that sorts two hazards on one side. The teams are slice 1's
+// and with them the effect order (`battle.effectOrder`) that sorts two hazards on one side. Slice 3b adds durations:
+// Reflect, Light Screen (and Light Clay), Tailwind and Trick Room. The teams are slice 1's
 // (gen-slice1.js makeScenario, so the move, species and spread draws are the same), then each Pokemon is changed by a
 // generator of its own, so slices 1 and 2 stay reproducible from their seeds:
 //   - a share of the Pokemon get a hazard setter in a move slot (two setters often, so a side holds two or three
-//     hazards and `effectOrder` decides their order);
+//     hazards and `effectOrder` decides their order), and a share get a field setter (Reflect, Light Screen,
+//     Tailwind, Trick Room: both screens on one side tie in ModifyDamage, a screen on each side tie in Residual);
+//   - a share get a paralysing move (Tailwind and Trick Room against paralysed Pokemon), and in a mirror match the
+//     two sides tie on speed, under Trick Room too;
 //   - a share are Flying types (not grounded: the hazards skip them), Poison types (a grounded one absorbs Toxic
 //     Spikes), Steel types (immune to the poison), or Shedinja (1 HP: any hazard knocks it out);
 //   - a share are level 1-20 (small HP, so a hazard can knock it out and the damage floors at 1);
@@ -32,7 +37,7 @@ const path = require('path');
 
 const SHOWDOWN_DIR = process.env.SHOWDOWN_DIR ||
 	path.resolve(__dirname, '..', '..', 'local', 'showdown');
-const { Dex, Battle } = require(path.join(SHOWDOWN_DIR, 'dist', 'sim'));
+const { Dex, Battle, Side } = require(path.join(SHOWDOWN_DIR, 'dist', 'sim'));
 const { record } = require('./record.js');
 const { makeScenario } = require('./gen-slice1.js');
 
@@ -50,6 +55,9 @@ function mulberry32(seed) {
 }
 
 const HAZARDS = ['stealthrock', 'spikes', 'toxicspikes', 'stickyweb'];
+const FIELD_SETTERS = ['reflect', 'lightscreen', 'tailwind', 'trickroom'];
+const SCREENS = ['reflect', 'lightscreen'];
+const PARALYSERS = ['thunderwave', 'glare', 'stunspore', 'nuzzle'];
 
 function assign(scenario, pool, seed) {
 	const rnd = mulberry32(seed * 1103515245 + 12345);
@@ -57,12 +65,15 @@ function assign(scenario, pool, seed) {
 	const pick = (xs) => xs[int(xs.length)];
 	const setters = HAZARDS.filter(id => pool.moves.includes(id));
 	if (setters.length === 0) throw new Error('the pool has no hazard setter');
+	const fieldSetters = FIELD_SETTERS.filter(id => pool.moves.includes(id));
+	if (fieldSetters.length === 0) throw new Error('the pool has no field setter');
+	const paralysers = PARALYSERS.filter(id => pool.moves.includes(id));
 	const bySpeciesType = (t) => pool.species.filter(id => dex.species.get(id).types.includes(t));
 	const flying = bySpeciesType('Flying'), poison = bySpeciesType('Poison'), steel = bySpeciesType('Steel');
 	const abilities = pool.abilities.filter(id => id !== 'noability');
 	const items = pool.items.filter(id => id !== '');
 	const weightedAbilities = abilities.concat(abilities.filter(id => id === 'toxicdebris').flatMap(id => [id, id, id, id, id]));
-	const weightedItems = items.concat(items.filter(id => id === 'heavydutyboots').flatMap(id => [id, id, id, id]));
+	const weightedItems = items.concat(items.filter(id => id === 'heavydutyboots' || id === 'lightclay').flatMap(id => [id, id, id, id]));
 	const mirror = JSON.stringify(scenario.teams[0]) === JSON.stringify(scenario.teams[1]);
 	const set = (s) => {
 		// species
@@ -74,9 +85,14 @@ function assign(scenario, pool, seed) {
 		// level: small Pokemon have little HP
 		if (int(100) < 14) s.level = 1 + int(20);
 		// hazard setters: one in two Pokemon has one, a quarter have two
-		const nSetters = int(100) < 50 ? (int(2) === 0 ? 2 : 1) : 0;
+		const nSetters = int(100) < 40 ? (int(2) === 0 ? 2 : 1) : 0;
 		const slots = [0, 1, 2, 3];
 		for (let i = 0; i < nSetters; i++) s.moves[slots.splice(int(slots.length), 1)[0]] = pick(setters);
+		// field setters: half of the Pokemon have one, a quarter of those two
+		const nField = int(100) < 55 ? (int(3) === 0 ? 2 : 1) : 0;
+		for (let i = 0; i < nField && slots.length; i++) s.moves[slots.splice(int(slots.length), 1)[0]] = pick(fieldSetters);
+		// a paralysing move
+		if (paralysers.length && slots.length && int(100) < 22) s.moves[slots.splice(int(slots.length), 1)[0]] = pick(paralysers);
 		s.moves = [...new Set(s.moves)];
 		while (s.moves.length < 4) s.moves.push(pick(pool.moves));
 		s.moves = [...new Set(s.moves)];
@@ -114,6 +130,16 @@ function newTally() {
 		hazardOrders: {},
 		poisonKilledBeforeToxicSpikesAbsorb: 0,
 		switchInSpeedTie: 0, switchInSpeedTieWithHazards: 0,
+		screenSet: { reflect: 0, lightscreen: 0 }, lightClayScreen8: 0, screenWithoutLightClay5: 0,
+		screenReducedDamage: { reflect: 0, lightscreen: 0 },
+		screenIgnoredByCrit: { reflect: 0, lightscreen: 0 },
+		screenOtherCategoryUnchanged: 0,
+		bothScreensOnTarget: 0, screensOnBothSides: 0,
+		screenExpired: { reflect: 0, lightscreen: 0 }, screenRestartRefused: 0,
+		residualTieAcrossSides: 0,
+		tailwindSet: 0, tailwindExpired: 0, tailwindSpeedDoubled: 0, tailwindWithParalysis: 0, tailwindRestartRefused: 0,
+		trickRoomSet: 0, trickRoomRestartEnded: 0, trickRoomExpired: 0,
+		trickRoomSwitchInSpeedTie: 0, trickRoomMoveSpeedTie: 0, trickRoomTurns: 0,
 	};
 }
 
@@ -123,11 +149,41 @@ function install() {
 	const t = () => activeTally;
 	// per fieldEvent('SwitchIn'): for each switching Pokemon the hazards that ran and the ones that changed something
 	let switchIn = null;
+	let inResidual = false;
 
 	const singleEvent = Battle.prototype.singleEvent;
 	Battle.prototype.singleEvent = function (eventid, effect, state, target, ...rest) {
 		const c = t();
 		if (!c || !effect) return singleEvent.call(this, eventid, effect, state, target, ...rest);
+		if ((eventid === 'SideStart' || eventid === 'SideRestart' || eventid === 'SideEnd') && (SCREENS.includes(effect.id) || effect.id === 'tailwind')) {
+			const r = singleEvent.call(this, eventid, effect, state, target, ...rest);
+			if (eventid === 'SideStart') {
+				if (effect.id === 'tailwind') c.tailwindSet++;
+				else {
+					c.screenSet[effect.id]++;
+					if (state.duration === 8) c.lightClayScreen8++;
+					else if (state.duration === 5 && rest[0] && rest[0].item !== 'lightclay') c.screenWithoutLightClay5++;
+				}
+			} else if (eventid === 'SideEnd') {
+				if (effect.id === 'tailwind') c.tailwindExpired++; else c.screenExpired[effect.id]++;
+			}
+			return r;
+		}
+		if (eventid === 'FieldStart' && effect.id === 'trickroom') {
+			const r = singleEvent.call(this, eventid, effect, state, target, ...rest);
+			c.trickRoomSet++;
+			return r;
+		}
+		if (eventid === 'FieldRestart' && effect.id === 'trickroom') {
+			const r = singleEvent.call(this, eventid, effect, state, target, ...rest);
+			c.trickRoomRestartEnded++;
+			return r;
+		}
+		if (eventid === 'FieldEnd' && effect.id === 'trickroom') {
+			const r = singleEvent.call(this, eventid, effect, state, target, ...rest);
+			if (inResidual) c.trickRoomExpired++;
+			return r;
+		}
 		if ((eventid === 'SideStart' || eventid === 'SideRestart') && HAZARDS.includes(effect.id)) {
 			const layersBefore = state && state.layers;
 			const r = singleEvent.call(this, eventid, effect, state, target, ...rest);
@@ -187,6 +243,11 @@ function install() {
 	const fieldEvent = Battle.prototype.fieldEvent;
 	Battle.prototype.fieldEvent = function (eventid, targets, ...rest) {
 		const c = t();
+		if (c && eventid === 'Residual') {
+			if (this.field.pseudoWeather.trickroom) c.trickRoomTurns++;
+			inResidual = true;
+			try { return fieldEvent.call(this, eventid, targets, ...rest); } finally { inResidual = false; }
+		}
 		if (!c || eventid !== 'SwitchIn' || !targets) return fieldEvent.call(this, eventid, targets, ...rest);
 		const outer = switchIn;
 		switchIn = new Map();
@@ -215,6 +276,30 @@ function install() {
 	Battle.prototype.runEvent = function (eventid, target, source, ...rest) {
 		const c = t();
 		const holder = Array.isArray(target) ? target[0] : target;
+		if (c && eventid === 'ModifyDamage' && source && source.side && rest[0]) {
+			// the attacker is the target and the defender the source
+			const sc = source.side.sideConditions, move = rest[0];
+			const r = runEvent.call(this, eventid, target, source, ...rest);
+			const crit = source.getMoveHitData(move).crit;
+			const cat = move.category;
+			const both = !!(sc.reflect && sc.lightscreen);
+			if (both) c.bothScreensOnTarget++;
+			if (Object.keys(this.sides[0].sideConditions).some(id => SCREENS.includes(id)) &&
+				Object.keys(this.sides[1].sideConditions).some(id => SCREENS.includes(id))) c.screensOnBothSides++;
+			for (const [id, category] of [['reflect', 'Physical'], ['lightscreen', 'Special']]) {
+				if (!sc[id]) continue;
+				if (cat !== category) { if (!sc[id === 'reflect' ? 'lightscreen' : 'reflect']) c.screenOtherCategoryUnchanged++; continue; }
+				if (crit) c.screenIgnoredByCrit[id]++;
+				else if (r < rest[1]) c.screenReducedDamage[id]++;
+			}
+			return r;
+		}
+		if (c && eventid === 'ModifySpe' && holder && holder.side && holder.side.sideConditions.tailwind) {
+			const r = runEvent.call(this, eventid, target, source, ...rest);
+			if (r > rest[1]) c.tailwindSpeedDoubled++;
+			if (holder.status === 'par') c.tailwindWithParalysis++;
+			return r;
+		}
 		if (!c || eventid !== 'DamagingHit' || !holder || holder.ability !== 'toxicdebris' || !source || !source.side) {
 			return runEvent.call(this, eventid, target, source, ...rest);
 		}
@@ -227,13 +312,40 @@ function install() {
 		return r;
 	};
 
+	// a screen or Tailwind used again while in place: addSideCondition returns false (no onSideRestart)
+	const addSideCondition = Side.prototype.addSideCondition;
+	Side.prototype.addSideCondition = function (status, ...rest) {
+		const c = t();
+		const id = typeof status === 'string' ? status : status.id;
+		if (!c || !(SCREENS.includes(id) || id === 'tailwind') || !this.sideConditions[id]) return addSideCondition.call(this, status, ...rest);
+		const r = addSideCondition.call(this, status, ...rest);
+		if (r === false) { if (id === 'tailwind') c.tailwindRestartRefused++; else c.screenRestartRefused++; }
+		return r;
+	};
+
 	// speed ties among the Pokemon in play when they switch in (runSwitch's speedSort of getAllActive)
 	const speedSort = Battle.prototype.speedSort;
 	Battle.prototype.speedSort = function (list, ...rest) {
 		const c = t();
-		if (c && list.length === 2 && list[0] && typeof list[0].getStat === 'function' && list[0].speed === list[1].speed) {
-			c.switchInSpeedTie++;
-			if (list.some(p => Object.keys(p.side.sideConditions).some(id => HAZARDS.includes(id)))) c.switchInSpeedTieWithHazards++;
+		if (c && list.length >= 2 && list[0]) {
+			const tr = !!this.field.pseudoWeather.trickroom;
+			if (list.length === 2 && typeof list[0].getStat === 'function' && list[0].speed === list[1].speed) {
+				c.switchInSpeedTie++;
+				if (list.some(p => Object.keys(p.side.sideConditions).some(id => HAZARDS.includes(id)))) c.switchInSpeedTieWithHazards++;
+				if (tr) c.trickRoomSwitchInSpeedTie++;
+			}
+			// the move actions of a turn: equal priority and speed under Trick Room
+			if (tr && list.length === 2 && list[0].choice === 'move' && list[1].choice === 'move' &&
+				list[0].priority === list[1].priority && list[0].speed === list[1].speed) c.trickRoomMoveSpeedTie++;
+			// two Residual handlers of side conditions on different sides that tie on every key
+			const hs = list.filter(h => h.effect && h.effectHolder && h.effectHolder.sideConditions);
+			for (let i = 0; i < hs.length; i++) {
+				for (let j = i + 1; j < hs.length; j++) {
+					const a = hs[i], b = hs[j];
+					if (a.effectHolder !== b.effectHolder && a.order === b.order && a.priority === b.priority &&
+						a.subOrder === b.subOrder && a.speed === b.speed && a.order === 26) c.residualTieAcrossSides++;
+				}
+			}
 		}
 		return speedSort.call(this, list, ...rest);
 	};

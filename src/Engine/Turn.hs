@@ -497,14 +497,17 @@ sideMove dx user target mv = do
 -- the damage is @undefined@ (basePower 0), so only the effect on the target's side runs.
 -- The @TryHitSide@ and @TryHitField@ callbacks of the move itself (@onTryHitSide@, ...) are not supported.
 -- A failed effect (the condition is already there and cannot restart) fails the move; nothing else follows.
--- LATENT: @weather@, @terrain@ and @pseudoWeather@ (@field.setWeather@ ...) are not run: no move that has one is
--- executable yet (phases 3b to 3d).
+-- LATENT: @weather@ and @terrain@ (@field.setWeather@, @setTerrain@) are not run: no move that has one is executable
+-- yet (phases 3c, 3d).
 {-# INLINABLE moveHitSide #-}
 moveHitSide :: MonadChance m => Dex -> Actor -> Actor -> MoveData -> Eng m ()
-moveHitSide dx user (Actor tp _) mv = case mrSideCondition (mvRule mv) of
+moveHitSide dx user (Actor tp _) mv = do
   -- `target.side.addSideCondition(moveData.sideCondition, source, move)`
-  Just ci -> void (addSideCondition dx tp ci user)
-  Nothing -> pure ()
+  forM_ (mrSideCondition rule) $ \ci -> void (addSideCondition dx tp ci user)
+  -- `this.battle.field.addPseudoWeather(moveData.pseudoWeather, source, move)`
+  forM_ (mrPseudoWeather rule) $ \ci -> void (addPseudoWeather dx ci user)
+  where
+    rule = mvRule mv
 
 -- | @hitStepAccuracy@'s stage step (battle-actions.ts): the user's accuracy stage minus the target's evasion
 -- stage, each clamped to [-6, 6], scales the accuracy by @(3 + s) / 3@ or @3 / (3 - s)@, truncated.
@@ -659,7 +662,7 @@ hitMove fmt dx user target mv = do
   r <- roll 0 16
   -- modifyDamage: ... runEvent('ModifyDamage', pokemon, target, move, baseDamage), then the minimum 1 and the 16-bit truncation
   let pre = modifyDamage fmt dx um tm mv crit r base
-  dmg <- finalDamage fmt . fromRelay pre <$> runEvent dx EvModifyDamage user (Just target) (Just mv) (RInt pre)
+  dmg <- finalDamage fmt . fromRelay pre <$> runEventCrit dx crit EvModifyDamage user (Just target) (Just mv) (RInt pre)
   let -- spreadDamage: clamp to at least 1 unless 0, then Pokemon.damage; `dealt` is the damage returned
       requested = if dmg == 0 then 0 else max 1 dmg
       dealt = min requested (monHp tm)

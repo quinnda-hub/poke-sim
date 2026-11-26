@@ -10,6 +10,7 @@
 module Engine.Dispatch
   ( Eng
   , runEvent
+  , runEventCrit
   , singleEvent
   , fieldEvent
   , eachEvent
@@ -20,6 +21,7 @@ module Engine.Dispatch
   , addVolatile
   , addSideCondition
   , removeSideCondition
+  , addPseudoWeather
   , boostMon
   , clampStage
   , trySetStatus
@@ -46,7 +48,7 @@ import Engine.Event
 import Engine.Modifier (baseMod, chainModify, modify)
 import Engine.Rule (BoostStat (..), MoveRule (..), StatusId (..))
 import Engine.State
-import Engine.Stats (boostedStat, finalSpeed, parSpe)
+import Engine.Stats (actionSpeed, boostedStat, parSpe)
 
 -- | The engine monad: battle state over the chance monad.
 type Eng m = StateT Battle m
@@ -200,9 +202,7 @@ stateOrderFor a = do
 -- already has restarts through its @onSideRestart@ (no handler: the move fails); otherwise its state is created
 -- (@initEffectState@ with the side as target, so the counter advances) with the condition's duration, and
 -- @SideStart@ runs; a falsy result deletes it again.
--- LATENT: @durationCallback@ (Reflect, Light Screen, Tailwind: Light Clay and Hail-like extensions) is not run: a
--- condition that lists it is unsupported. @runEvent('SideConditionStart')@ has no supported handler, so it is not
--- run.
+-- LATENT: @runEvent('SideConditionStart')@ has no supported handler, so it is not run.
 addSideCondition :: MonadChance m => Dex -> Player -> Int -> Actor -> Eng m Bool
 addSideCondition dx p ci source = do
   b <- get
@@ -216,6 +216,8 @@ addSideCondition dx p ci source = do
       let (order, b') = takeEffectOrder b
           duration = maybe 0 cnDuration (effectOf dx key)
       modify' (const (modifySide p (\s -> s {sConds = SV.snoc (sConds s) (CondEntry ci noEffectState {esOrder = order, esDuration = duration})}) b'))
+      -- this.sideConditions[status.id].duration = status.durationCallback.call(this.battle, this.active[0], source, sourceEffect)
+      setDurationFromCallback dx key owner source
       r <- singleEvent dx EvStart key owner (Just source) Nothing RNone
       if relayTruthy r
         then pure True
@@ -223,18 +225,72 @@ addSideCondition dx p ci source = do
           modify' (modifySide p (\s -> s {sConds = SV.filter (\(CondEntry j _) -> j /= ci) (sConds s)}))
           pure False
 
--- | @side.removeSideCondition@ (side.ts 460): the condition goes, after its @SideEnd@ event.
--- LATENT: @SideEnd@ has no event here yet: a condition that lists @onSideEnd@ is unsupported, so no handler runs.
-removeSideCondition :: Monad m => Player -> Int -> Eng m ()
-removeSideCondition p ci = modify' (modifySide p (\s -> s {sConds = SV.filter (\(CondEntry j _) -> j /= ci) (sConds s)}))
+-- | @side.removeSideCondition@ (side.ts 460): a condition the side has ends (@singleEvent('SideEnd')@, with the side's
+-- state) and goes.
+removeSideCondition :: MonadChance m => Dex -> Player -> Int -> Eng m ()
+removeSideCondition dx p ci = do
+  b <- get
+  let key = EffectKey EffSideCond ci
+  case ownerState b (OwnSide p) key of
+    Nothing -> pure () -- `if (!this.sideConditions[status.id]) return false`
+    Just _ -> do
+      void (singleEvent dx EvEnd key (OwnSide p) Nothing Nothing RNone)
+      modify' (modifySide p (\s -> s {sConds = SV.filter (\(CondEntry j _) -> j /= ci) (sConds s)}))
 
--- | @field.clearWeather@, @clearTerrain@ and @removePseudoWeather@: the condition goes (no @FieldEnd@ event yet: see
--- 'removeSideCondition').
-removeFieldCond :: EffectKey -> Battle -> Battle
-removeFieldCond (EffectKey kind i) b = case kind of
-  EffWeather -> b {bField = (bField b) {fWeather = noCond, fWeatherState = noEffectState}}
-  EffTerrain -> b {bField = (bField b) {fTerrain = noCond, fTerrainState = noEffectState}}
-  _ -> b {bField = (bField b) {fPseudo = SV.filter (\(CondEntry j _) -> j /= i) (fPseudo (bField b))}}
+-- | @field.removePseudoWeather@ (field.ts 223), @clearWeather@ and @clearTerrain@: the condition ends
+-- (@singleEvent('FieldEnd')@) and goes.
+-- LATENT: @clearWeather@ and @clearTerrain@ also run @WeatherChange@ / @TerrainChange@ (@eachEvent@) and reset the
+-- state with @initEffectState({id: ''})@; no weather or terrain is supported yet (phases 3c, 3d).
+removeFieldCond :: MonadChance m => Dex -> EffectKey -> Eng m ()
+removeFieldCond dx key@(EffectKey kind i) = do
+  b <- get
+  case ownerState b OwnField key of
+    Nothing -> pure ()
+    Just _ -> do
+      void (singleEvent dx EvEnd key OwnField Nothing Nothing RNone)
+      modify' $ \bb -> case kind of
+        EffWeather -> bb {bField = (bField bb) {fWeather = noCond, fWeatherState = noEffectState}}
+        EffTerrain -> bb {bField = (bField bb) {fTerrain = noCond, fTerrainState = noEffectState}}
+        _ -> bb {bField = (bField bb) {fPseudo = SV.filter (\(CondEntry j _) -> j /= i) (fPseudo (bField bb))}}
+
+-- | @field.addPseudoWeather@ (field.ts 187-212) of a field-condition id by a source Pokemon. A pseudo-weather the field
+-- already has restarts through its @onFieldRestart@ (none: the move fails); otherwise its state is created (no
+-- target, so no @effectOrder@ and no counter), the @durationCallback@ sets its duration, and @FieldStart@ runs; a
+-- falsy result deletes it again.
+-- LATENT: @runEvent('PseudoWeatherChange')@ has no supported handler, so it is not run.
+addPseudoWeather :: MonadChance m => Dex -> Int -> Actor -> Eng m Bool
+addPseudoWeather dx ci source = do
+  b <- get
+  let key = EffectKey EffPseudoWeather ci
+  case ownerState b OwnField key of
+    Just _ -> case effectOf dx key >>= \cn -> condSpec cn PField EvRestart >>= hsBody of
+      Nothing -> pure False -- `if (!status.onFieldRestart) return false`
+      Just body -> relayTruthy <$> singleBody dx EvRestart body key OwnField (holderOf b OwnField) (Just source) Nothing RNone
+    Nothing -> do
+      modify' (\bb -> bb {bField = (bField bb) {fPseudo = SV.snoc (fPseudo (bField bb)) (CondEntry ci noEffectState {esDuration = maybe 0 cnDuration (effectOf dx key)})}})
+      -- state.duration = status.durationCallback.call(this.battle, source, source, sourceEffect)
+      setDurationFromCallback dx key OwnField source
+      r <- singleEvent dx EvStart key OwnField (Just source) Nothing RNone
+      if relayTruthy r
+        then pure True
+        else do
+          modify' (\bb -> bb {bField = (bField bb) {fPseudo = SV.filter (\(CondEntry j _) -> j /= ci) (fPseudo (bField bb))}})
+          pure False
+
+-- | The condition's @durationCallback@ (the handler @(POwn, EvDurationCallback)@), if it has one: its result is the
+-- state's duration. @source@ is the Pokemon that sets the condition.
+-- LATENT: Tailwind's and Trick Room's callbacks read @source.hasAbility('persistent')@ (6 and 7 turns); Persistent is
+-- not a supported ability.
+setDurationFromCallback :: MonadChance m => Dex -> EffectKey -> Owner -> Actor -> Eng m ()
+setDurationFromCallback dx key owner source = do
+  b <- get
+  case effectOf dx key >>= \cn -> condSpec cn POwn EvDurationCallback >>= hsBody of
+    Nothing -> pure ()
+    Just body -> do
+      Res out _ <- runBody dx body (Ctx (holderOf b owner) owner key (Just source) Nothing baseMod False) RNone
+      case out of
+        Replace (RInt d) -> modify' (\bb -> maybe bb (\st -> setOwnerState owner key st {esDuration = d} bb) (ownerState bb owner key))
+        _ -> pure ()
 
 -- ---------------------------------------------------------------------------
 -- Collection and keys
@@ -249,6 +305,9 @@ data Handler = Handler
   -- condition is collected for. 'Nothing' when the holder is the side or the field.
   , hSpec :: !HandlerSpec
   , hSortKey :: !SortKey
+  , hDuration :: !Int
+  -- ^ The state's duration when collected (Showdown's @handler.state@ is that object: while it is in place the live
+  -- duration is its own, once it is stale only this copy counts down).
   , hStateOrder :: !Int
   -- ^ The @effectOrder@ of the state when collected: the identity of the state object (battle.ts 535-560 compares
   -- the object itself).
@@ -289,7 +348,7 @@ pokemonHandlers dx b byDuration pfx ev a =
     itemPart = if monItem m == noItem then [] else one (EffectKey EffItem (monItem m)) (monItemState m)
     one key st = case effectOf dx key >>= \cn -> condSpec cn pfx ev of
       Just spec | isJust (hsBody spec) || (byDuration && esDuration st /= 0) ->
-        [Handler key (OwnMon a) (Just a) spec (sortKey ev spec (monSpeedKey b ev a) st) (esOrder st) True]
+        [Handler key (OwnMon a) (Just a) spec (sortKey ev spec (monSpeedKey b ev a) st) (esDuration st) (esOrder st) True]
       _ -> []
 
 -- | @resolvePriority@ (battle.ts 957-1032): order, priority and subOrder from the spec, the speed given, and for
@@ -335,7 +394,7 @@ collectParts b ev ownPfx how = case how of
 -- (957-1032): the side condition's subOrder (4 unless the export gives one), @effectOrder@ for @SwitchIn@.
 sideHandlers :: Dex -> Battle -> Bool -> Collect -> EventId -> Player -> [Handler]
 sideHandlers dx b byDuration how ev p =
-  [ Handler key (OwnSide p) holder spec (sortKey ev spec speed st) (esOrder st) end
+  [ Handler key (OwnSide p) holder spec (sortKey ev spec speed st) (esDuration st) (esOrder st) end
   | CondEntry i st <- SV.toList (sConds (sideOf p b))
   , let key = EffectKey EffSideCond i
   , Just cn <- [effectOf dx key]
@@ -358,7 +417,7 @@ fieldHandlers dx b byDuration how ev =
         let (pfx, speed, holder, end) = collectParts b ev PField how
          in case condSpec cn pfx ev of
               Just spec | isJust (hsBody spec) || (byDuration && esDuration st /= 0) ->
-                [Handler key OwnField holder spec (sortKey ev spec speed st) (esOrder st) end]
+                [Handler key OwnField holder spec (sortKey ev spec speed st) (esDuration st) (esOrder st) end]
               _ -> []
       Nothing -> []
 
@@ -433,6 +492,9 @@ data Ctx = Ctx
   , cSource :: !(Maybe Actor)
   , cMove :: !(Maybe MoveData)
   , cMod :: !Int
+  , cCrit :: !Bool
+  -- ^ The target's @getMoveHitData(move).crit@ of the hit the event belongs to (@ModifyDamage@: Reflect and Light Screen
+  -- do not weaken a critical hit); false for every other event.
   }
 
 -- | @battle.runEvent@ (battle.ts 765-925) on a Pokemon: collect the handlers, sort them, run them with the relay
@@ -450,7 +512,12 @@ data Ctx = Ctx
 -- pass the target as a one-element array; in singles that is the same as the single target) and @fastExit@ are not
 -- modelled.
 runEvent :: MonadChance m => Dex -> EventId -> Actor -> Maybe Actor -> Maybe MoveData -> Relay -> Eng m Relay
-runEvent dx ev target source mv relay0 = do
+runEvent dx = runEventCrit dx False
+
+-- | 'runEvent' for an event of a hit whose critical-hit result is known (@ModifyDamage@): the handlers can read it as
+-- 'cCrit'.
+runEventCrit :: MonadChance m => Dex -> Bool -> EventId -> Actor -> Maybe Actor -> Maybe MoveData -> Relay -> Eng m Relay
+runEventCrit dx crit ev target source mv relay0 = do
   b <- get
   let fmt = bFormat b
   sorted <- sortHandlers ev (findEventHandlers dx b ev target source)
@@ -469,7 +536,7 @@ runEvent dx ev target source mv relay0 = do
           Nothing -> go fmt hs r md
           Just body -> do
             -- a side or field handler is called with the event's own arguments: the Pokemon is the event's target
-            Res out md' <- runBody dx body (Ctx (fromMaybe target (hHolder h)) (hOwner h) (hKey h) source mv md) r
+            Res out md' <- runBody dx body (Ctx (fromMaybe target (hHolder h)) (hOwner h) (hKey h) source mv md crit) r
             case out of
               Keep -> go fmt hs r md'
               Replace r'
@@ -527,7 +594,7 @@ singleBody dx ev body key owner holder source mv relay = do
   if off
     then pure relay
     else do
-      Res out _ <- runBody dx body (Ctx holder owner key source mv baseMod) relay
+      Res out _ <- runBody dx body (Ctx holder owner key source mv baseMod False) relay
       pure (case out of Keep -> relay; Replace r -> r)
 
 -- | @battle.eachEvent@ (battle.ts 470), for @Update@ and @BeforeTurn@: speed-sort the active Pokemon by their cached
@@ -593,25 +660,42 @@ fieldEvent dx ev targets = do
           owner = hOwner h
           -- `(handler.effectHolder as Pokemon).fainted`
           fainted = maybe False (monFainted . monOf b) (hHolder h)
-          inPlace st = case owner of
-            OwnSide _ -> esOrder st == hStateOrder h
-            _ -> True
-      case ownerState b owner key of
-        _ | fainted -> run rest
-        Nothing -> run rest -- the effect was removed by a prior handler
-        Just st
-          | not (inPlace st) -> run rest
-          | ev == EvResidual && hEnd h && esDuration st /= 0 -> do
-              -- handler.state.duration--; at 0 `end` (clearStatus, removeVolatile, removeSideCondition, ...) and `continue`
-              let d = esDuration st - 1
-              modify' (setOwnerState owner key st {esDuration = d})
+          current = ownerState b owner key
+          -- battle.ts 535-560: the state object is still where it was. A side condition is compared by its
+          -- effectOrder, unique to each creation; a Pokemon's effect and a field condition by id.
+          -- LATENT: Showdown compares the state object itself for a Pokemon's effect (an effect removed and re-added
+          -- in one fieldEvent would pass here) and, for a field state, only once it has a target (battle.ts 548-561;
+          -- docs/handlers.md "A field state gains a target").
+          inPlace = case (current, owner) of
+            (Just st, OwnSide _) -> esOrder st == hStateOrder h
+            (Just _, _) -> True
+            (Nothing, _) -> False
+          -- `handler.state.duration`: the live state while it is in place, else the object as it was collected
+          liveDuration = case current of
+            Just st | inPlace -> esDuration st
+            _ -> hDuration h
+      if fainted
+        then run rest
+        else
+          if ev == EvResidual && hEnd h && liveDuration /= 0
+            then do
+              -- handler.state.duration--: only an object still in place changes anything; a stale copy only counts
+              let d = liveDuration - 1
+              case current of
+                Just st | inPlace -> modify' (setOwnerState owner key st {esDuration = d})
+                _ -> pure ()
               if d == 0
                 then do
+                  -- `handler.end.call(effectHolder, effect.id)`: removes by id whatever is there now, then `continue`
                   endEffect owner key
                   ended <- gets ((/= Ongoing) . bResult)
                   unless ended (run rest)
-                else callback h >> after rest
-          | otherwise -> callback h >> after rest
+                else afterCount h inPlace rest
+            else afterCount h inPlace rest
+    -- the in-place check (battle.ts 535-560), then the callback
+    afterCount h inPlace rest
+      | not inPlace = run rest
+      | otherwise = callback h >> after rest
     -- `if (handler.callback) singleEvent(...)`: the effect holder is the target (the side's condition collected for a
     -- Pokemon is called with that Pokemon)
     callback h = forM_ (hsBody (hSpec h)) $ \body -> do
@@ -622,10 +706,12 @@ fieldEvent dx ev targets = do
       ended <- gets ((/= Ongoing) . bResult)
       unless ended (run rest)
     endEffect owner key = case (owner, key) of
+      -- pokemon.clearStatus: `if (!this.hp || !this.status) return false`, then clears whatever status it has now
       (OwnMon holder, EffectKey EffStatus _) -> modify' (modifyMon holder (\x -> if monHp x > 0 then clearStatus x else x))
-      (OwnMon holder, EffectKey EffVolatile i) -> modify' (modifyMon holder (removeVolatile i))
-      (OwnSide p, EffectKey EffSideCond i) -> removeSideCondition p i
-      (OwnField, _) -> modify' (removeFieldCond key)
+      -- pokemon.removeVolatile: `if (!this.hp) return false`, then by id (false when it is not there)
+      (OwnMon holder, EffectKey EffVolatile i) -> modify' (modifyMon holder (\x -> if monHp x > 0 then removeVolatile i x else x))
+      (OwnSide p, EffectKey EffSideCond i) -> removeSideCondition dx p i
+      (OwnField, _) -> removeFieldCond dx key
       _ -> pure () -- abilities and items have no duration, so never end here
 
 -- ---------------------------------------------------------------------------
@@ -788,7 +874,7 @@ runNative dx n c relay = do
       | hasTypeNamed dx "Poison" m -> do
           let Actor p _ = holder
               EffectKey _ ci = cKey c
-          removeSideCondition p ci
+          removeSideCondition dx p ci
           keep
       | hasTypeNamed dx "Steel" m || boots -> keep
       | otherwise -> do
@@ -800,6 +886,23 @@ runNative dx n c relay = do
     NStickyWebSwitchIn
       | not (isGrounded dx m) || boots -> keep
       | otherwise -> void (boostMon holder [(BSpe, -1)]) >> keep
+    -- reflect, lightscreen durationCallback(target, source, effect): `source?.hasItem('lightclay')` -> 8, else 5
+    NLightClayDuration -> do
+      b <- get
+      duration (if maybe False (hasItemNamed dx "lightclay" . monOf b) (cSource c) then 8 else 5)
+    -- tailwind durationCallback: 4 (6 with Persistent, which is not supported); trickroom durationCallback: 5 (7)
+    NTailwindDuration -> duration 4
+    NTrickRoomDuration -> duration 5
+    -- reflect.onAnyModifyDamage(damage, source, target, move): `target !== source && this.effectState.target.hasAlly(target)
+    -- && this.getCategory(move) === 'Physical'`, then `!target.getMoveHitData(move).crit && !move.infiltrates` ->
+    -- chainModify(0.5) (activePerHalf is 1 in singles). The event is run with the attacker as its target and the defender
+    -- as its source, so the handler's `source` is the attacker (the holder here) and its `target` the defender (the
+    -- event's source). A move with `infiltrates` is not supported (the translation rejects the key).
+    NReflectDamage -> screenDamage True
+    -- lightscreen.onAnyModifyDamage: the same for a Special move
+    NLightScreenDamage -> screenDamage False
+    -- trickroom.onFieldRestart: this.field.removePseudoWeather('trickroom'); it returns undefined, so the move succeeds
+    NTrickRoomRestart -> removeFieldCond dx (cKey c) >> keep
     -- toxicdebris.onDamagingHit(damage, target, source, move): `side = source.isAlly(target) ? source.side.foe :
     -- source.side` (singles: the attacker's side); a Physical move with no Toxic Spikes there, or fewer than 2
     -- layers, calls side.addSideCondition('toxicspikes', target)
@@ -812,6 +915,15 @@ runNative dx n c relay = do
               void (addSideCondition dx sp ts holder) >> keep
         _ -> keep
   where
+    duration d = pure (Res (Replace (RInt d)) (cMod c))
+    screenDamage physical = case (cMove c, cSource c, cOwner c) of
+      (Just mv, Just defender@(Actor dp _), OwnSide sp)
+        | defender /= cHolder c
+        , dp == sp
+        , not (mvStatus mv)
+        , mvPhysical mv == physical
+        , not (cCrit c) -> chained (1, 2)
+      _ -> pure (Res Keep (cMod c))
     getLayers = gets (\b -> maybe 0 esA (ownerState b (cOwner c) (cKey c)))
     setLayers v = modify' (\b -> maybe b (\st -> setOwnerState (cOwner c) (cKey c) st {esA = v} b) (ownerState b (cOwner c) (cKey c)))
     restartLayers limit = do
@@ -837,7 +949,11 @@ getActionSpeed dx a = do
   let m = monOf b a
       boosted = boostedStat (stSpe (monStats m)) (bsSpe (monBoosts m))
   r <- runEvent dx EvModifySpe a Nothing Nothing (RInt boosted)
-  pure (finalSpeed (bFormat b) (case r of RInt v -> v; _ -> boosted))
+  -- `this.battle.field.getPseudoWeather('trickroom')` (the twisteddimensionmod rule, which inverts it, is not in gen9ou)
+  let trickRoom = case M.lookup "trickroom" (dxFieldIx dx) of
+        Just ci -> any (\(CondEntry j _) -> j == ci) (fPseudo (bField b))
+        Nothing -> False
+  pure (actionSpeed (bFormat b) trickRoom (case r of RInt v -> v; _ -> boosted))
 
 -- | @battle.updateSpeed()@: refresh the cached speed of every Pokemon in play.
 updateSpeedAll :: MonadChance m => Dex -> Eng m ()

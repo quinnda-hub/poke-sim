@@ -130,6 +130,7 @@ checkBattle dx b = do
       let f = bField b
       pseudo <- pure (SV.toList (fPseudo f))
       if distinct [i | CondEntry i _ <- pseudo] then Right () else Left "a pseudo-weather appears twice"
+      mapM_ (\(CondEntry i st) -> durationOk "pseudo-weather " (maybe "" cnId (dxFieldConds dx V.!? i)) i st) pseudo
       if fWeather f == noCond && fWeatherState f /= noEffectState then Left "no weather but a weather state" else Right ()
       if fTerrain f == noCond && fTerrainState f /= noEffectState then Left "no terrain but a terrain state" else Right ()
       let orders = [esOrder st | (_, s) <- [(P1, bP1 b), (P2, bP2 b)], CondEntry _ st <- SV.toList (sConds s)]
@@ -154,8 +155,18 @@ checkBattle dx b = do
           Just hi | layers < 1 || layers > hi -> Left (who ++ show name ++ " has " ++ show layers ++ " layers, outside 1.." ++ show hi)
           Nothing | layers /= -1 -> Left (who ++ show name ++ " has layers " ++ show layers)
           _ -> Right ()
-        if esDuration st < 0 then Left (who ++ show name ++ " has a negative duration") else Right ()) es
+        durationOk who name i st) es
     distinct xs = length xs == length (nub xs)
+    -- A condition with a duration (condition.duration, data/moves.ts) is in place only with 1 or more turns left: the
+    -- residual countdown ends it at 0. Its duration is at most the static one, except the screens, whose
+    -- durationCallback gives 8 with a Light Clay user. A condition with no duration has none.
+    durationOk who name i st = do
+      let base = maybe 0 cnDuration (dxFieldConds dx V.!? i)
+          hi = if name `elem` ["reflect", "lightscreen"] then 8 else base
+          d = esDuration st
+      if (base == 0 && d /= 0) || (base /= 0 && (d < 1 || d > hi))
+        then Left (who ++ show name ++ " has duration " ++ show d ++ ", outside its bounds (static " ++ show base ++ ")")
+        else Right ()
     ask p asked = case (asked, null (legalChoices b p)) of
       (True, True) -> Left (show p ++ " is asked but has no legal choices")
       (False, False) -> Left (show p ++ " is not asked but has legal choices")

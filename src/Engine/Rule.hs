@@ -121,7 +121,7 @@ data MoveRule = MoveRule
   , mrTerrain :: !(Maybe Int)
   -- ^ @move.terrain@: @field.setTerrain@ (phase 3d; not executable yet).
   , mrPseudoWeather :: !(Maybe Int)
-  -- ^ @move.pseudoWeather@: @field.addPseudoWeather@ (phase 3b; not executable yet).
+  -- ^ @move.pseudoWeather@: @field.addPseudoWeather@ in @runMoveEffects@.
   }
   deriving (Eq, Show)
 
@@ -153,22 +153,24 @@ plainRule = MoveRule
 -- secondaries, thawing the target (@thawsTarget@) and the user (@defrost@). A status move: exactly one hit
 -- effect, a self-targeted heal, or a stat change or a status condition on its target, or a side condition (a
 -- hazard, on the foe's side or the user's) and nothing else. Nothing here inflicts sleep (the translation rejects
--- it), a status or flinch effect on the user is not executable, and nor are weather, terrain and pseudo-weather
--- moves yet (phases 3b to 3d).
+-- it), a status or flinch effect on the user is not executable, and nor are weather and terrain moves yet (phases
+-- 3c and 3d). A pseudo-weather move (Trick Room) is a status move on @all@ with that and nothing else.
 executable :: MoveRule -> Bool
 executable r =
   (not (mrThawsTarget r) || mrDamaging r)
     && all boostOnly (mrSelf r) && all (\s -> all targetEffect (secTarget s) && all boostOnly (secSelf s)) (mrSecondaries r)
-    && mrWeather r == Nothing && mrTerrain r == Nothing && mrPseudoWeather r == Nothing
+    && mrWeather r == Nothing && mrTerrain r == Nothing
     && if mrDamaging r
       then null (mrOnHit r) && not (mrIgnoreImmunity r) && mrTarget r == TargetFoe && mrSideCondition r == Nothing
+        && mrPseudoWeather r == Nothing
       else mrHits r == OneHit && mrDrain r == Nothing && mrRecoil r == Nothing
         && null (mrSelf r) && null (mrSecondaries r)
-        && (case (mrOnHit r, mrTarget r, mrSideCondition r) of
-              ([EHeal _ _], TargetSelf, Nothing) -> True
-              ([EBoost _], t, Nothing) -> t == TargetFoe || t == TargetSelf
-              ([EStatus _], TargetFoe, Nothing) -> True
-              ([], t, Just _) -> t == TargetFoeSide || t == TargetAllySide
+        && (case (mrOnHit r, mrTarget r, mrSideCondition r, mrPseudoWeather r) of
+              ([EHeal _ _], TargetSelf, Nothing, Nothing) -> True
+              ([EBoost _], t, Nothing, Nothing) -> t == TargetFoe || t == TargetSelf
+              ([EStatus _], TargetFoe, Nothing, Nothing) -> True
+              ([], t, Just _, Nothing) -> t == TargetFoeSide || t == TargetAllySide
+              ([], TargetAll, Nothing, Just _) -> True
               _ -> False)
   where
     boostOnly (EBoost _) = True

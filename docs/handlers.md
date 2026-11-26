@@ -333,6 +333,17 @@ have `runEvent` handlers (Sandstorm's `onModifySpD`, Snowscape's
 and `onTryHit`). **Phases 3c and 3d must model the bit**, set it where
 `runEvent` would, and use it for the in-place check.
 
+### Handler argument names
+
+A handler's parameters are named for its own effect, not for the event.
+`runEvent(eventid, target, source, ...)` calls each handler as
+`(relayVar, target, source, effect)`. `modifyDamage` runs
+`runEvent('ModifyDamage', attacker, defender, move, damage)`, so in a screen's
+`onAnyModifyDamage(damage, source, target, move)` the parameter called `source`
+is the attacker (the event's target), and `target` is the defender (the
+event's source). Native handlers map them by position, as Showdown does, not
+by name.
+
 ### Effect order
 
 `bEffectOrder` joins the battle state. It increments exactly where

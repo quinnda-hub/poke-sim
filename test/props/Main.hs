@@ -32,7 +32,7 @@ import Engine.Format (trunc, truncBits)
 import Engine.Rule (executable, moveRule)
 import Engine.State
 import Engine.Modifier (baseMod, chain, chainModify, finalModify, modify, modifyBy)
-import Engine.Stats (boostedStat, finalSpeed, parSpe)
+import Engine.Stats (actionSpeed, boostedStat, finalSpeed, parSpe)
 import Engine.Turn (roundDiv, stagedAccuracy)
 import Playout
 
@@ -65,6 +65,7 @@ main = do
         [ ("roundDiv is Math.round(n / d)", withTests (fromIntegral n) propRoundDiv)
         , ("boostedStat is Math.floor(stat * stage multiplier)", withTests (fromIntegral n) propBoostedStat)
         , ("a paralysed action speed is floor(boosted speed * 50 / 100)", withTests (fromIntegral n) propParalysedSpeed)
+        , ("an action speed is capped at 10000, flipped to 10000 - speed by Trick Room, and truncated to 13 bits", withTests (fromIntegral n) propActionSpeed)
         , ("stagedAccuracy is trunc(acc * stage multiplier)", withTests (fromIntegral n) propAccuracy)
         , ("trunc and truncBits are >>> 0 and its masks", withTests (fromIntegral n) propTrunc)
         , ("chain and chainModify are ((a * b + 2048) >> 12) of the scaled modifiers", withTests (fromIntegral n) propChain)
@@ -181,6 +182,14 @@ propParalysedSpeed = property $ do
   -- other modifier); the Spe stat is then capped at 10000 (out of reach here) and getActionSpeed truncates to 13 bits
   finalSpeed gen9ou (fst (parSpe gen9ou baseMod boosted)) === boosted * 50 `div` 100 `mod` 8192
   finalSpeed gen9ou boosted === boosted `mod` 8192
+
+propActionSpeed :: Property
+propActionSpeed = property $ do
+  spe <- forAll (Gen.choice [Gen.int (Range.linear 0 999), Gen.int (Range.linear 0 20000)])
+  -- getStat: `if (stat > 10000) stat = 10000`; getActionSpeed: `if (trickRoomCheck) speed = 10000 - speed`, then trunc(speed, 13)
+  let capped = min 10000 spe
+  actionSpeed gen9ou False spe === capped `mod` 8192
+  actionSpeed gen9ou True spe === (10000 - capped) `mod` 8192
 
 propAccuracy :: Property
 propAccuracy = property $ do

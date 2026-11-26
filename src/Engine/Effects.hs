@@ -29,6 +29,10 @@
 -- damage (leftovers, blacksludge), the status orbs (flameorb, toxicorb), contact damage (rockyhelmet), Life
 -- Orb's recoil, and the Assault Vest's move disabling.
 --
+-- Tailwind's @onModifySpe@ is @RChainModify 2 1 []@, a rule with three whitelisted users now (hugepower,
+-- purepower, tailwind). Reflect and Light Screen's damage halving, the duration callbacks and Trick Room's restart
+-- are native: one or two users each.
+--
 -- The field conditions of slice 3a are all native, none of them reaches the bar: layers (spikes, toxicspikes) have
 -- two whitelisted users, so there is no rule kind for them; each hazard's @onSwitchIn@ is a body of its own
 -- (stealthrock: damage by Rock effectiveness; spikes: damage by layer; toxicspikes: poison or absorb; stickyweb: a
@@ -100,6 +104,8 @@ itemBodies ty name = case name of
   -- heavydutyboots: no handlers ("Hazard Immunity implemented in moves.ts": the hazards' onSwitchIn bodies call
   -- pokemon.hasItem('heavydutyboots'))
   "heavydutyboots" -> Just []
+  -- lightclay: no handlers ("implemented in the corresponding thing": the screens' durationCallback reads the item)
+  "lightclay" -> Just []
   _ -> case lookup name typeItems of
     -- onBasePower, `move.type === T` -> chainModify([4915, 4096]) (data/items.ts; each body checked against the
     -- source: the plain type check and nothing else)
@@ -139,4 +145,22 @@ fieldCondBodies name = case name of
          , (POwn, EvSwitchIn, BNative NToxicSpikesSwitchIn) ]
   -- stickyweb: onSideStart logs; onSwitchIn drops a grounded Pokemon's Speed by 1 stage
   "stickyweb" -> Just [(PSide, EvStart, BNative NLogOnly), (POwn, EvSwitchIn, BNative NStickyWebSwitchIn)]
+  -- reflect, lightscreen: durationCallback (8 turns with Light Clay, else 5), onAnyModifyDamage (halve the damage of
+  -- a Physical / Special move that is not a critical hit, against the side), onSideStart and onSideEnd (log lines);
+  -- the countdown is the duration key of onSideResidual
+  "reflect" -> screen NReflectDamage
+  "lightscreen" -> screen NLightScreenDamage
+  -- tailwind: durationCallback (4), onModifySpe chainModify(2), onSideStart and onSideEnd (log lines)
+  "tailwind" ->
+    Just [ (POwn, EvDurationCallback, BNative NTailwindDuration), (POwn, EvModifySpe, BRule (RChainModify 2 1 []))
+         , (PSide, EvStart, BNative NLogOnly), (PSide, EvEnd, BNative NLogOnly) ]
+  -- trickroom: durationCallback (5), onFieldStart and onFieldEnd (log lines), onFieldRestart removes it; its effect
+  -- is in getActionSpeed (pokemon.ts 662)
+  "trickroom" ->
+    Just [ (POwn, EvDurationCallback, BNative NTrickRoomDuration), (PField, EvStart, BNative NLogOnly)
+         , (PField, EvRestart, BNative NTrickRoomRestart), (PField, EvEnd, BNative NLogOnly) ]
   _ -> Nothing
+  where
+    screen dmg =
+      Just [ (POwn, EvDurationCallback, BNative NLightClayDuration), (PAny, EvModifyDamage, BNative dmg)
+           , (PSide, EvStart, BNative NLogOnly), (PSide, EvEnd, BNative NLogOnly) ]

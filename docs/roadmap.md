@@ -95,7 +95,7 @@ Last updated 2026-11-25.
     about 10 GB for 2,000 traces, and was killed by the OOM killer on the
     15 GB laptop. It now peaks at about 80 MB.
 - **Test tiers.** The fast tier (`POKESIM_TIER=fast`) replays every 10th trace
-  and runs the hedgehog properties at 100 tests each, in about 8 s. The long
+  and runs the hedgehog properties at 100 tests each, in about 10 s. The long
   tier, which gates merges into main, replays everything and runs the
   properties at 2000 tests each.
 
@@ -215,7 +215,7 @@ Alongside:
 - **Scenario generation from rules.** For each rule, generate battles that
   exercise it with each random outcome forced both ways, and report coverage
   per rule.
-- **Trace size.** 2,900 battles take about 1.2 GB. Snapshots should become
+- **Trace size.** 3,200 battles take about 1.4 GB. Snapshots should become
   deltas.
 - **Benchmark tracking.** Record throughput at each slice so slowdowns are
   measured when they appear.
