@@ -16,6 +16,7 @@ module Engine.Dispatch
   , HitResult (..)
   , moveOwnHit
   , moveTry
+  , moveTryImmunity
   , moveTryHit
   , moveAfterHit
   , moveFieldHit
@@ -301,6 +302,71 @@ useItem dx a sourceEffect = do
             modify' (modifyMon a (\x -> x {monItem = noItem, monItemState = noEffectState}))
             void (runEvent dx EvAfterUseItem a Nothing Nothing (RText (itemId dx (monItem m))))
             pure True
+
+-- | @battle.singleEvent('TakeItem', item, owner.itemState, target, source, move, item)@ (Knock Off's @BasePower@, Trick,
+-- Switcheroo, Thief): the item's own @onTakeItem@ and no other effect's. Its @target@ argument is the Pokemon the handler
+-- reads as @source@ (Booster Energy asks whether it is a Paradox). The item is not gated by @ignoringItem@ for @TakeItem@
+-- (battle.ts 614). True when the item has no handler.
+itemTakeEvent :: MonadChance m => Dex -> Actor -> Actor -> Actor -> Int -> Maybe MoveData -> Eng m Bool
+itemTakeEvent dx owner target source ix mv =
+  case effectOf dx key >>= \cn -> condSpec cn POwn EvTakeItem >>= hsBody of
+    Nothing -> pure True
+    Just body -> relayTruthy <$> singleBody dx EvTakeItem body key (OwnMon owner) target (Just source) mv (RText (itemId dx ix))
+  where
+    key = EffectKey EffItem ix
+
+-- | What @pokemon.takeItem(source)@ returned (pokemon.ts 1873): @undefined@ with no item, @false@ when a handler refused,
+-- else the item.
+data TakeResult = TookNone | TookRefused | Took !Int
+  deriving (Eq, Show)
+
+-- | @pokemon.takeItem(source)@ (pokemon.ts 1873-1888). With no item it returns at once. Otherwise
+-- @runEvent('TakeItem', pokemon, source, null, item)@ runs every effect's @onTakeItem@ (Booster Energy refuses a Paradox
+-- holder; Unburden adds its volatile, before or after the refusal); a falsy result is @false@. Else the item goes and its
+-- state is cleared (@clearEffectState@: no keys, @effectOrder@ 0), the item's @End@ runs with that cleared state, and
+-- @AfterTakeItem@ runs. A missing @source@ is the Pokemon itself (Knock Off's takeItem()).
+-- @gen === 4@'s @itemKnockedOff@ check is not reached in gen 9; @lastItem@ is not set by takeItem (only @useItem@ and
+-- @eatItem@ set it). @pendingStaleness@ is team-ranking bookkeeping, not battle state.
+-- LATENT: @AfterTakeItem@ has no handler in any supported effect, so it is not run (a run with no handlers draws nothing).
+takeItem :: MonadChance m => Dex -> Actor -> Maybe Actor -> Eng m TakeResult
+takeItem dx a msource = do
+  m <- gets (`monOf` a)
+  let ix = monItem m
+  if ix == noItem
+    then pure TookNone
+    else do
+      ok <- relayTruthy <$> runEvent dx EvTakeItem a (Just (fromMaybe a msource)) Nothing (RText (itemId dx ix))
+      if not ok
+        then pure TookRefused
+        else do
+          modify' (modifyMon a (\x -> x {monItem = noItem, monItemState = noEffectState}))
+          void (singleEvent dx EvEnd (EffectKey EffItem ix) (OwnMon a) Nothing Nothing RNone)
+          pure (Took ix)
+
+-- | @target.item = yourItem.id@: a plain assignment that puts an item back after a failed Trick or Thief. The item's state
+-- stays as @takeItem@ left it (cleared).
+restoreItem :: Monad m => Actor -> TakeResult -> Eng m ()
+restoreItem a r = case r of
+  Took ix -> modify' (modifyMon a (\x -> x {monItem = ix}))
+  _ -> pure ()
+
+-- | @pokemon.setItem(item)@ (pokemon.ts 1890-1913) with no source or effect: false for a Pokemon with no HP or not in play.
+-- The item and a fresh state (@initEffectState({ id, target })@: the next @effectOrder@ for a real item, since the target is
+-- active, 0 for the empty item) are put in place, the old item's @End@ runs if there was one, then the new item's @Start@
+-- (Booster Energy, the seeds).
+-- LATENT: @pendingStaleness@ is ranking bookkeeping; the @Start@ event's source and effect are only read by handlers that use
+-- them (none of the supported items does).
+setItem :: MonadChance m => Dex -> Actor -> Int -> Eng m Bool
+setItem dx a ix = do
+  m <- gets (`monOf` a)
+  if monHp m <= 0 || not (monActive m)
+    then pure False
+    else do
+      order <- if ix == noItem then pure 0 else stateOrderFor a
+      modify' (modifyMon a (\x -> x {monItem = ix, monItemState = noEffectState {esOrder = order}}))
+      when (monItem m /= noItem) (void (singleEvent dx EvEnd (EffectKey EffItem (monItem m)) (OwnMon a) Nothing Nothing RNone))
+      when (ix /= noItem) (void (singleEvent dx EvStart (EffectKey EffItem ix) (OwnMon a) Nothing Nothing RNone))
+      pure True
 
 -- | @field.suppressingWeather()@ (field.ts 101): an active Pokemon with an ability that suppresses weather (Air Lock,
 -- Cloud Nine). The gates of @singleEvent@ (battle.ts 624-627) and @runEvent@ (897-900) and 'effectiveWeather' read it.
@@ -794,7 +860,8 @@ skipped dx ev b h = case (hKey h, hOwner h) of
   (EffectKey EffAbility _, OwnMon a) ->
     (maybe False cnBreakable (effectOf dx (hKey h)) && suppressingAbility b a)
       || not (monActive (monOf b a)) -- ignoringAbility, gen >= 5
-  (EffectKey EffItem _, OwnMon a) -> ev /= EvStart && ev /= EvSwitchIn && not (monActive (monOf b a)) -- ignoringItem, gen >= 5
+  -- battle.ts 881: `eventid !== 'Start' && eventid !== 'SwitchIn' && eventid !== 'TakeItem'`
+  (EffectKey EffItem _, OwnMon a) -> ev /= EvStart && ev /= EvSwitchIn && ev /= EvTakeItem && not (monActive (monOf b a)) -- ignoringItem, gen >= 5
   -- battle.ts 897-900: `(effect.effectType === 'Weather' || eventid === 'Weather') && eventid !== 'Residual' && eventid !== 'End'
   -- && this.field.suppressingWeather()` (Air Lock, Cloud Nine: 'suppressingWeather' is always false here)
   (EffectKey kind _, _) | (kind == EffWeather || ev == EvWeather) && ev /= EvResidual && ev /= EvEnd -> suppressingWeather b
@@ -807,7 +874,7 @@ suppressingAbility _ _ = False
 -- | @battle.singleEvent@ (battle.ts 578-656): run one effect's handler for an event on its owner (a Pokemon, a side or
 -- the field; the callback is the effect's own: @onStart@ of a status, @onSideStart@ of a side condition). Returns
 -- the relay value, which a handler may replace. Gates (601-628): the status is no longer the holder's; an item of a
--- holder that is not active, except for @Start@ (@TakeItem@ is not an event here); an ability of an inactive holder,
+-- holder that is not active, except for @Start@ and @TakeItem@; an ability of an inactive holder,
 -- except for @End@. The weather gate joins with weather.
 singleEvent :: MonadChance m => Dex -> EventId -> EffectKey -> Owner -> Maybe Actor -> Maybe MoveData -> Relay -> Eng m Relay
 singleEvent dx ev key owner source mv = singleEventFx dx ev key owner source mv Nothing
@@ -839,7 +906,8 @@ singleBodyFx dx ev body key owner holder source mv eff relay = do
   let m = monOf b0 holder
       off = case (key, owner) of
         (EffectKey EffStatus _, OwnMon _) -> not (isJust (effectState m key)) -- it's changed; call it off
-        (EffectKey EffItem _, OwnMon _) -> ev /= EvStart && not (monActive m)
+        -- battle.ts 614: `eventid !== 'Start' && eventid !== 'TakeItem' && eventid !== 'SetAbility'`
+        (EffectKey EffItem _, OwnMon _) -> ev /= EvStart && ev /= EvTakeItem && not (monActive m)
         -- battle.ts 621: `eventid !== 'End' && effect.effectType === 'Ability' && target.ignoringAbility()`
         (EffectKey EffAbility _, OwnMon _) -> ev /= EvEnd && not (monActive m)
         -- battle.ts 624-627: a weather's callbacks other than FieldStart, FieldResidual and FieldEnd while the weather is
@@ -1454,9 +1522,36 @@ runNative dx n c relay = do
     NUnburdenAfterUseItem -> void (addVolatileFx dx holder CUnburden (Just (cKey c))) >> keep
     -- unburden.onEnd(pokemon): pokemon.removeVolatile('unburden') (a Pokemon with no HP keeps it: clearVolatile follows)
     NUnburdenEnd -> modify' (modifyMon holder (\x -> if monHp x > 0 then removeVolatile (fromEnum CUnburden) x else x)) >> keep
-    -- boosterenergy.onTakeItem, unburden.onTakeItem: no supported move takes an item (runEvent('TakeItem') is never run)
-    -- LATENT: Booster Energy returns false for a Paradox species, Unburden adds its volatile.
-    NInertTakeItem -> keep
+    -- boosterenergy.onTakeItem(item, source): `if (source.baseSpecies.tags.includes("Paradox")) return false`. The `source`
+    -- parameter is the target of the event (the holder, in takeItem's runEvent; the Pokemon that would receive the item, in a
+    -- singleEvent of Trick or Thief), which is the Ctx holder here.
+    NBoosterTakeItem
+      -- (no Paradox has other formes, so the species is its own base species)
+      | spParadox (speciesData dx (monSpecies m)) -> returning stop
+      | otherwise -> keep
+    -- unburden.onTakeItem(item, pokemon): pokemon.addVolatile('unburden'). It runs whether or not the take then succeeds
+    -- (a later handler may refuse, and Trick may fail after takeItem)
+    NUnburdenTakeItem -> void (addVolatileFx dx holder CUnburden (Just (cKey c))) >> keep
+    -- knockoff.onBasePower(basePower, source, target, move): `item = target.getItem()`; if
+    -- singleEvent('TakeItem', item, target.itemState, target, target, move, item) is falsy, return; `if (item.id)`
+    -- chainModify(1.5). Only the item's own onTakeItem is asked (no ability's: Unburden's would add its volatile)
+    NKnockOffPower -> case cSource c of
+      Just d -> do
+        b <- get
+        let ix = monItem (monOf b d)
+        if ix == noItem
+          then keep
+          else do
+            ok <- itemTakeEvent dx d d d ix (cMove c)
+            if ok then chained (3, 2) else keep
+      Nothing -> keep
+    -- the other moves' bodies on items are run by their call sites ('moveAfterHit', 'moveOwnHit', 'moveTry',
+    -- 'moveTryImmunity')
+    NKnockOffAfterHit -> keep
+    NTrickTryImmunity -> keep
+    NTrickHit -> keep
+    NThiefAfterHit -> keep
+    NPoltergeistTry -> keep
     -- boosterenergy.onStart(pokemon): `this.effectState.started = true`, then its onUpdate
     NBoosterEnergyStart -> do
       modify' (\bb -> maybe bb (\st -> setOwnerState (cOwner c) (cKey c) st {esA = 1} bb) (ownerState bb (cOwner c) (cKey c)))
@@ -1755,6 +1850,36 @@ moveOwnHit dx user target mv = case moveSpec mv POwn EvHit >>= hsBody of
         removed <- forM [up, other up] $ \p -> or <$> mapM (removeNamedSide dx p) hazards
         boosted <- boostMon target [(BAtk, 1), (BSpe, 1)]
         pure (if boosted || or removed then HitOk else HitFail)
+      -- trick, switcheroo .onHit(target, source, move): `yourItem = target.takeItem(source)`, `myItem = source.takeItem()` (both
+      -- always run, in that order, whatever the first returned). A refusal (`false`), or no item on either side, puts the
+      -- items back (`target.item = yourItem.id`, a plain assignment) and fails the move. Then each item's own TakeItem is
+      -- asked with the Pokemon that would receive it as its target (the user's item first), and a refusal puts both back. Then
+      -- `target.setItem(myItem)` and `source.setItem(yourItem)` (each only for an item that exists)
+      NTrickHit -> do
+        yours <- takeItem dx target (Just user)
+        mine <- takeItem dx user Nothing
+        let refused = yours == TookRefused || mine == TookRefused
+            neither = yours == TookNone && mine == TookNone
+            putBack = restoreItem target yours >> restoreItem user mine
+        if refused || neither
+          then putBack >> pure HitFail
+          else do
+            okMine <- case mine of
+              Took ix -> itemTakeEvent dx user target user ix (Just mv)
+              _ -> pure True
+            okYours <- case yours of
+              Took ix | okMine -> itemTakeEvent dx target user target ix (Just mv)
+              _ -> pure True
+            if not (okMine && okYours)
+              then putBack >> pure HitFail
+              else do
+                case mine of
+                  Took ix -> void (setItem dx target ix)
+                  _ -> pure ()
+                case yours of
+                  Took ix -> void (setItem dx user ix)
+                  _ -> pure ()
+                pure HitOk
       -- clearsmog.onHit(target): target.clearBoosts() (every stage, accuracy and evasion too, 0), whatever the target's HP
       NClearSmogHit -> modify' (modifyMon target (\x -> x {monBoosts = noBoosts})) >> pure HitOk
       _ -> pure HitOk
@@ -1779,9 +1904,20 @@ defogTargetOnly = ["reflect", "lightscreen", "auroraveil", "safeguard", "mist"]
 -- the move's own @onTry@, whose falsy result fails the move. Aurora Veil needs snow (`this.field.isWeather(['hail',
 -- 'snowscape'])`, which reads the effective weather).
 -- The same event opens @trySpreadMoveHit@ (656); no supported move on a Pokemon has an @onTry@.
-moveTry :: Monad m => Dex -> MoveData -> Eng m Bool
-moveTry dx mv = case moveSpec mv POwn EvTry >>= hsBody of
+moveTry :: Monad m => Dex -> Actor -> MoveData -> Eng m Bool
+moveTry dx target mv = case moveSpec mv POwn EvTry >>= hsBody of
   Just (BNative NAuroraVeilTry) -> gets (maybe False (`elem` fieldIds dx ["hail", "snowscape"]) . effectiveWeather)
+  -- poltergeist.onTry(source, target): `return !!target.item`
+  Just (BNative NPoltergeistTry) -> gets (\b -> monItem (monOf b target) /= noItem)
+  _ -> pure True
+
+-- | @singleEvent('TryImmunity', move, {}, target, pokemon, move)@ (battle-actions.ts 739, @hitStepTryImmunity@, after the powder
+-- check): the move's own @onTryImmunity@, whose falsy result makes the target immune. Trick and Switcheroo: `!target.hasAbility('stickyhold')`.
+-- LATENT: Sticky Hold is not a supported ability, so the check never fails; @hasAbility@ also needs the ability not to be ignored.
+moveTryImmunity :: Monad m => Dex -> Actor -> MoveData -> Eng m Bool
+moveTryImmunity dx target mv = case moveSpec mv POwn EvTryImmunity >>= hsBody of
+  Just (BNative NTrickTryImmunity) ->
+    gets (\b -> abilityId dx (monAbility (monOf b target)) /= "stickyhold" || ignoringAbility b target)
   _ -> pure True
 
 -- | @singleEvent('TryHit', moveData, {}, target, pokemon, move)@ (battle-actions.ts 1102), the move's own @onTryHit@, at the start of
@@ -1815,6 +1951,22 @@ moveAfterHit dx user target mv = case moveSpec mv POwn EvAfterHit >>= hsBody of
     -- ceaselessedge, stoneaxe: `for (const side of source.side.foeSidesWithConditions()) side.addSideCondition(...)`
     NCeaselessEdgeAfterHit -> foeHazard "spikes"
     NStoneAxeAfterHit -> foeHazard "stealthrock"
+    -- knockoff.onAfterHit(target, source): `const item = target.takeItem()` (no source: the target is its own source)
+    NKnockOffAfterHit -> void (takeItem dx target Nothing)
+    -- thief.onAfterHit(target, source, move): a user holding an item (or a gem volatile: LATENT, gems are unsupported) returns;
+    -- `yourItem = target.takeItem(source)`; none, or refused, returns; then the item's own TakeItem is asked again with the
+    -- user as the receiver, and `source.setItem(yourItem)`; if either fails the item goes back by plain assignment
+    -- (`target.item = yourItem.id`, "so we don't break choicelock or anything")
+    NThiefAfterHit -> do
+      uItem <- gets (\b -> monItem (monOf b user))
+      when (uItem == noItem) $ do
+        r <- takeItem dx target (Just user)
+        case r of
+          Took ix -> do
+            ok <- itemTakeEvent dx target user target ix (Just mv)
+            placed <- if ok then setItem dx user ix else pure False
+            unless placed (restoreItem target r)
+          _ -> pure ()
     _ -> pure ()
   _ -> pure ()
   where

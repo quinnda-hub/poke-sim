@@ -600,6 +600,9 @@
   "isPokeball": false,
   "isPrimalOrb": false,
   "onResidualOrder": 10,
+  "tags": [
+   "True Past"
+  ],
   "handlers": [
    "onEat",
    "onResidual",
@@ -653,6 +656,9 @@
   "boosts": {
    "atk": 2
   },
+  "tags": [
+   "True Past"
+  ],
   "handlers": [
    "onUpdate"
   ]
@@ -716,6 +722,9 @@
   "isGem": false,
   "isPokeball": false,
   "isPrimalOrb": false,
+  "tags": [
+   "True Past"
+  ],
   "handlers": [
    "onEat",
    "onUpdate"
@@ -1045,6 +1054,9 @@
   "isGem": false,
   "isPokeball": false,
   "isPrimalOrb": false,
+  "tags": [
+   "True Past"
+  ],
   "handlers": [
    "onEat",
    "onUpdate"
@@ -3413,6 +3425,9 @@
   "isPokeball": false,
   "isPrimalOrb": false,
   "onResidualOrder": 10,
+  "tags": [
+   "True Past"
+  ],
   "handlers": [
    "onEat",
    "onResidual",
@@ -4016,6 +4031,9 @@
   "isGem": false,
   "isPokeball": false,
   "isPrimalOrb": false,
+  "tags": [
+   "True Past"
+  ],
   "handlers": [
    "onEat",
    "onUpdate"
@@ -5565,6 +5583,9 @@
   "isGem": false,
   "isPokeball": false,
   "isPrimalOrb": false,
+  "tags": [
+   "True Past"
+  ],
   "handlers": [
    "onEat",
    "onUpdate"
@@ -5583,6 +5604,9 @@
   "isGem": false,
   "isPokeball": false,
   "isPrimalOrb": false,
+  "tags": [
+   "True Past"
+  ],
   "handlers": [
    "onEat",
    "onUpdate"
@@ -5713,6 +5737,9 @@
   "isGem": false,
   "isPokeball": false,
   "isPrimalOrb": false,
+  "tags": [
+   "True Past"
+  ],
   "handlers": [
    "onEat",
    "onUpdate"
@@ -6156,6 +6183,9 @@
   "isGem": false,
   "isPokeball": false,
   "isPrimalOrb": false,
+  "tags": [
+   "True Past"
+  ],
   "handlers": [
    "onBasePower"
   ]
@@ -6320,6 +6350,9 @@
   "isGem": false,
   "isPokeball": false,
   "isPrimalOrb": false,
+  "tags": [
+   "True Past"
+  ],
   "handlers": [
    "onBasePower"
   ]
@@ -6560,6 +6593,9 @@
   "isGem": false,
   "isPokeball": false,
   "isPrimalOrb": false,
+  "tags": [
+   "True Past"
+  ],
   "handlers": [
    "onEat",
    "onUpdate"
@@ -6578,6 +6614,9 @@
   "isGem": false,
   "isPokeball": false,
   "isPrimalOrb": false,
+  "tags": [
+   "True Past"
+  ],
   "handlers": [
    "onEat",
    "onUpdate"

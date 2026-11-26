@@ -24,7 +24,7 @@ const DROP = new Set([
 	'exists', 'sourceEffect', 'rating', 'spritenum', 'color', 'heightm', 'eggGroups',
 	'cosmeticFormes', 'otherFormes', 'formeOrder', 'canHatch', 'evos', 'prevo', 'evoType',
 	'evoLevel', 'evoItem', 'evoMove', 'evoCondition', 'evoRegion', 'nfe', 'spriteid',
-	'bst', 'tags', 'fling', 'naturalGift',
+	'bst', 'fling', 'naturalGift',
 ]);
 
 /** Declarative fields as JSON, plus the sorted names of any handler functions. */

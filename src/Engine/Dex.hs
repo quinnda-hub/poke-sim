@@ -67,6 +67,8 @@ data SpeciesData = SpeciesData
   -- ^ A species the slice is tested on (same criteria as the species pool in tools/oracle/gen-slice0.js).
   , spWeight :: !Int
   -- ^ @weighthg@: the weight in tenths of a kilogram (@pokemon.weighthg@ before @ModifyWeight@).
+  , spParadox :: !Bool
+  -- ^ @tags@ includes @"Paradox"@ (data/pokedex.ts), which Booster Energy's @onTakeItem@ reads.
   }
   deriving (Show)
 
@@ -513,11 +515,14 @@ speciesOf tix v = do
     _ -> Right 0
   num <- field "num" v >>= asInt
   weight <- field "weighthg" v >>= asInt
+  paradox <- case v of
+    Object o | Just (Array tagVals) <- KM.lookup "tags" o -> elem "Paradox" <$> traverse asText (V.toList tagVals)
+    _ -> Right False
   -- gen-slice0.js: num > 0, not nonstandard, a base forme, not battle-only; plus Shedinja for its fixed HP
   let supported =
         ident == "shedinja"
           || (num > 0 && not (truthyField "isNonstandard" v) && not (truthyField "forme" v) && not (truthyField "battleOnly" v))
-  pure (SpeciesData ident t1 t2 (U.fromList base) gender maxHp supported weight)
+  pure (SpeciesData ident t1 t2 (U.fromList base) gender maxHp supported weight paradox)
 
 typeIx :: M.Map T.Text Int -> T.Text -> Either String Int
 typeIx tix t = maybe (Left ("unknown type " ++ T.unpack t)) Right (M.lookup t tix)

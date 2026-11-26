@@ -131,9 +131,9 @@ abilityBodies ty wx name = case name of
   "quarkdrive" ->
     Just [ (POwn, EvStart, BNative NQuarkDriveStart), (POwn, EvTerrainChange, BNative NQuarkDriveTerrainChange)
          , (POwn, EvEnd, BNative NQuarkDriveEnd) ]
-  -- unburden: onAfterUseItem adds the volatile, onTakeItem too (no supported move takes items), onEnd removes it
+  -- unburden: onAfterUseItem adds the volatile, onTakeItem too, onEnd removes it
   "unburden" ->
-    Just [ (POwn, EvAfterUseItem, BNative NUnburdenAfterUseItem), (POwn, EvTakeItem, BNative NInertTakeItem)
+    Just [ (POwn, EvAfterUseItem, BNative NUnburdenAfterUseItem), (POwn, EvTakeItem, BNative NUnburdenTakeItem)
          , (POwn, EvEnd, BNative NUnburdenEnd) ]
   -- toxicdebris: onDamagingHit, a Physical move sets Toxic Spikes on the attacker's side
   "toxicdebris" -> Just [(POwn, EvDamagingHit, BNative NToxicDebris)]
@@ -192,7 +192,7 @@ itemBodies ty fid name = case name of
   -- Terrain: use the item and add the volatile), onTakeItem (Paradox species cannot lose it)
   "boosterenergy" ->
     Just [ (POwn, EvStart, BNative NBoosterEnergyStart), (POwn, EvUpdate, BNative NBoosterEnergyUpdate)
-         , (POwn, EvTakeItem, BNative NInertTakeItem) ]
+         , (POwn, EvTakeItem, BNative NBoosterTakeItem) ]
   -- electricseed, grassyseed, mistyseed, psychicseed: onStart and onTerrainChange call pokemon.useItem() under their
   -- terrain (onStart also needs `!pokemon.ignoringItem()`, always true here); the boosts are the item's `boosts`
   "electricseed" -> seed "electricterrain"
@@ -309,7 +309,12 @@ fieldCondBodies name = case name of
 --
 -- Not implemented: mistyexplosion has the @onBasePower@ of expandingforce under Misty Terrain, but its @selfdestruct@
 -- keeps the move rejected, so a body would run on no path. Payback, triplekick and tripleaxel (per-turn history,
--- per-hit accuracy) and knockoff are later phases.
+-- per-hit accuracy) are later phases.
+--
+-- Slice 4d takes items: knockoff, trick, switcheroo, thief and poltergeist. Not accepted, with the reason: covet (not on the
+-- whitelist; it would share thief's body), bugbite and pluck (eat the target's berry), fling, recycle, embargo, magicroom and
+-- corrosivegas (item state and effects the engine does not hold, or no body here), and the abilities magician, pickpocket,
+-- stickyhold, harvest and cudchew.
 moveBodies :: T.Text -> Maybe [(Prefix, EventId, Body)]
 moveBodies name = case name of
   -- lowkick, grassknot: basePowerCallback by the target's weight; onTryHit fails on a Dynamaxed target
@@ -391,6 +396,15 @@ moveBodies name = case name of
   "brickbreak" -> Just [(POwn, EvTryHit, BNative NScreenBreakTryHit)]
   "psychicfangs" -> Just [(POwn, EvTryHit, BNative NScreenBreakTryHit)]
   "ragingbull" -> Just [(POwn, EvTryHit, BNative NScreenBreakTryHit), (POwn, EvModifyType, BNative NRagingBullType)]
+  -- Slice 4d. knockoff (9966): onBasePower is 1.5 against a target whose item can be taken, onAfterHit takes it
+  "knockoff" -> Just [(POwn, EvBasePower, BNative NKnockOffPower), (POwn, EvAfterHit, BNative NKnockOffAfterHit)]
+  -- trick (19872), switcheroo (18651): onTryImmunity (not against Sticky Hold), onHit swaps the items
+  "trick" -> Just [(POwn, EvTryImmunity, BNative NTrickTryImmunity), (POwn, EvHit, BNative NTrickHit)]
+  "switcheroo" -> Just [(POwn, EvTryImmunity, BNative NTrickTryImmunity), (POwn, EvHit, BNative NTrickHit)]
+  -- thief (19309): onAfterHit takes the target's item when the user has none
+  "thief" -> Just [(POwn, EvAfterHit, BNative NThiefAfterHit)]
+  -- poltergeist (13600): onTry fails against a target with no item, onTryHit only logs
+  "poltergeist" -> Just [(POwn, EvTry, BNative NPoltergeistTry), (POwn, EvTryHit, BNative NLogOnly)]
   -- auroraveil (830): onTry needs snow (its condition is in 'fieldCondBodies')
   "auroraveil" -> Just [(POwn, EvTry, BNative NAuroraVeilTry)]
   _ -> Nothing

@@ -53,6 +53,18 @@
 //   - the removers come with boost moves, terrain moves and Light Clay, so that Haze and Clear Smog meet boosts, and Ice Spinner and
 //     Defog meet each terrain.
 //
+// Slice 4d adds item removal and swaps: Knock Off (`onBasePower` asks the item's own `onTakeItem`, `onAfterHit` takes the item), Trick
+// and Switcheroo (`onTryImmunity`, `onHit`), Thief (`onAfterHit`) and Poltergeist (`onTry`). From a stream of draws of its own:
+//   - a share of the Pokemon carry one of the five, with Booster Energy on a Paradox species, or an Unburden holder with an item;
+//   - about one battle in three is a scripted duel of the two leads: Knock Off against each class of target (no item, a held item,
+//     Booster Energy on a Paradox and on an ordinary species, an Unburden holder with and without an item, with Booster Energy on a
+//     Paradox, a seed), Shedinja's Knock Off or Thief into Rocky Helmet (the user faints of the helmet in the same hit, which gates
+//     `AfterHit`), Trick and Switcheroo between each pair of classes, Thief with an empty and a full hand, Poltergeist into an item
+//     and into none. The foe lead uses a non-damaging move, so the item move is used first. A fast Flying lead Roosts into a slow
+//     Misty Surge lead's status move (4b's counter for it was met once in twelve hundred battles).
+// No Choice item is in the pool (the choice-lock volatile is a later slice), and no berry (the seeds are the consumable class): the
+// cases the design lists for them are structurally zero.
+//
 // Usage:
 //   node gen-slice4.js <outDir> <count> <poolFile> [firstSeed=1]
 //
@@ -97,7 +109,14 @@ const OWN_MOVES = [
 ];
 // Listed in the design but rejected, so not in the pool: hurricane (its confusion secondary) and mistyexplosion
 // (selfdestruct). They are structurally zero in the tally.
-const REJECTED_MOVES = { hurricane: 'rejected: secondary volatileStatus confusion', mistyexplosion: 'rejected: selfdestruct (and no body)' };
+const REJECTED_MOVES = {
+	hurricane: 'rejected: secondary volatileStatus confusion', mistyexplosion: 'rejected: selfdestruct (and no body)',
+	// slice 4d: each item move the design leaves out
+	covet: 'not whitelisted', bugbite: 'eats the target\'s berry', pluck: 'eats the target\'s berry', fling: 'no body', recycle: 'needs lastItem',
+	embargo: 'no body', magicroom: 'no body', corrosivegas: 'no body',
+};
+// Slice 4d
+const ITEM_MOVES = ['knockoff', 'trick', 'switcheroo', 'thief', 'poltergeist'];
 const FREEZERS = ['freezedry', 'blizzard', 'icebeam', 'icywind'];
 const STATUS_MOVES = ['willowisp', 'toxic', 'thunderwave', 'glare'];
 const BOOST_MOVES = ['swordsdance', 'nastyplot', 'calmmind', 'dragondance', 'bulkup', 'quiverdance', 'agility', 'coil', 'workup', 'shellsmash'];
@@ -354,8 +373,35 @@ function assign(scenario, pool, seed) {
 		// Rocky Helmet is the foe's side of the HP gate
 		if (int4(100) < 12 && !['lifeorb', 'heavydutyboots', 'lightclay'].some(i => s.item === dex.items.get(i).name)) item('rockyhelmet');
 	};
+	// slice 4d: a stream of draws of its own, so that the choices above are those of slice 4c for a seed
+	const rnd5 = mulberry32(seed * 2654435761 + 374761393);
+	const int5 = (n) => Math.floor(rnd5() * n);
+	const pick5 = (xs) => xs[int5(xs.length)];
+	const has5 = (ids) => ids.filter(id => pool.moves.includes(id));
+	const itemMoves = has5(ITEM_MOVES);
+	const weightedItemMoves = has5(['knockoff', 'knockoff', 'knockoff', 'thief', 'poltergeist', 'trick', 'switcheroo']);
+	const paradox = pool.species.filter(id => dex.species.get(id).tags.includes('Paradox'));
+	const ordinary = pool.species.filter(id => { const sp = dex.species.get(id); return !sp.tags.includes('Paradox') && !sp.types.includes('Normal') && !sp.types.includes('Ghost'); });
+	const plainItems = pool.items.filter(id => id && id !== 'boosterenergy' && !SEEDS.includes(id));
+	const seeds5 = SEEDS.filter(id => pool.items.includes(id));
+	const idles = has5(['calmmind', 'swordsdance', 'nastyplot', 'agility']);
+	const nameOf = (kind, id) => dex[kind].get(id).name;
+	const set4d = (s) => {
+		const slots = [0, 1, 2, 3].filter(i => !keep.includes(idOf(s.moves[i])));
+		const put = (id) => { if (id && slots.length && !s.moves.map(idOf).includes(id)) s.moves[slots.splice(int5(slots.length), 1)[0]] = id; };
+		if (weightedItemMoves.length && int5(100) < 16) { put(pick5(weightedItemMoves)); if (int5(100) < 30) put(pick5(weightedItemMoves)); }
+		const q = int5(100);
+		if (q < 8 && paradox.length && pool.items.includes('boosterenergy')) {
+			s.species = nameOf('species', pick5(paradox));
+			s.item = nameOf('items', 'boosterenergy');
+			if (int5(2) === 0) s.ability = 'No Ability';
+		} else if (q < 16 && pool.abilities.includes('unburden')) {
+			s.ability = nameOf('abilities', 'unburden');
+			if (int5(100) < 70 && plainItems.length) s.item = nameOf('items', pick5(plainItems));
+		}
+	};
 	// a mirror match keeps its two teams identical (the two sides tie on speed and priority)
-	for (const s of scenario.teams[0]) { set(s); set4c(s); }
+	for (const s of scenario.teams[0]) { set(s); set4c(s); set4d(s); }
 	// a Grassy Glide duel in about one battle in eight: a mirror match whose lead sets Grassy Terrain and carries Grassy Glide
 	// and a priority move, so the two leads tie on speed at the priority Grassy Terrain gives them (an equal-priority tie
 	// is shuffled by a draw)
@@ -371,7 +417,7 @@ function assign(scenario, pool, seed) {
 		scenario.choices = [['team 123456', 'team 123456']];
 	}
 	if (mirror || duel) scenario.teams[1] = JSON.parse(JSON.stringify(scenario.teams[0]));
-	else for (const s of scenario.teams[1]) { set(s); set4c(s); }
+	else for (const s of scenario.teams[1]) { set(s); set4c(s); set4d(s); }
 	// slice 4c, scripted openings (`scenario.choices`, a pair per decision point, then the random policy): about one battle in ten
 	//  - a hazard stack: one lead sets Stealth Rock, three layers of Spikes, two of Toxic Spikes and Sticky Web on the foe's side
 	//    (all four kinds, at their limits) while the foe lead boosts; then either the foe lead uses a remover or swapper on its own
@@ -418,6 +464,97 @@ function assign(scenario, pool, seed) {
 				scenario.choices = [['team 123456', 'team 123456'], ...boostTurns, pair('switch 2', 'move 1'), pair('move 1', 'move 1')];
 			}
 		}
+	}
+	// slice 4d, scripted duels of the two leads (`scenario.choices`: one turn, then the random policy): about one battle in three
+	const script5 = int5(100);
+	if (!kinds && !duel && itemMoves.length && idles.length >= 4 && ordinary.length && script5 < 34) {
+		// the classes of a lead's hand: its species, ability and item
+		const classes = {
+			none: () => ({ species: pick5(ordinary), ability: 'No Ability', item: '' }),
+			held: () => ({ species: pick5(ordinary), ability: 'No Ability', item: pick5(plainItems) }),
+			boosterParadox: () => ({ species: pick5(paradox), ability: 'No Ability', item: 'boosterenergy' }),
+			boosterOrdinary: () => ({ species: pick5(ordinary), ability: 'No Ability', item: 'boosterenergy' }),
+			unburdenHeld: () => ({ species: pick5(ordinary), ability: 'unburden', item: pick5(plainItems) }),
+			unburdenNone: () => ({ species: pick5(ordinary), ability: 'unburden', item: '' }),
+			unburdenBoosterParadox: () => ({ species: pick5(paradox), ability: 'unburden', item: 'boosterenergy' }),
+			seed: () => ({ species: pick5(ordinary), ability: 'No Ability', item: pick5(seeds5) }),
+			// empty-handed receivers: a Paradox (refuses Booster Energy), an ordinary Pokemon with a Paradox ability (uses Booster Energy on
+			// arrival), and a terrain setter (uses a seed on arrival when the terrain matches)
+			paradoxNone: () => ({ species: pick5(paradox), ability: 'No Ability', item: '' }),
+			paradoxHeld: () => ({ species: pick5(paradox), ability: 'No Ability', item: pick5(plainItems) }),
+			paradoxAbilityNone: () => ({ species: pick5(ordinary), ability: pick5(['protosynthesis', 'quarkdrive'].filter(x => pool.abilities.includes(x))), item: '' }),
+			surgeNone: () => ({ species: pick5(ordinary), ability: pick5(['grassysurge', 'electricsurge', 'mistysurge', 'psychicsurge'].filter(x => pool.abilities.includes(x))), item: '' }),
+		};
+		const available = Object.keys(classes).filter(k => (!/aradox/.test(k) || paradox.length) && (!/Paradox$/.test(k) || pool.items.includes('boosterenergy')) &&
+			(!/booster/i.test(k) || pool.items.includes('boosterenergy')) && (!/unburden/.test(k) || pool.abilities.includes('unburden')) &&
+			(k !== 'seed' || seeds5.length) && (!['held', 'unburdenHeld', 'paradoxHeld'].includes(k) || plainItems.length) &&
+			(k !== 'paradoxAbilityNone' || pool.abilities.includes('protosynthesis') || pool.abilities.includes('quarkdrive')) &&
+			(k !== 'surgeNone' || ['grassysurge', 'electricsurge', 'mistysurge', 'psychicsurge'].some(x => pool.abilities.includes(x))));
+		const lead5 = (s, cls, moves) => {
+			const h = classes[cls]();
+			s.species = nameOf('species', h.species);
+			s.ability = h.ability === 'No Ability' ? h.ability : nameOf('abilities', h.ability);
+			s.item = h.item ? nameOf('items', h.item) : '';
+			s.moves = moves.slice(0, 4);
+		};
+		const withIdles = (first) => [...first, ...idles].slice(0, 4);
+		// (one scripted turn: a faint on it would turn the next pair into a switch request)
+		scenario.choices = [['team 123456', 'team 123456'], ['move 1', 'move 1']];
+		const a = scenario.teams[0][0], b = scenario.teams[1][0];
+		const kind = int5(100);
+		const bySpe = (id) => dex.species.get(id).baseStats.spe;
+		const flyers = pool.species.filter(id => dex.species.get(id).types.includes('Flying')).sort((x, y) => bySpe(y) - bySpe(x));
+		const slow = pool.species.slice().sort((x, y) => bySpe(x) - bySpe(y));
+		const statusMoves = has5(['willowisp', 'toxic', 'thunderwave', 'glare']);
+		const hurtFlyers = flyers.filter(id => !dex.species.get(id).types.includes('Poison'));
+		if (kind < 5 && hurtFlyers.length && pool.moves.includes('roost') && pool.abilities.includes('mistysurge') && statusMoves.length &&
+			pool.items.includes('blacksludge')) {
+			// a status move into a Roosted Flying type under Misty Terrain (4b's tally): the slow foe lead sets Misty Terrain at switch-in
+			// and idles; the fast Flying lead holds Black Sludge (a non-Poison type loses an eighth at the end of turn 1, so that Roost has
+			// something to heal), idles, then Roosts on turn 2 as the foe uses its status move. Nothing deals damage, so no faint turns the
+			// second scripted pair into a switch request.
+			scenario.choices = [['team 123456', 'team 123456'], ['move 2', 'move 2'], ['move 1', 'move 1']];
+			a.species = nameOf('species', pick5(hurtFlyers.slice(0, Math.max(1, Math.floor(hurtFlyers.length / 5))))); a.ability = 'No Ability'; a.item = nameOf('items', 'blacksludge');
+			a.moves = withIdles(['roost']);
+			b.species = nameOf('species', pick5(slow.slice(0, Math.floor(slow.length / 5)))); b.ability = nameOf('abilities', 'mistysurge'); b.item = '';
+			b.moves = [pick5(statusMoves), ...idles].slice(0, 4);
+		} else if (kind < 36 && pool.moves.includes('knockoff')) {
+			// Knock Off against each class of target
+			lead5(a, pick5(['none', 'none', 'held']), withIdles(['knockoff']));
+			lead5(b, pick5(available), withIdles([]));
+		} else if (kind < 44 && pool.species.includes('shedinja') && pool.items.includes('rockyhelmet') && has5(['knockoff', 'thief']).length) {
+			// the user faints of Rocky Helmet in the hit, so AfterHit is gated off and the item stays
+			a.species = nameOf('species', 'shedinja'); a.ability = 'No Ability'; a.item = ''; a.moves = withIdles([pick5(has5(['knockoff', 'thief']))]);
+			lead5(b, 'none', withIdles([]));
+			b.item = nameOf('items', 'rockyhelmet');
+		} else if (kind < 70 && has5(['trick', 'switcheroo']).length) {
+			// Trick and Switcheroo between each pair of classes, both hands empty now and then
+			lead5(a, int5(100) < 12 ? 'none' : pick5(available), withIdles([pick5(has5(['trick', 'switcheroo']))]));
+			lead5(b, int5(100) < 12 ? 'none' : pick5(available), withIdles([]));
+			// a seed or Booster Energy into a receiver that uses it, now and then
+			const carry = pick5(['boosterOrdinary', 'seed'].filter(k => available.includes(k)));
+			if (carry && int5(100) < 30) lead5(b, carry, withIdles([]));
+			if (int5(100) < 30) lead5(a, pick5(['paradoxNone', 'paradoxAbilityNone', 'surgeNone'].filter(k => available.includes(k))), withIdles([a.moves[0]]));
+		} else if (kind < 88 && pool.moves.includes('thief')) {
+			// Thief with an empty and with a full hand, into each class
+			lead5(a, pick5(['none', 'none', 'held', 'boosterOrdinary', 'boosterParadox', 'paradoxNone', 'paradoxAbilityNone', 'surgeNone'].filter(k => available.includes(k))), withIdles(['thief']));
+			lead5(b, pick5(available.filter(k => int5(3) > 0 || /^(booster|seed)/.test(k))), withIdles([]));
+			// Booster Energy stolen by a Paradox, which refuses it
+			if (available.includes('paradoxNone') && available.includes('boosterOrdinary') && int5(100) < 20) {
+				lead5(a, 'paradoxNone', withIdles(['thief']));
+				lead5(b, 'boosterOrdinary', withIdles([]));
+			}
+			// Booster Energy stolen by an ordinary Pokemon with a Paradox ability, which uses it on arrival
+			if (available.includes('paradoxAbilityNone') && available.includes('boosterOrdinary') && int5(100) < 35) {
+				lead5(a, 'paradoxAbilityNone', withIdles(['thief']));
+				lead5(b, 'boosterOrdinary', withIdles([]));
+			}
+		} else if (pool.moves.includes('poltergeist')) {
+			lead5(a, pick5(['none', 'held'].filter(k => available.includes(k))), withIdles(['poltergeist']));
+			lead5(b, pick5(available), withIdles([]));
+		} else scenario.choices = undefined;
+		// the foe's lead plays idle moves (its first four are status moves), so the item move lands before it is hurt or moves the item
+		if (scenario.choices && kind >= 5) b.moves = withIdles([]);
 	}
 	return scenario;
 }
@@ -537,6 +674,31 @@ function newTally() {
 		// whole list, in the order it had, and the effect orders along a side stay increasing (a state that stayed behind would be
 		// followed by arrivals with lower orders)
 		ragingBullTypeChanged: 0,
+		// ---- slice 4d ----
+		moveUsed4d: z(ITEM_MOVES),
+		// knockoff onBasePower: the target's item as the move's TakeItem check sees it (only the item's own handler is asked)
+		knockOffBasePower: z(['no item', 'item, boosted', 'Booster Energy on a Paradox, refused (no boost)']),
+		knockOffBoostedBoosterOnOrdinary: 0, knockOffBoostedSeed: 0,
+		// knockoff onAfterHit: the target's hand, what became of it, and Unburden
+		knockOffTargetItem: z(['none', 'held', 'boosterParadox', 'boosterOrdinary', 'seed']),
+		knockOffOutcome: z(['taken', 'refused']), knockOffTargetFaintedItemTaken: 0,
+		knockOffUnburden: z(['item taken, volatile added', 'refused, volatile added', 'no item, no volatile']),
+		knockOffUserFaintedInHit: 0, knockOffUserFaintedToRockyHelmetItemKept: 0,
+		// trick and switcheroo
+		trickResult: z(['swapped', 'fails: both empty', 'fails: a take refused (Booster Energy on a Paradox)', 'fails: receiver refuses (Booster Energy to a Paradox)']),
+		trickHands: z(['both', 'user only', 'target only', 'neither']),
+		trickWithUnburden: z(['user', 'target']), trickBoosterSwapped: 0, trickSeedSwapped: 0,
+		trickArrivalUsed: z(['boosterenergy']),
+		// thief
+		thiefOutcome: z(['stole', 'stole and used on arrival', 'user hand full', 'target empty', 'refused by holder (Booster Energy on a Paradox)', 'refused by receiver (Booster Energy to a Paradox)']),
+		// poltergeist onTry
+		poltergeistTry: z(['target has an item', 'target has none (fails)']),
+		// structurally zero: no Choice item is in the pool (the choice-lock volatile, its ModifyMove and Choice Scarf's speed are a later
+		// slice), so Knock Off, Trick and Thief never meet one and a Trick never meets a locked Pokemon; no berry is in the pool (the
+		// seeds are the consumable class); Sticky Hold is not a supported ability, so no move meets it
+		// (a seed that matches the active terrain is used the moment the terrain starts, so no Pokemon holds one for Trick or Thief to move
+		// into a receiver that would use it on arrival)
+		trickSeedUsedOnArrival: 0, knockOffChoiceItem: 0, trickChoiceItem: 0, trickOnLockedPokemon: 0, knockOffBerry: 0, stickyHoldBlocks: 0,
 	};
 }
 
@@ -556,6 +718,7 @@ function install() {
 		if (c && id === 'ivycudgel') c.ivyCudgelUsed++;
 		if (c && id in c.moveUsed4b) c.moveUsed4b[id]++;
 		if (c && id in c.moveUsed4c) c.moveUsed4c[id]++;
+		if (c && id in c.moveUsed4d) c.moveUsed4d[id]++;
 		if (c && id === 'roost') {
 			const flying = pokemon.types.includes('Flying');
 			c.roostUser[!flying ? 'not Flying' : pokemon.types.length === 1 ? 'pure Flying' : 'dual Flying']++;
@@ -702,6 +865,16 @@ function install() {
 				if (terrain === 'grassyterrain') { if (grounded(atk)) c.grassyGlideInTerrain++; else c.grassyGlideUngroundedInTerrain++; }
 				else c.grassyGlideOutOfTerrain++;
 				break;
+			case 'knockoff': {
+				const r = runEvent.call(this, eventid, target, source, ...rest);
+				if (!def.item) c.knockOffBasePower['no item']++;
+				else if (r > bp) {
+					c.knockOffBasePower['item, boosted']++;
+					if (def.item === 'boosterenergy') c.knockOffBoostedBoosterOnOrdinary++;
+					if (SEEDS.includes(def.item)) c.knockOffBoostedSeed++;
+				} else c.knockOffBasePower['Booster Energy on a Paradox, refused (no boost)']++;
+				return r;
+			}
 			case 'ficklebeam': {
 				const r = runEvent.call(this, eventid, target, source, ...rest);
 				// the doubling is the move's: another handler (a type item, Technician, a terrain) changed the result too when it is not 2x
@@ -766,6 +939,57 @@ function install() {
 					if (target.side.sideConditions.reflect) c.auroraVeilWithReflect++;
 					if (target.side.sideConditions.lightscreen) c.auroraVeilWithLightScreen++;
 				}
+				return r;
+			}
+			// slice 4d. onAfterHit of Knock Off: the target (the foe that was hit) loses its item unless the item refuses
+			if (eventid === 'AfterHit' && source && id === 'knockoff') {
+				const cls = handClass(target), unburdenBefore = !!target.volatiles.unburden, unburdenHolder = target.ability === 'unburden';
+				const r = singleEvent.call(this, eventid, effect, state, target, source, ...rest);
+				c.knockOffTargetItem[cls]++;
+				if (cls !== 'none') {
+					c.knockOffOutcome[target.item ? 'refused' : 'taken']++;
+					if (!target.item && target.hp === 0) c.knockOffTargetFaintedItemTaken++;
+				}
+				if (unburdenHolder && !unburdenBefore && target.hp > 0) {
+					if (cls === 'none') c.knockOffUnburden['no item, no volatile'] += target.volatiles.unburden ? 0 : 1;
+					else if (target.volatiles.unburden) c.knockOffUnburden[target.item ? 'refused, volatile added' : 'item taken, volatile added']++;
+				}
+				return r;
+			}
+			// onAfterHit of Thief: the user takes the target's item when its own hand is empty
+			if (eventid === 'AfterHit' && source && id === 'thief') {
+				const full = !!source.item, held = target.item, cls = handClass(target), recvParadox = isParadox(source);
+				const r = singleEvent.call(this, eventid, effect, state, target, source, ...rest);
+				if (full) c.thiefOutcome['user hand full']++;
+				else if (!held) c.thiefOutcome['target empty']++;
+				else if (!target.item) c.thiefOutcome[source.item ? 'stole' : 'stole and used on arrival']++;
+				else if (cls === 'boosterParadox') c.thiefOutcome['refused by holder (Booster Energy on a Paradox)']++;
+				else if (held === 'boosterenergy' && recvParadox) c.thiefOutcome['refused by receiver (Booster Energy to a Paradox)']++;
+				return r;
+			}
+			// onHit of Trick and Switcheroo: the event's target is the foe and its source the user
+			if (eventid === 'Hit' && source && (id === 'trick' || id === 'switcheroo')) {
+				const ui = source.item, ti = target.item;
+				const refusesHolder = (p) => p.item === 'boosterenergy' && isParadox(p);
+				const holderRefuses = refusesHolder(source) || refusesHolder(target);
+				const receiverRefuses = (ui === 'boosterenergy' && isParadox(target)) || (ti === 'boosterenergy' && isParadox(source));
+				c.trickHands[ui && ti ? 'both' : ui ? 'user only' : ti ? 'target only' : 'neither']++;
+				const r = singleEvent.call(this, eventid, effect, state, target, source, ...rest);
+				if (r === false) {
+					c.trickResult[!ui && !ti ? 'fails: both empty' : holderRefuses ? 'fails: a take refused (Booster Energy on a Paradox)' : receiverRefuses ? 'fails: receiver refuses (Booster Energy to a Paradox)' : 'fails: both empty']++;
+				} else {
+					c.trickResult.swapped++;
+					if (source.ability === 'unburden') c.trickWithUnburden.user++;
+					if (target.ability === 'unburden') c.trickWithUnburden.target++;
+					if (ui === 'boosterenergy' || ti === 'boosterenergy') c.trickBoosterSwapped++;
+					if (SEEDS.includes(ui) || SEEDS.includes(ti)) c.trickSeedSwapped++;
+				}
+				return r;
+			}
+			// onTry of Poltergeist: the user is the event's target, the foe its source
+			if (eventid === 'Try' && source && id === 'poltergeist') {
+				const r = singleEvent.call(this, eventid, effect, state, target, source, ...rest);
+				c.poltergeistTry[r ? 'target has an item' : 'target has none (fails)']++;
 				return r;
 			}
 			// onAfterHit: target is the foe that was hit and source the user
@@ -874,6 +1098,35 @@ function install() {
 			} else if (effect.id === 'flyingpress' && target.types.length === 2) c.flyingPressDualEffect++;
 		}
 		return singleEvent.call(this, eventid, effect, state, target, source, ...rest);
+	};
+
+	// ---- slice 4d ----
+	const isParadox = (p) => p.baseSpecies.tags.includes('Paradox');
+	const handClass = (p) => !p.item ? 'none' : p.item === 'boosterenergy' ? (isParadox(p) ? 'boosterParadox' : 'boosterOrdinary') : SEEDS.includes(p.item) ? 'seed' : 'held';
+	const spreadMoveHit4d = BattleActions.prototype.spreadMoveHit;
+	BattleActions.prototype.spreadMoveHit = function (targets, pokemon, moveOrMoveName, hitEffect, isSecondary, isSelf) {
+		const c = t();
+		const id = moveOrMoveName && moveOrMoveName.id;
+		const watched = c && !isSecondary && !isSelf && (id === 'knockoff' || id === 'thief');
+		const r = spreadMoveHit4d.call(this, targets, pokemon, moveOrMoveName, hitEffect, isSecondary, isSelf);
+		if (watched && pokemon.hp === 0 && id === 'knockoff') {
+			// the HP gate of AfterHit: the user is down at the end of the hit, so the target keeps its item
+			const target = targets[0];
+			c.knockOffUserFaintedInHit++;
+			if (target && target.item === 'rockyhelmet') c.knockOffUserFaintedToRockyHelmetItemKept++;
+		}
+		return r;
+	};
+	const setItem = Pokemon.prototype.setItem;
+	Pokemon.prototype.setItem = function (item, ...rest) {
+		const r = setItem.call(this, item, ...rest);
+		const c = t();
+		const id = typeof item === 'string' ? dex.toID(item) : item.id;
+		const by = this.battle.effect && this.battle.effect.id;
+		if (c && id && !this.item && ['trick', 'switcheroo', 'thief'].includes(by)) {
+			if (id === 'boosterenergy') c.trickArrivalUsed.boosterenergy++;
+		}
+		return r;
 	};
 
 	// getDamage: a damageCallback skips the crit roll and the damage modifiers; a fixed `damage` too (Seismic Toss, Night Shade);

@@ -478,8 +478,11 @@ useMoveWith fmt dx user target mv = case mrTarget rule of
      -- LATENT: the Invulnerability event (step 0) and the move's @Try@ event have no handler.
      -- trySpreadMoveHit (battle-actions.ts 656-657): singleEvent('PrepareHit', move, {}, target, pokemon, move) (Ivy Cudgel
      -- logs), then runEvent('PrepareHit', pokemon, target, move), before the hit steps
-     void (singleMoveEvent dx EvPrepareHit target (Just user) mv)
-     prepared <- relayTruthy <$> runEvent dx EvPrepareHit user (Just target) (Just mv) RNone
+     -- (656: `singleEvent('Try', move, null, pokemon, targets[0], move) && singleEvent('PrepareHit') && runEvent('PrepareHit')`:
+     -- the move's own onTry first, whose falsy result fails the move: Poltergeist against a target with no item)
+     tried <- moveTry dx target mv
+     when tried (void (singleMoveEvent dx EvPrepareHit target (Just user) mv))
+     prepared <- if tried then relayTruthy <$> runEvent dx EvPrepareHit user (Just target) (Just mv) RNone else pure False
      tryHit <- if prepared then relayTruthy <$> runEvent dx EvTryHit target (Just user) (Just mv) RNone else pure False
      when tryHit $
       -- hitStepTypeImmunity (before accuracy: an immune target consumes no draws); a move with
@@ -487,7 +490,9 @@ useMoveWith fmt dx user target mv = case mrTarget rule of
       unless (not (mrIgnoreImmunity rule) && isImmune dx (mvType mv) tm) $
        -- hitStepTryImmunity (battle-actions.ts 735): `gen >= 6 && move.flags['powder'] && target !== pokemon &&
        -- !this.dex.getImmunity('powder', target)`: Grass types are immune to a powder move (no draw)
-       unless (mrPowder rule && typeImmuneTo dx "powder" tm) $ do
+       unless (mrPowder rule && typeImmuneTo dx "powder" tm) $
+        -- hitStepTryImmunity, the move's own onTryImmunity (battle-actions.ts 739): Trick and Switcheroo against Sticky Hold
+        moveTryImmunity dx target mv >>= \tryImm -> when tryImm $ do
         -- hitStepAccuracy
         hits <- if mvAccuracy mv == neverMisses || (isToxic && hasTypeNamed dx "Poison" um) then pure True
           -- `if (!move.ignoreEvasion)` the target's evasion stage joins the accuracy stage (battle-actions.ts 785-788)
@@ -530,7 +535,7 @@ sideMove :: MonadChance m => Dex -> Actor -> Actor -> MoveData -> Eng m ()
 sideMove dx user target mv = do
   -- tryMoveHit (battle-actions.ts 889-891): `singleEvent('Try') && singleEvent('PrepareHit') && runEvent('PrepareHit')`; the move's
   -- own onTry (Aurora Veil needs snow) comes first and a falsy result fails the move before anything else
-  tried <- moveTry dx mv
+  tried <- moveTry dx target mv
   prepared <- if tried then relayTruthy <$> runEvent dx EvPrepareHit user (Just target) (Just mv) RNone else pure False
   when prepared $ do
     let tryHit = if mrTarget (mvRule mv) == TargetAll then EvTryHitField else EvTryHitSide
