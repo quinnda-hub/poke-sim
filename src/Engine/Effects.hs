@@ -294,9 +294,14 @@ fieldCondBodies name = case name of
 -- | The bodies of a move's own handlers (data/moves.ts), by its id, or 'Nothing' when the engine does not implement
 -- them. A move with no handler of its own needs no entry. The @condition.*@ handlers are not listed here.
 --
+-- The heal and Pain Split bodies (slice 4b) are native, each used by one to three moves: the weather heal by moonlight, synthesis and
+-- morningsun (and shoreup's sand variant), the quarter heal and cure by junglehealing and lunarblessing. Roost has no handler of its
+-- own: its heal and volatile are rules (@heal@, @self.volatileStatus@) and the volatile's @onType@ is
+-- 'Engine.Event.nativeBody'.
+--
 -- Not implemented: mistyexplosion has the @onBasePower@ of expandingforce under Misty Terrain, but its @selfdestruct@
 -- keeps the move rejected, so a body would run on no path. Payback, triplekick and tripleaxel (per-turn history,
--- per-hit accuracy), the healing and stat-override moves and knockoff are later phases.
+-- per-hit accuracy) and knockoff are later phases.
 moveBodies :: T.Text -> Maybe [(Prefix, EventId, Body)]
 moveBodies name = case name of
   -- lowkick, grassknot: basePowerCallback by the target's weight; onTryHit fails on a Dynamaxed target
@@ -344,4 +349,17 @@ moveBodies name = case name of
   -- ruination, superfang: damageCallback, half of the target's HP (at least 1)
   "ruination" -> Just [(POwn, EvDamageCallback, BNative NHalfHpDamage)]
   "superfang" -> Just [(POwn, EvDamageCallback, BNative NHalfHpDamage)]
+  -- moonlight, synthesis, morningsun (data/moves.ts 12252, 18732, 12288): onHit heals by the weather; shoreup (16365): by
+  -- sandstorm only
+  "moonlight" -> Just [(POwn, EvHit, BNative NWeatherHeal)]
+  "synthesis" -> Just [(POwn, EvHit, BNative NWeatherHeal)]
+  "morningsun" -> Just [(POwn, EvHit, BNative NWeatherHeal)]
+  "shoreup" -> Just [(POwn, EvHit, BNative NShoreUpHeal)]
+  -- junglehealing (9863), lunarblessing (10554): onHit heals a quarter, then cures the status
+  "junglehealing" -> Just [(POwn, EvHit, BNative NHealCureStatus)]
+  "lunarblessing" -> Just [(POwn, EvHit, BNative NHealCureStatus)]
+  -- strengthsap (18181): onHit lowers the target's Attack and heals by it
+  "strengthsap" -> Just [(POwn, EvHit, BNative NStrengthSapHit)]
+  -- painsplit (13133): onHit averages the two HPs
+  "painsplit" -> Just [(POwn, EvHit, BNative NPainSplitHit)]
   _ -> Nothing

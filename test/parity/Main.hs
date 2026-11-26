@@ -28,6 +28,7 @@ import System.IO (hFlush, hPutStrLn, stderr)
 
 import Engine
 import Engine.Chance
+import Engine.Damage (monTypes)
 import Engine.Dex
 import Engine.Event (condName)
 import Engine.State
@@ -505,7 +506,9 @@ diffMon dex path orig m ev =
     st = monStats m
     bs = monBoosts m
     typeName t = T.unpack (dxTypeNames dex V.! t)
-    types = typeName (monType1 m) : [typeName (monType2 m) | monType2 m /= noType]
+    -- record.js snapshots `p.getTypes()` (the Type event applied), so the engine's getTypes is compared, not the stored types
+    (ty1, ty2) = monTypes dex m
+    types = typeName ty1 : [typeName ty2 | ty2 /= noType]
     genderName g = case g of GenderM -> "M"; GenderF -> "F"; GenderNone -> ""
     statusName s = case s of
       StatusNone -> ""

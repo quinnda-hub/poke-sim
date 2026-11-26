@@ -201,7 +201,8 @@ data Mon = Mon
   , monBoosts :: !Boosts
   , monType1 :: !Int
   , monType2 :: !Int
-  -- ^ -1 when single-typed.
+  -- ^ -1 when single-typed. Showdown's stored @pokemon.types@: nothing changes them yet. Read types through
+  -- 'Engine.Damage.monTypes' (@getTypes()@), never from these.
   , monMoves :: !(SV.Vector MoveSlot)
   , monSpeed :: !Int
   -- ^ Showdown's cached @pokemon.speed@ (refreshed only by @updateSpeed@ / @setSpecies@).

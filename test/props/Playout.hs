@@ -25,7 +25,8 @@ import qualified Hedgehog.Range as Range
 
 import Engine
 import Engine.Chance (Sample)
-import Engine.Dex (Condition (..), Dex (..), abilityId, supportedAbilities, supportedItems, supportedMoves, supportedSpecies)
+import Engine.Dex (Condition (..), Dex (..), SpeciesData (..), abilityId, noType, speciesData, supportedAbilities, supportedItems, supportedMoves, supportedSpecies)
+import Engine.Damage (monTypes)
 import Engine.Event (CondId (..))
 import Engine.State
 
@@ -109,7 +110,7 @@ advanceWhile dx n p b = case request b of
           Right b' -> advanceWhile dx (n - 1) p b'
 
 -- | State invariants and the decision-point contract: each side asked has legal choices and a side not asked
--- has none; HP in 0..maxHp, PP in 0..maxPP, stages in -6..6, fainted means HP 0.
+-- has none; HP in 0..maxHp (so no heal passes the maximum), PP in 0..maxPP, stages in -6..6, fainted means HP 0; getTypes is the species' own, less Flying under a Roost.
 checkBattle :: Dex -> Battle -> Either String ()
 checkBattle dx b = do
   case request b of
@@ -202,7 +203,10 @@ checkBattle dx b = do
             | i == fromEnum CProtosynthesis = ability "protosynthesis" && esDuration st == 0 && esA st >= 0 && esA st <= 4 && boosterOk st
             | i == fromEnum CQuarkDrive = ability "quarkdrive" && esDuration st == 0 && esA st >= 0 && esA st <= 4 && boosterOk st
             | i == fromEnum CUnburden = ability "unburden" && esDuration st == 0
+            -- roost: one turn (duration 1), and the state keeps the species' types as they were (typeWas, esA and esB)
+            | i == fromEnum CRoost = esDuration st == 1
             | otherwise = False
+          sp = speciesData dx (monSpecies m)
           ability name = abilityId dx (monAbility m) == name
           boosterOk st = esB st == 0 || (esB st == 1 && monItem m == noItem)
           ids = [i | Volatile i _ <- SV.toList (monVolatiles m)]
@@ -213,6 +217,26 @@ checkBattle dx b = do
       if monStatus m == StatusTox && (stage < 0 || stage > 15) then bad ("badly poisoned with stage " ++ show stage) else Right ()
       if monStatus m /= StatusTox && stage /= -1 && not (monFainted m && stage >= 0 && stage <= 15)
         then bad ("stage " ++ show stage ++ " with status " ++ show (monStatus m) ++ " on a live Pokemon") else Right ()
+      -- the stored types are the species' own (nothing supported changes them); @getTypes()@ ('monTypes') is those, less Flying
+      -- under a Roost (Normal when that leaves none), so a Roosted Pokemon never reports the Flying type
+      let baseTypes = [t | t <- [spType1 sp, spType2 sp], t /= noType]
+          storedTypes = [t | t <- [monType1 m, monType2 m], t /= noType]
+          (g1, g2) = monTypes dx m
+          gotTypes = [t | t <- [g1, g2], t /= noType]
+          flyingId = V.elemIndex "Flying" (dxTypeNames dx)
+          normalId = V.elemIndex "Normal" (dxTypeNames dx)
+          roosted = fromEnum CRoost `elem` ids
+          without = [t | t <- baseTypes, Just t /= flyingId]
+          expectedTypes = if roosted then (if null without then maybe [] pure normalId else without) else baseTypes
+      if storedTypes == baseTypes && gotTypes == expectedTypes && (not roosted || all (\t -> Just t /= flyingId) gotTypes)
+        then Right ()
+        else bad ("stored types " ++ show storedTypes ++ ", getTypes " ++ show gotTypes ++ " but " ++ show expectedTypes)
+      -- a Roost never survives to a move request (the Residual of its turn removes it); the exception, as for flinch, is
+      -- a battle that ends mid-turn
+      case request b of
+        Awaiting MoveRequest _ _ | roosted -> bad "Roost at a move request"
+        _ -> Right ()
+      if roosted && (not (monActive m) || monFainted m || monHp m <= 0) then bad "Roost on a Pokemon that is not active or has no HP" else Right ()
       -- flinch (duration 1) lives only on an active Pokemon with HP, and never survives to a move request
       -- (Residual removes it); the one exception is a battle that ends mid-residual
       if flinched && (not (monActive m) || monFainted m || monHp m <= 0) then bad "flinch on a Pokemon that is not active or has no HP" else Right ()

@@ -109,6 +109,12 @@ data EventId
   -- @durationCallback@.
   | EvDamageCallback
   -- ^ Not an event: a move's @damageCallback@, called directly by @getDamage@ (battle-actions.ts 1665).
+  | EvHit
+  -- ^ @singleEvent('Hit', moveData, {}, target, source, move)@ in @runMoveEffects@ (battle-actions.ts 1338), then
+  -- @runEvent('Hit', target, source, move)@ (1342). Only a move's own @onHit@ is supported.
+  | EvType
+  -- ^ @runEvent('Type', pokemon, null, null, pokemon.types)@ in @getTypes@ (pokemon.ts 2165): every read of a Pokemon's
+  -- types. Only the Roost volatile listens to it; 'Engine.Damage.monTypes' is the pure form of the event.
   deriving (Eq, Show, Enum, Bounded)
 
 -- | How @runEvent@ orders the handlers of an event (battle.ts 797-803).
@@ -193,6 +199,8 @@ eventName e = case e of
   EvModifyPriority -> "ModifyPriority"
   EvBasePowerCallback -> "BasePowerCallback"
   EvDamageCallback -> "DamageCallback"
+  EvHit -> "Hit"
+  EvType -> "Type"
 
 -- | Which Pokemon a handler reacts to: the holder (@onX@), its allies (@onAllyX@), its foes (@onFoeX@), the
 -- source of the event (@onSourceX@) or anyone (@onAnyX@).
@@ -232,7 +240,7 @@ parseHandlerName n = case T.stripPrefix "on" n of
 
 -- | The conditions the engine supports: the statuses of slice 1 and the flinch volatile. The index
 -- ('fromEnum') is the id used in the state and in the @Dex@ condition table.
-data CondId = CBrn | CPar | CPsn | CTox | CFrz | CFlinch | CProtosynthesis | CQuarkDrive | CUnburden
+data CondId = CBrn | CPar | CPsn | CTox | CFrz | CFlinch | CProtosynthesis | CQuarkDrive | CUnburden | CRoost
   deriving (Eq, Show, Enum, Bounded)
 
 -- | The key of the condition in @conditions.json@ (data/conditions.ts).
@@ -247,6 +255,7 @@ condName c = case c of
   CProtosynthesis -> "protosynthesis"
   CQuarkDrive -> "quarkdrive"
   CUnburden -> "unburden"
+  CRoost -> "roost"
 
 -- | What kind of effect holds a handler. Showdown's other kinds (slot conditions, the move itself) join when their
 -- holders exist in the state. A move is one for @onEffect@ events.
@@ -481,13 +490,23 @@ data NativeId
   | NVenoshockPower
   -- ^ venoshock, barbbarrage @onBasePower@: a poisoned target doubles the power.
   | NBrinePower
+  -- Moves' own handlers (slice 4b).
+  | NWeatherHeal
+  -- ^ moonlight, synthesis, morningsun @onHit@: heal @modify(maxhp, factor)@, the factor by the weather.
+  | NShoreUpHeal
+  | NHealCureStatus
+  -- ^ junglehealing, lunarblessing @onHit@: heal a quarter, then @cureStatus()@.
+  | NStrengthSapHit
+  | NPainSplitHit
+  | NRoostType
+  -- ^ roost @condition.onType@: the Pokemon's types without Flying, applied by 'Engine.Damage.monTypes'.
   deriving (Eq, Show)
 
 -- | The body of each handler the engine implements (written by hand: Showdown's handlers are code). A condition
 -- is supported only when every handler the export lists for it has a body here.
 -- Source: data/conditions.ts, @brn@ (lines 2-19), @par@ (20-47), @frz@ (92-122), @psn@ (123-137), @tox@
 -- (138-163) and @flinch@ (198-206); and the @condition@ blocks of the abilities protosynthesis, quarkdrive and
--- unburden (data/abilities.ts).
+-- unburden (data/abilities.ts); and the @condition@ block of the move roost (data/moves.ts 15442-15463).
 nativeBody :: CondId -> Prefix -> EventId -> Maybe Body
 nativeBody c POwn e = BNative <$> case (c, e) of
   (CBrn, EvStart) -> Just NLogOnly
@@ -511,6 +530,9 @@ nativeBody c POwn e = BNative <$> case (c, e) of
   (CQuarkDrive, EvStart) -> Just NParadoxStart
   (CQuarkDrive, EvEnd) -> Just NLogOnly
   (CUnburden, EvModifySpe) -> Just NUnburdenSpe
+  -- roost: onStart logs (LATENT: it returns false for a Terastallized Pokemon; Tera is not modelled), onType removes Flying
+  (CRoost, EvStart) -> Just NLogOnly
+  (CRoost, EvType) -> Just NRoostType
   (_, EvModifyAtk) | paradox c -> Just NParadoxAtk
   (_, EvModifyDef) | paradox c -> Just NParadoxDef
   (_, EvModifySpA) | paradox c -> Just NParadoxSpA
