@@ -16,6 +16,7 @@ import qualified Data.Aeson.Key as K
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.Map.Strict as M
 import Data.List (nub)
+import Data.Maybe (fromMaybe)
 import Data.Scientific (toBoundedInteger)
 import qualified Data.Text as T
 import qualified Data.Vector as V
@@ -44,6 +45,8 @@ data SetSpec = SetSpec
   -- ^ An index into the item table, or 'noItem'.
   , ssGender :: !(Maybe Gender)
   -- ^ 'Nothing' lets the engine draw it, as Showdown does.
+  , ssTeraType :: !(Maybe Int)
+  -- ^ The set's @teraType@, a type id; 'Nothing' takes the species' first type (pokemon.ts 473).
   }
   deriving (Eq, Show)
 
@@ -107,7 +110,15 @@ parseSet dx (Object o) = do
     Just (String "F") -> Right (Just GenderF)
     Just (String "N") -> Right (Just GenderNone)
     Just _ -> Left "gender must be M, F, N or empty"
-  pure (SetSpec species moves nature evs ivs level ability item gender)
+  -- pokemon.ts 473: `this.teraType = this.set.teraType || this.types[0]`; any type name, Stellar included
+  teraType <- case KM.lookup "teraType" o of
+    Nothing -> Right Nothing
+    Just (String "") -> Right Nothing
+    -- phase 5a: Stellar is unsupported until 5b (it changes STAB, the 60 floor and getTypes)
+    Just (String "Stellar") -> Left "unsupported teraType Stellar (Stellar Terastallization is phase 5b)"
+    Just (String t) -> maybe (Left ("unknown teraType " ++ T.unpack t)) (Right . Just) (V.elemIndex t (dxTypeNames dx))
+    Just _ -> Left "teraType must be a string"
+  pure (SetSpec species moves nature evs ivs level ability item gender teraType)
   where
     str k = case KM.lookup k o of
       Just (String t) -> Right t
@@ -150,6 +161,7 @@ buildSide fmt dx (Team team) = do
     , sLeft = length mons
     , sHasActive = False
     , sConds = SV.empty
+    , sTeraUsed = False
     }
 
 {-# INLINABLE buildMon #-}
@@ -187,6 +199,9 @@ buildMon fmt dx s = do
     , monBoosts = noBoosts
     , monType1 = spType1 sp
     , monType2 = spType2 sp
+    , monTeraType = fromMaybe (spType1 sp) (ssTeraType s)
+    , monTerastallized = False
+    , monStellarBoosted = 0
     , monMoves = SV.fromList (map slot (ssMoves s))
     , monSpeed = stSpe stats
     , monFainted = False
@@ -195,6 +210,8 @@ buildMon fmt dx s = do
     , monSwitchFlag = False
     , monStatus = StatusNone
     , monAbility = ssAbility s
+    , monBaseAbility = ssAbility s
+    , monSetAbility = ssAbility s
     , monAbilityState = noEffectState
     , monItem = ssItem s
     , monItemState = noEffectState

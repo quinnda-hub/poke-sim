@@ -132,6 +132,9 @@ data EventId
   | EvHitField
   -- ^ @singleEvent('HitField', moveData, {}, target, source, move)@ in @runMoveEffects@ (battle-actions.ts 1328-1331), for a
   -- move with target @all@. Only a move's own handler is supported.
+  | EvAfterTerastallization
+  -- ^ @runEvent('AfterTerastallization', pokemon)@ at the end of @terastallize@ (battle-actions.ts 2024). No supported effect
+  -- listens to it, but the event point keeps its (draw-free, with fewer than two handlers) sort.
   deriving (Eq, Show, Enum, Bounded)
 
 -- | How @runEvent@ orders the handlers of an event (battle.ts 797-803).
@@ -223,6 +226,7 @@ eventName e = case e of
   EvAfterHit -> "AfterHit"
   EvAfterSubDamage -> "AfterSubDamage"
   EvHitField -> "HitField"
+  EvAfterTerastallization -> "AfterTerastallization"
 
 -- | Which Pokemon a handler reacts to: the holder (@onX@), its allies (@onAllyX@), its foes (@onFoeX@), the
 -- source of the event (@onSourceX@) or anyone (@onAnyX@).
@@ -410,6 +414,8 @@ data NativeId
   | NToxicSpikesSwitchIn
   | NStickyWebSwitchIn
   | NToxicDebris
+  | NEmbodyAspectTeal
+  -- ^ embodyaspectteal @onStart@: +1 Speed once per ability state, for a terastallized Ogerpon-Teal-Tera.
   | NLightClayDuration
   -- ^ reflect, lightscreen @durationCallback@: 8 with a Light Clay user, else 5.
   | NTailwindDuration
@@ -534,6 +540,8 @@ data NativeId
   -- ^ junglehealing, lunarblessing @onHit@: heal a quarter, then @cureStatus()@.
   | NStrengthSapHit
   | NPainSplitHit
+  | NRoostStart
+  -- ^ roost @condition.onStart@: false for a terastallized target (data/moves.ts 15449-15453), so the volatile is not added.
   | NRoostType
   -- ^ roost @condition.onType@: the Pokemon's types without Flying, applied by 'Engine.Damage.monTypes'.
   -- Moves' own handlers (slice 4c).
@@ -591,7 +599,7 @@ nativeBody c POwn e = BNative <$> case (c, e) of
   (CQuarkDrive, EvEnd) -> Just NLogOnly
   (CUnburden, EvModifySpe) -> Just NUnburdenSpe
   -- roost: onStart logs (LATENT: it returns false for a Terastallized Pokemon; Tera is not modelled), onType removes Flying
-  (CRoost, EvStart) -> Just NLogOnly
+  (CRoost, EvStart) -> Just NRoostStart
   (CRoost, EvType) -> Just NRoostType
   (_, EvModifyAtk) | paradox c -> Just NParadoxAtk
   (_, EvModifyDef) | paradox c -> Just NParadoxDef

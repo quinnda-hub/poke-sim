@@ -203,6 +203,14 @@ data Mon = Mon
   , monType2 :: !Int
   -- ^ -1 when single-typed. Showdown's stored @pokemon.types@: nothing changes them yet. Read types through
   -- 'Engine.Damage.monTypes' (@getTypes()@), never from these.
+  , monTeraType :: !Int
+  -- ^ @pokemon.teraType@: the set's @teraType@, or the species' first type (pokemon.ts 473). A type id; Stellar is one.
+  , monTerastallized :: !Bool
+  -- ^ @pokemon.terastallized@ is set (to 'monTeraType'). Deleted when the Pokemon faints (battle.ts 2617); a switch
+  -- keeps it.
+  , monStellarBoosted :: !Int
+  -- ^ @pokemon.stellarBoostedTypes@ (pokemon.ts 285) as a bit set over type ids: the types a Stellar Pokemon's
+  -- boost has been spent on.
   , monMoves :: !(SV.Vector MoveSlot)
   , monSpeed :: !Int
   -- ^ Showdown's cached @pokemon.speed@ (refreshed only by @updateSpeed@ / @setSpecies@).
@@ -221,6 +229,12 @@ data Mon = Mon
   -- @statusState@ alone, so a Pokemon that fainted badly poisoned keeps its stage.
   , monAbility :: !Int
   -- ^ An index into the @Dex@ ability table (@pokemon.ability@).
+  , monBaseAbility :: !Int
+  -- ^ @pokemon.baseAbility@ (pokemon.ts 442): the set's ability; the Tera forme change sets it to the forme's ability
+  -- (1511, unconditionally). @clearVolatile@ restores 'monAbility' from it on a switch-out and on a faint (1544).
+  , monSetAbility :: !Int
+  -- ^ @toID(set.ability)@, which never changes. The faint path's formeRegression branch resets 'monBaseAbility' to it
+  -- (battle.ts 2607-2611), before @clearVolatile@.
   , monAbilityState :: !EffectState
   , monItem :: !Int
   -- ^ An index into the @Dex@ item table, or 'noItem'.
@@ -243,6 +257,10 @@ data Side = Side
   -- ^ @side.active[0]@ is set (true once the lead has switched in).
   , sConds :: !(SV.Vector CondEntry)
   -- ^ @side.sideConditions@ in insertion order (hazards, screens, Tailwind).
+  , sTeraUsed :: !Bool
+  -- ^ A member has terastallized, so every member's @canTerastallize@ is null (battle-actions.ts 2004-2006).
+  -- @canTerastallize@ itself is not stored: it is @teraType@ unless this is set (battle-actions.ts 1982-1988; no
+  -- gen9ou Pokemon can hold a Z-crystal or Mega Evolve).
   }
   deriving (Eq, Show)
 
@@ -266,6 +284,7 @@ data ActionKind
   | KBeforeTurn
   | KRunSwitch
   | KSwitch
+  | KTerastallize
   | KMove
   | KResidual
   deriving (Eq, Show)

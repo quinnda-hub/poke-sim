@@ -18,6 +18,9 @@ import Control.Monad (forM_, unless, void, when)
 import Control.Monad.Trans.State.Strict (execStateT, get, gets, modify')
 import Data.Maybe (fromMaybe, isNothing)
 import qualified Data.Vector.Strict as SV
+import qualified Data.Map.Strict as M
+import qualified Data.Text as T
+import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as U
 
 import Engine.Chance
@@ -97,6 +100,9 @@ choiceActions b kind p c = case (kind, c) of
   (MoveRequest, Move n)
     | mustStruggle b p -> Just [mk KMove active 0 (-1)]
     | otherwise -> Just [mk KMove active 0 (n - 1)]
+  -- battle-queue.ts 230-236: `unshift` of a 'terastallize' action (only when the Pokemon is not already terastallized),
+  -- ahead of the move; its priority is unset (0) and its speed the Pokemon's action speed ('Engine.Queue.resolveAction')
+  (MoveRequest, MoveTera n) -> (\ms -> [mk KTerastallize active 0 0 | not (monTerastallized (activeMon p b))] ++ ms) <$> choiceActions b kind p (Move n)
   (MoveRequest, Switch n) -> switchTo KSwitch n
   (SwitchRequest, Switch n) -> switchTo KInstaSwitch n
   _ -> Nothing
@@ -195,6 +201,10 @@ runAction dx ac = do
     KRunSwitch -> do
       forM_ (acActor ac) (runSwitch dx)
       afterAction dx ac
+    -- battle.ts 2781-2782: `case 'terastallize': this.actions.terastallize(action.pokemon)`, then the shared tail
+    KTerastallize -> do
+      forM_ (acActor ac) (terastallize dx)
+      afterAction dx ac
     KBeforeTurn -> do
       eachEvent dx EvBeforeTurn -- eachEvent('BeforeTurn')
       afterAction dx ac
@@ -203,6 +213,48 @@ runAction dx ac = do
       fieldEvent dx EvResidual Nothing -- fieldEvent('Residual')
       afterAction dx ac
 {-# INLINABLE runAction #-}
+
+-- | @actions.terastallize@ (battle-actions.ts 1990-2026), which draws nothing. An Ogerpon whose Tera type is not Fire, Grass,
+-- Rock or Water returns at once (no illusion is supported): nothing is set, the side keeps its Tera. Otherwise the Pokemon is
+-- terastallized and the side's @canTerastallize@ goes ('sTeraUsed'); an Ogerpon changes forme permanently
+-- (@formeChange@: Ogerpon-Teal-Tera with Embody Aspect (Teal)); then @AfterTerastallization@ runs.
+-- LATENT: Morpeko's branch (2018-2023) needs Hunger Switch's forme change, which is not supported; base Terapagos
+-- terastallizes like any other Pokemon (no Terapagos forme is supported).
+{-# INLINABLE terastallize #-}
+terastallize :: MonadChance m => Dex -> Actor -> Eng m ()
+terastallize dx a@(Actor p _) = do
+  m <- gets (`monOf` a)
+  let sp = speciesData dx (monSpecies m)
+      ogerpon = spBaseSpecies sp == "Ogerpon"
+      teraName = dxTypeNames dx V.! monTeraType m
+  unless (ogerpon && teraName `notElem` ["Fire", "Grass", "Rock", "Water"]) $ do
+    modify' (modifySide p (\s -> s {sTeraUsed = True}) . modifyMon a (\x -> x {monTerastallized = True}))
+    when ogerpon (formeChangeTera dx a)
+    void (runEvent dx EvAfterTerastallization a Nothing Nothing RNone)
+
+-- | @pokemon.formeChange(ogerponSpecies, null, true)@ (pokemon.ts 1449-1518) of Ogerpon's Terastallization: @setSpecies@
+-- (species, stored types, stats and speed), @baseSpecies@ (the species: transform is unsupported), then @setAbility(ability0,
+-- null, null, true)@: the old ability's @End@, the new ability and a fresh state (the next effect order), the new ability's
+-- @Start@ (Embody Aspect boosts a terastallized Ogerpon-Teal-Tera); @baseAbility@ is the new ability.
+-- LATENT: every Ogerpon forme has the same base stats, so the stats are not recomputed; `source || !getAbility().flags
+-- ['cantsuppress']` (1509) is always true as no supported ability has that flag.
+formeChangeTera :: MonadChance m => Dex -> Actor -> Eng m ()
+formeChangeTera dx a = do
+  m <- gets (`monOf` a)
+  let sp = speciesData dx (monSpecies m)
+      base = if T.null (spBattleOnly sp) then spId sp else spBattleOnly sp
+      newId = base <> (if base == "ogerpon" then "tealtera" else "tera")
+  case (M.lookup newId (dxSpeciesIx dx), M.lookup (spAbility0 (speciesData dx (M.findWithDefault (monSpecies m) newId (dxSpeciesIx dx)))) (dxAbilityIx dx)) of
+    (Just ns, Just ab) -> do
+      let nsp = speciesData dx ns
+      modify' (modifyMon a (\x -> x {monSpecies = ns, monType1 = spType1 nsp, monType2 = spType2 nsp, monSpeed = stSpe (monStats x)}))
+      -- setAbility: singleEvent('End', oldAbility, this.abilityState, this), then the new state, then its Start
+      void (singleEvent dx EvEnd (EffectKey EffAbility (monAbility m)) (OwnMon a) Nothing Nothing RNone)
+      order <- nextEffectOrder True
+      modify' (modifyMon a (\x -> x {monAbility = ab, monAbilityState = noEffectState {esOrder = order}}))
+      void (singleEvent dx EvStart (EffectKey EffAbility ab) (OwnMon a) Nothing Nothing RNone)
+      modify' (modifyMon a (\x -> x {monBaseAbility = ab}))
+    _ -> pure ()
 
 -- | @case 'team'@: rebuild the side's Pokemon order one action at a time. No tail.
 teamAction :: Monad m => Action -> Eng m ()
@@ -332,7 +384,7 @@ switchIn dx p target = do
         -- 142-143: Protosynthesis, Quark Drive and Unburden remove their volatile)
         endAbilityAndItem dx o
         -- queue.cancelAction(oldActive); oldActive.clearVolatile() (resets the stat stages, the volatiles and the cached speed; the status, and toxic's stage, stay)
-        modify' (\b -> modifyMon o (\m -> m {monSpeed = stSpe (monStats m), monBoosts = noBoosts, monVolatiles = SV.empty}) b {bQueue = cancelAction o (bQueue b)})
+        modify' (\b -> modifyMon o (\m -> m {monSpeed = stSpe (monStats m), monBoosts = noBoosts, monVolatiles = SV.empty, monAbility = monBaseAbility m}) b {bQueue = cancelAction o (bQueue b)})
       _ -> pure ()
     case old of
       Just o -> do
@@ -758,7 +810,9 @@ getDamage fmt dx user target mv = do
   -- again. `onEffect` puts the move's own onBasePower first in the list, which is then sorted with the others
   -- ('runEventOnEffect'); Fickle Beam's randomChance is drawn when its handler runs, after the crit roll. A handler only ever
   -- raises the power here, so the `!basePower` early return (damage 0, no further draw) is unreachable
-  power <- (\r -> case r of RInt p -> max 1 p; _ -> max 1 bp0) <$> runEventOnEffect dx EvBasePower user (Just target) mv (RInt (max 1 bp0))
+  power1 <- (\r -> case r of RInt p -> max 1 p; _ -> max 1 bp0) <$> runEventOnEffect dx EvBasePower user (Just target) mv (RInt (max 1 bp0))
+  -- getDamage (1717-1726): the Terastallized user's 60 base-power floor, after the BasePower event and the clamp
+  let power = teraFloor dx um mv power1
   -- getDamage (battle-actions.ts 1729-1756): the Pokemon and the stat each side of the formula reads.
   -- `attacker = move.overrideOffensivePokemon === 'target' ? target : source` (Foul Play: the target's Attack and stage),
   -- `attackStat = move.overrideOffensiveStat || (isPhysical ? 'atk' : 'spa')` (Body Press: Defense), `defenseStat =

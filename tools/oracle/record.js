@@ -170,7 +170,10 @@ function record(scenario, hooks) {
 	const prng = new RecordingPRNG(scenario.seed, draws);
 	const battle = new Battle({ formatid: scenario.format, prng });
 	const policy = mulberry32(scenario.policySeed ?? 1);
-	const opts = { tera: !!scenario.tera };
+	// tera: offer `move N terastallize` choices. teraChance (optional, with tera): the policy picks among the other choices
+	// uniformly, then takes a move's Tera variant with this probability, so a side terastallizes at varied turns rather than
+	// almost always on the first. Without teraChance the pick is uniform over every legal choice.
+	const opts = { tera: !!scenario.tera, teraChance: scenario.teraChance };
 	const maxTurns = scenario.maxTurns ?? 300;
 	const scripted = (scenario.choices || []).slice();
 
@@ -196,6 +199,14 @@ function record(scenario, hooks) {
 		return `team ${order.join('')}`;
 	};
 
+	const pick = (list) => {
+		if (opts.teraChance === undefined) return list[Math.floor(policy() * list.length)];
+		const plain = list.filter(c => !c.endsWith(' terastallize'));
+		const c = plain[Math.floor(policy() * plain.length)];
+		const tera = `${c} terastallize`;
+		return list.includes(tera) && policy() < opts.teraChance ? tera : c;
+	};
+
 	while (!battle.ended) {
 		if (battle.turn > maxTurns) { truncated = true; break; }
 		const newDraws = draws.slice(drawCursor);
@@ -207,7 +218,7 @@ function record(scenario, hooks) {
 			if (legal[i].length === 0) return null;
 			if (script && script[i]) return script[i];
 			if (legal[i][0] === 'team') return pickTeam(s);
-			return legal[i][Math.floor(policy() * legal[i].length)];
+			return pick(legal[i]);
 		});
 		steps.push({ draws: newDraws, state, legal, chosen });
 		battle.sides.forEach((s, i) => {
@@ -226,6 +237,8 @@ function record(scenario, hooks) {
 		format: scenario.format,
 		seed: scenario.seed,
 		policySeed: scenario.policySeed ?? 1,
+		// Present (true) only when the policy was offered `move N terastallize` choices; older traces never were.
+		...(opts.tera ? { tera: true } : {}),
 		teams: scenario.teams,
 		steps,
 		truncated,

@@ -137,6 +137,8 @@ abilityBodies ty wx name = case name of
          , (POwn, EvEnd, BNative NUnburdenEnd) ]
   -- toxicdebris: onDamagingHit, a Physical move sets Toxic Spikes on the attacker's side
   "toxicdebris" -> Just [(POwn, EvDamagingHit, BNative NToxicDebris)]
+  -- embodyaspectteal: onStart (also its SwitchIn: the state is new at every switch-in, so it boosts again)
+  "embodyaspectteal" -> Just [(POwn, EvStart, BNative NEmbodyAspectTeal)]
   -- technician: onBasePower, basePower after the accumulated modifier <= 60 -> chainModify(1.5)
   "technician" -> Just [(POwn, EvBasePower, BNative NTechnician)]
   -- filter, solidrock, prismarmor: onSourceModifyDamage, `typeMod > 0` -> chainModify(0.75)

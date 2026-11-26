@@ -24,6 +24,8 @@ data Choice
     Team [Int]
   | -- | @move N@, 1-based slot.
     Move !Int
+  | -- | @move N terastallize@ (side.ts 1268-1287): the move, and Terastallization before it.
+    MoveTera !Int
   | -- | @switch N@, 1-based slot.
     Switch !Int
   deriving (Eq, Show)
@@ -32,6 +34,7 @@ data Choice
 renderChoice :: Choice -> String
 renderChoice (Team xs) = "team " ++ concatMap show xs
 renderChoice (Move n) = "move " ++ show n
+renderChoice (MoveTera n) = "move " ++ show n ++ " terastallize"
 renderChoice (Switch n) = "switch " ++ show n
 
 -- | What a request asks for.
@@ -91,7 +94,8 @@ isLegal b p c = case (request b, c) of
   (Awaiting TeamPreview _ _, Team xs) -> sort xs == [1 .. SV.length (sMons (sideOf p b))]
   _ -> c `elem` legalChoices b p
 
--- | Legal choices in Showdown's order: moves with PP (or the single Struggle choice), then switches.
+-- | Legal choices in Showdown's order: moves with PP (or the single Struggle choice), each followed by its Tera variant while
+-- the side can still Terastallize, then switches.
 -- At team preview: the n lead choices, each listing the chosen lead first and the rest ascending.
 legalChoices :: Battle -> Player -> [Choice]
 legalChoices b p = case request b of
@@ -103,9 +107,15 @@ legalChoices b p = case request b of
   where
     s = sideOf p b
     asked a1 a2 = if p == P1 then a1 else a2
+    -- each move's Tera variant follows it while `canTerastallize` holds (pokemon.ts getMoveRequestData 1167-1168: the request
+    -- carries it only without a locked move; battle-actions.ts 2004-2006: not once a member of the side has Terastallized).
+    -- A Pokemon that must Struggle has no Tera choice: getMoveRequestData sets `lockedMove = 'struggle'` (pokemon.ts 1133-1139),
+    -- which skips the `canTerastallize` line, so the recorded list is `move 1` alone.
+    -- LATENT: no locking move or volatile is supported yet, so Struggle is the only locked move.
+    withTera i = if sTeraUsed s then [Move i] else [Move i, MoveTera i]
     moves
       | mustStruggle b p = [Move 1]
-      | otherwise = [Move i | (i, ms) <- zip [1 ..] (SV.toList (monMoves (activeMon p b))), msPP ms > 0, not (msDisabled ms)]
+      | otherwise = concat [withTera i | (i, ms) <- zip [1 ..] (SV.toList (monMoves (activeMon p b))), msPP ms > 0, not (msDisabled ms)]
     switches =
       [ Switch (i + 1)
       | i <- [1 .. U.length (sSlots s) - 1]

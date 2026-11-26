@@ -583,3 +583,85 @@ engine does not hold, and wait for a phase that adds it.
      values that no trace observes; the property `itemMoves` checks it.
 
 Each phase is its own PR, stacked on the one before.
+
+## Terastallization (slice 5)
+
+Designed 2026-11-26 from Showdown 0.11.11. gen9ou allows Terastallization
+(its Standard ruleset has no Terastal Clause) and bans Tera Blast, so no
+Stellar-type move can appear.
+
+### The choice and the action
+
+- The choice is `MoveTera n` (`move n terastallize`, side.ts 1268-1287). It is
+  legal when the active Pokémon's `canTerastallize` is set: its Tera type,
+  until any member of its side terastallizes (battle-actions.ts 1982-1988,
+  2004-2006). The state keeps that as `sTeraUsed`, not per Pokémon. No gen9ou
+  Pokémon holds a Z-crystal or can Mega Evolve, the other two null cases.
+- `legalChoices` lists each move's Tera variant right after the move, as
+  record.js does (`move 1`, `move 1 terastallize`, `move 2`, ...). A Pokémon
+  locked into a move has none, and that includes Struggle: with no usable
+  move the request sets `lockedMove = 'struggle'` (pokemon.ts 1124-1126), and
+  `canTerastallize` is written only without a locked move (1158-1168).
+- The move action brings a `KTerastallize` action, queued before it only
+  when the Pokémon is not already terastallized (battle-queue.ts 230-236), at
+  order 106 (battle-queue.ts 188): after switches, before every move whatever
+  its priority. Two Tera actions sort by speed, and a tie draws.
+- `terastallize()` (battle-actions.ts 1990-2026) draws nothing. It sets
+  `terastallized`, clears the side's `canTerastallize`, and runs
+  `AfterTerastallization`. Then the shared action tail runs, as after every
+  action (its `Update` and faint checks).
+- A fainted Pokémon loses `terastallized` (battle.ts 2617). A switch keeps it.
+
+### What terastallized changes
+
+- `getTypes` returns `[teraType]` before the `Type` event (pokemon.ts
+  2161-2163), so Roost's type change no longer applies. Every type read goes
+  through `monTypes` already (slice 4b), so effectiveness, immunities,
+  grounding, hazards and status immunities follow.
+- STAB (battle-actions.ts 1820-1850) reads both: the current types
+  (`hasType`) and the types before Terastallization (`getTypes(false, true)`,
+  the stored types with the `Type` event). A Tera type that is also an
+  original type gives 2x. `ModifySTAB` runs after (Adaptability, LATENT if
+  not supported).
+- The 60 base-power floor (battle-actions.ts 1717-1726): a terastallized
+  user's move of its Tera type with base power under 60, priority 0 or less,
+  not multi-hit and not variable-power, is raised to 60.
+- Roost's volatile fails on a terastallized Pokémon (data/moves.ts
+  15449-15453). Setting or adding a type also fails (pokemon.ts 2140-2155);
+  no supported move does either.
+- Ogerpon's Tera changes its forme (battle-actions.ts 2010-2014): Ogerpon
+  becomes Ogerpon-Teal-Tera, whose ability is Embody Aspect (Teal). An
+  Ogerpon whose Tera type is not Fire, Grass, Rock or Water does not
+  terastallize at all; the choice is accepted and nothing happens
+  (1991-1995). Morpeko's and Terapagos's branches need forme changes that
+  are not supported; base Terapagos terastallizes like any other Pokémon.
+  The forme change is a permanent `formeChange` (pokemon.ts 1449-1518): the
+  species becomes Ogerpon-Teal-Tera, `setAbility` runs (the old ability's
+  `End`, a fresh state, Embody Aspect's `Start`) unless the current ability
+  is `cantsuppress` (no supported ability is, so that branch is LATENT), and
+  `baseAbility` becomes Embody Aspect either way. A
+  fainting Ogerpon reverts to its set's species and ability (battle.ts
+  2607-2611). The state keeps `monBaseAbility` and `monSetAbility` for this.
+
+### The trace contract
+
+- A trace recorded with Tera choices offered carries `tera: true`. Without
+  it, the parity test compares the recorded legal lists with the engine's
+  minus its `MoveTera` choices: the policy was never offered them, though
+  Showdown allowed them.
+- Every Pokémon's `teraType` and `terastallized` are compared at every
+  decision point, in every trace.
+- record.js takes an optional `teraChance`: the policy picks among the other
+  choices, then takes a move's Tera variant with that probability, so Tera
+  happens at varied turns. Without it, scenarios behave exactly as before.
+
+### Phases
+
+1. **5a: Terastallization without Stellar.** Everything above. A team whose
+   Tera type is Stellar is rejected at `parseTeam`, as an unsupported input,
+   until 5b.
+2. **5b: Stellar.** `getTypes` keeps the original types; STAB is 2x for an
+   original type and 1.2x (4915/4096) for any other, once per type
+   (`stellarBoostedTypes`, kept as `monStellarBoosted`); the 60 floor
+   applies to any type not yet boosted. A Stellar-type move against a
+   terastallized target (typeMod 1) cannot occur in gen9ou.

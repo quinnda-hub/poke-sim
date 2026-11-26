@@ -30,6 +30,7 @@ orderOf k = case k of
   KBeforeTurn -> 4
   KRunSwitch -> 101
   KSwitch -> 103
+  KTerastallize -> 106
   KMove -> 200
   KResidual -> 300
 

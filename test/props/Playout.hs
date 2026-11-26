@@ -45,6 +45,8 @@ genTeams dx = (,) <$> genTeam <*> genTeam
     abilities = supportedAbilities dx
     items = supportedItems dx
     natures = M.keys (dxNatureIx dx)
+    -- every real type; Stellar is rejected by parseTeam until phase 5b
+    teraTypes = [t | t <- V.toList (dxTypeNames dx), t `notElem` ["Stellar", "???"]]
     genTeam = do
       n <- Gen.int (Range.linear 1 6)
       sets <- Gen.list (Range.singleton n) genSet
@@ -59,8 +61,9 @@ genTeams dx = (,) <$> genTeam <*> genTeam
       evs <- Gen.list (Range.singleton 6) (Gen.int (Range.linear 0 252))
       ab <- Gen.element abilities
       it <- Gen.element items
+      tera <- Gen.element teraTypes
       pure (object
-        [ "species" .= sp, "moves" .= ms, "nature" .= nat, "level" .= lvl, "ability" .= ab, "item" .= it
+        [ "species" .= sp, "teraType" .= tera, "moves" .= ms, "nature" .= nat, "level" .= lvl, "ability" .= ab, "item" .= it
         , "evs" .= object [K.fromText k .= v | (k, v) <- zip ["hp", "atk", "def", "spa", "spd", "spe"] evs]
         ])
 
@@ -179,7 +182,17 @@ checkBattle dx b = do
       (True, True) -> Left (show p ++ " is asked but has no legal choices")
       (False, False) -> Left (show p ++ " is not asked but has legal choices")
       _ -> Right ()
-    side (p, s) = mapM_ (mon p) (SV.toList (sMons s))
+    side (p, s) = do
+      mapM_ (mon p) (SV.toList (sMons s))
+      -- Terastallization: at most one member is terastallized, and none unless the side has used its Tera (a member that
+      -- fainted lost `terastallized` but the side keeps having used it)
+      let terad = length (filter monTerastallized (SV.toList (sMons s)))
+      if terad <= 1 && (sTeraUsed s || terad == 0)
+        then Right ()
+        else Left (show p ++ ": " ++ show terad ++ " terastallized members with sTeraUsed " ++ show (sTeraUsed s))
+      -- a Tera choice is legal only together with the move of the same slot
+      let cs = legalChoices b p
+      if and [Move n `elem` cs | MoveTera n <- cs] then Right () else Left (show p ++ ": a Tera choice without its move")
     mon p m = do
       let who = show p ++ " " ++ show (monSpecies m) ++ ": "
           bad what = Left (who ++ what)
@@ -233,9 +246,16 @@ checkBattle dx b = do
           roosted = fromEnum CRoost `elem` ids
           without = [t | t <- baseTypes, Just t /= flyingId]
           expectedTypes = if roosted then (if null without then maybe [] pure normalId else without) else baseTypes
-      if storedTypes == baseTypes && gotTypes == expectedTypes && (not roosted || all (\t -> Just t /= flyingId) gotTypes)
+      -- a terastallized Pokemon's types are exactly its Tera type, and a fainted one is not terastallized
+      let expected' = if monTerastallized m then [monTeraType m] else expectedTypes
+      if monTerastallized m && (monFainted m || roosted) then bad "terastallized and fainted, or with a Roost" else Right ()
+      -- the base ability is the set's, except in a Tera forme, where the forme change made it Embody Aspect (Teal)
+      let teraForme = spBaseSpecies sp == "Ogerpon" && spBattleOnly sp /= ""
+      if (if teraForme then abilityId dx (monBaseAbility m) == "embodyaspectteal" else monBaseAbility m == monSetAbility m)
+        then Right () else bad "the base ability is not the set's, outside a Tera forme"
+      if storedTypes == baseTypes && gotTypes == expected' && (not roosted || all (\t -> Just t /= flyingId) gotTypes)
         then Right ()
-        else bad ("stored types " ++ show storedTypes ++ ", getTypes " ++ show gotTypes ++ " but " ++ show expectedTypes)
+        else bad ("stored types " ++ show storedTypes ++ ", getTypes " ++ show gotTypes ++ " but " ++ show expected')
       -- a Roost never survives to a move request (the Residual of its turn removes it); the exception, as for flinch, is
       -- a battle that ends mid-turn
       case request b of

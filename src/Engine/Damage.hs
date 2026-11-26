@@ -7,6 +7,8 @@ module Engine.Damage
   , typeImmuneTo
   , statusKey
   , monTypes
+  , monTypesPreTera
+  , teraFloor
   , hasTypeNamed
   , hasItemNamed
   , typeIdNamed
@@ -29,7 +31,7 @@ import Engine.Dex
 import Engine.Event (Body (..), CondId, EventId (..), HandlerSpec (..), NativeId (..), Prefix (..))
 import Engine.Format (Format, trunc, truncBits)
 import Engine.Modifier (modify)
-import Engine.Rule (StatusId (..))
+import Engine.Rule (Hits (..), MoveRule (..), StatusId (..))
 import Engine.State (Mon (..), MonStatus (..), Volatile (..), noItem)
 
 -- | Denominator of the crit chance for a crit stage, or 'Nothing' when the move cannot crit
@@ -53,10 +55,19 @@ critDenominator ratio = case max 0 (min 4 ratio) of
 -- volatiles that have the handler, as a pure function; at most one does, so it sorts nothing and draws nothing. The fast path,
 -- a Pokemon with no volatile, returns the stored types: exact because no ability, item, status, side, field or foe handler of
 -- the event exists.
--- LATENT: a Terastallized Pokemon returns @[terastallized]@ before the event (2161), and @addedType@ (Trick-or-Treat) is
--- appended after it (2167); neither is modelled. @setType@ (Soak, Burn Up) would overwrite 'monType1'/'monType2'.
+-- A Terastallized Pokemon returns @[terastallized]@ before the event (2161-2163; Stellar, which keeps its types, is not
+-- supported). Roost's volatile does not apply then, and cannot be added (data/moves.ts 15449).
+-- LATENT: @addedType@ (Trick-or-Treat) is appended after the event (2167) and is not modelled. @setType@ (Soak, Burn Up)
+-- would overwrite 'monType1'/'monType2'.
 monTypes :: Dex -> Mon -> (Int, Int)
 monTypes dx m
+  | monTerastallized m = (monTeraType m, noType)
+  | otherwise = monTypesPreTera dx m
+
+-- | @pokemon.getTypes(false, true)@ (@preterastallized@): the stored types through the @Type@ event, as 'monTypes' computes
+-- them for a Pokemon that has not Terastallized.
+monTypesPreTera :: Dex -> Mon -> (Int, Int)
+monTypesPreTera dx m
   | SV.null vs = (monType1 m, monType2 m)
   | otherwise = SV.foldl' apply (monType1 m, monType2 m) vs
   where
@@ -209,10 +220,15 @@ modifyDamage f dx attacker defender mv crit roll16 base1 =
       -- "???" never gets STAB (modifyDamage: `if (type !== '???')`); `baseDamage = this.battle.modify(baseDamage, stab)`
       -- with stab 1.5, a modify() of its own (battle-actions.ts ~1850), not a chainModify
       -- `pokemon.hasType(type) || pokemon.getTypes(false, true).includes(type)`: both read getTypes() ('monTypes')
-      -- LATENT: Showdown runs ModifySTAB (Adaptability, Terastallization).
+      -- (1827: `pokemon.hasType(type) || pokemon.getTypes(false, true).includes(type)`), then 2 when the Tera type is the move's
+      -- type and an original type (1844-1846)
       (at1, at2) = monTypes dx attacker
-      stab = mvType mv /= noType && (mvType mv == at1 || mvType mv == at2)
-      base4 = if stab then modify f base3 6144 else base3
+      (pt1, pt2) = monTypesPreTera dx attacker
+      ty = mvType mv
+      stab = ty /= noType && (ty == at1 || ty == at2 || ty == pt1 || ty == pt2)
+      teraStab = monTerastallized attacker && monTeraType attacker == ty && (ty == pt1 || ty == pt2)
+      -- LATENT: runEvent('ModifySTAB') (1847), after the 2x: its only listener, Adaptability, is not supported.
+      base4 = if stab then modify f base3 (if teraStab then 8192 else 6144) else base3
       tm = moveTypeMod dx mv defender
       base5
         | tm > 0 = base4 * 2 ^ tm
@@ -224,6 +240,21 @@ modifyDamage f dx attacker defender mv crit roll16 base1 =
       -- step and before the final ModifyDamage event
       base6 = if monStatus attacker == StatusBrn && mvPhysical mv && mvId mv /= "facade" then modify f base5 2048 else base5
    in base6
+
+-- | The base-power floor of a Terastallized user (battle-actions.ts 1717-1726): a move of the user's Tera type (`hasType` reads
+-- 'monTypes': the Tera type alone) with base power under 60, whose dex priority is at most 0 and which has no multihit (the
+-- dex's), and is not variable-power (@basePower@ 0 or 150 with a @basePowerCallback@), is raised to 60. Runs after the
+-- @BasePower@ event and its clamp. (Stellar's variant is phase 5b.)
+teraFloor :: Dex -> Mon -> MoveData -> Int -> Int
+teraFloor dx user mv power
+  | monTerastallized user, mvType mv /= noType, mvType mv == fst (monTypes dx user)
+  , power < 60, mvPriority mv <= 0, mrHits (mvRule mv) == OneHit
+  , not ((mvPower mv == 0 || mvPower mv == 150) && hasCallback) = 60
+  | otherwise = power
+  where
+    hasCallback = case moveSpec mv POwn EvBasePowerCallback of
+      Just _ -> True
+      Nothing -> False
 
 -- | The end of @modifyDamage@ after @runEvent('ModifyDamage')@: `if (this.battle.gen !== 5 && !baseDamage) return 1`,
 -- then 16-bit truncation, which can truncate to 0 (battle-actions.ts 1895-1899).
