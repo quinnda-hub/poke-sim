@@ -736,7 +736,8 @@ runEventCrit dx crit ev target source mv relay0 = do
           Nothing -> go fmt hs r md
           Just body -> do
             -- `this.effectState.target = effectHolder` (battle.ts 908-909) when the callback is a function: a field state
-            -- gets its target (the Field) the first time one of its callbacks runs through runEvent
+            -- gets its target (the Field) the first time one of its callbacks runs through runEvent.
+            -- LATENT: unverified, no trace observes the bit (see the in-place check in 'fieldEvent')
             case (hOwner h, body) of
               (OwnField, BConst _) -> pure ()
               (OwnField, _) -> modify' (\bb -> maybe bb (\st -> setOwnerState OwnField (hKey h) st {esHasTarget = True} bb) (ownerState bb OwnField (hKey h)))
@@ -886,6 +887,11 @@ fieldEvent dx ev targets = do
           -- effectOrder, unique to each creation; a Pokemon's effect by id. A field state is checked only once it has a
           -- target (548-561; docs/handlers.md "A field state gains a target"): before that the callback runs
           -- whatever has become of the state. The bit is the live state's, or the collected one's when it is gone.
+          -- LATENT: the target bit ('esHasTarget', set where runEvent runs a field state's callback, below) is implemented
+          -- but unverified: removing the line that sets it leaves every recorded trace passing. It only matters when a
+          -- weather or terrain state is replaced or removed while one of its handlers is still queued in the same
+          -- fieldEvent, and no weather or terrain has a SwitchIn handler and nothing sets one during Residual; their
+          -- subOrders (5 and 0) do not depend on it.
           -- LATENT: Showdown compares the state object itself for a Pokemon's effect (an effect removed and re-added
           -- in one fieldEvent would pass here) and for a field state with a target (a weather cleared and set again
           -- with the same id would pass here; clearWeather also resets the same object in place, so it would pass there

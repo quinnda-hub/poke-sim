@@ -390,7 +390,8 @@ fieldConditions conditionsV moveEntries = do
   -- LATENT (pseudo-weather entries below): Showdown's runEvent sets `effectState.target = effectHolder` on each callback
   -- it runs (battle.ts 908-909), so after a pseudo-weather's first runEvent callback its subOrder fallback is 5, not 2
   -- (resolvePriority 995-998), and fieldEvent's in-place check (548-561) starts to apply to that field state.
-  -- The in-place half is modelled ('Engine.State.esHasTarget'); the subOrder half is not, and is unreachable while no
+  -- The in-place half is implemented ('Engine.State.esHasTarget') but UNVERIFIED: no trace can observe it (see the LATENT
+  -- in 'Engine.Dispatch.fieldEvent'). The subOrder half is not modelled, and is unreachable while no
   -- pseudo-weather has a runEvent handler without an explicit subOrder (Trick Room has no runEvent handler). A weather's
   -- subOrder is 5 and a terrain's 0 whatever their target.
   weathers <- traverse (\(k, v) -> (,) k <$> effectFor k 5 PField False v (fieldCondBodies k))

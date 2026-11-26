@@ -330,8 +330,17 @@ target yet. Slice 3's only pseudo-weather, Trick Room, has no `runEvent`
 handler, so the sort-key half cannot happen in slice 3. Weather and terrain do
 have `runEvent` handlers (Sandstorm's `onModifySpD`, Snowscape's
 `onModifyDef`, `WeatherModifyDamage`, the terrains' `onBasePower`, `onSetStatus`
-and `onTryHit`). **Phases 3c and 3d must model the bit**, set it where
-`runEvent` would, and use it for the in-place check.
+and `onTryHit`). Phases 3c and 3d model the bit: it is set where `runEvent`
+would set it, and it gates the in-place check.
+
+**The bit is implemented but unverified.** No slice 3 trace changes when the
+engine never sets it. The in-place check can only differ when a weather or
+terrain state is replaced while one of its handlers is still queued in the
+same `fieldEvent`. No weather or terrain has a `SwitchIn` handler, and nothing
+supported sets weather or terrain during `Residual`. A slice that adds either
+(a weather or terrain set at end of turn, a field state with a `SwitchIn`
+handler) or a pseudo-weather with a `runEvent` handler, which makes the
+sort-key half live, must record a case for it.
 
 ### Handler argument names
 

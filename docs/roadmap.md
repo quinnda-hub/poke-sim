@@ -94,6 +94,41 @@ Last updated 2026-11-25.
   - The parity test's long tier had been keeping every decoded trace alive,
     about 10 GB for 2,000 traces, and was killed by the OOM killer on the
     15 GB laptop. It now peaks at about 80 MB.
+- **Slice 3: field state**, in five phases (design in docs/handlers.md,
+  "Field state (slice 3)").
+  - 3a: side and field holders, `effectOrder` (Showdown's `initEffectState`
+    counter), and the entry hazards: Stealth Rock, Spikes, Toxic Spikes,
+    Sticky Web, Heavy-Duty Boots and Toxic Debris. Side- and field-targeted
+    moves take Showdown's `tryMoveHit` path.
+  - 3b: durations and their countdown (`durationCallback`, `SideEnd`,
+    `FieldEnd`), Reflect, Light Screen, Light Clay, Tailwind and Trick Room.
+    Two screens on one side tie in `ModifyDamage` and are shuffled.
+  - 3c: sun, rain, sand and snow, set by move or ability; an ability's or
+    item's `onStart` runs as its `SwitchIn` handler. The rocks, sand chip and
+    its immunities, the weather damage step, the sand and snow stat boosts,
+    and the weather speed abilities and Hydration.
+  - 3d: the four terrains, the surges and Terrain Extender, grounding, and
+    the new `TryHit`, `SetStatus` and `TryAddVolatile` event points, with
+    Overcoat, Leaf Guard and the powder flag.
+  - 3e: item use (`useItem`), Protosynthesis, Quark Drive, Booster Energy,
+    the seeds and Unburden; ability and item `End` at switch-out and faint.
+  - 1,500 slice-3 battles are recorded, rebalanced and re-recorded in each
+    phase, with a tally from Showdown's own events in which every counter is
+    non-zero. Parity checks 3,800 traces, 263,530 decision points and
+    579,496 draws. Each phase's deliberate mutations were caught, or shown to
+    be unobservable with a reason.
+  - The parity test now accepts a trace cut off at the recorder's turn limit:
+    it is checked up to the cut, and an empty step must be refused for the
+    missing choice. Before, the three such battles would have been skipped.
+  - Implemented but unverified, because nothing accepted reaches them: the
+    field-state target bit (docs/handlers.md), and Electric and Misty
+    Terrain's sleep, Yawn and confusion blocks.
+  - Whitelist coverage: 162 of 300 moves (56.7% by weight), 22 of 85
+    abilities (30.0%) and 31 of 71 items (68.2%).
+  - Independent reviews of 3a and of 3b-3e found nothing blocking. Their
+    should-fix findings are fixed: a move-acceptance hole for weather moves
+    with unrelated `condition` blocks, and weak trace coverage of switch-in
+    priority (now caught by 154 traces, from 2).
 - **Test tiers.** The fast tier (`POKESIM_TIER=fast`) replays every 10th trace
   and runs the hedgehog properties at 100 tests each, in about 14 s. The long
   tier, which gates merges into main, replays everything and runs the
@@ -149,6 +184,9 @@ The cause is the same: every event now also collects side and field holders,
 even when none are attached. Cumulatively, 3a runs at about 0.54 of slice
 2a's throughput. The same optimisation step covers it.
 
+Slices 3b-3e were not benchmarked on the laptop. Measure slice 3 as a whole
+against `main` on the workstation at the start of the optimisation step.
+
 ## Known gaps in slice 0
 
 - **The 1000-turn tie is implemented but never exercised.** No recorded battle
@@ -191,14 +229,18 @@ will be wrong once later mechanics arrive. Each is marked in the code with a
 Each step is gated by the parity test. See
 [oracle-testing.md](oracle-testing.md).
 
-1. **Field state:** weather, terrain, hazards, screens. This makes
-   `effectOrder` live for hazards. Choice items wait for the choice-lock
-   volatile, and Heavy-Duty Boots waits for hazards.
-2. **Cheaper event points.** Slice 2b costs about 38% on the plain path (see
-   the benchmark log). Optimise with draws and state unchanged, measured on
+1. **Cheaper event points.** Slice 2b costs about 38% on the plain path and
+   3a about another 13% (see the benchmark log). Optimise with draws and state unchanged, measured on
    the workstation.
-3. **More abilities and items** on the handler system, in usage order. Each
-   one is a small task with an objective pass or fail, which suits delegation.
+2. **Moves' own handler code** (`onHit`, `onAfterHit`, `onTry`,
+   `onModifyMove`, `basePowerCallback`, ...), which the rule translation
+   rejects today. It brings hazard removal (Rapid Spin, Defog, Mortal Spin,
+   Court Change, Ice Spinner), Aurora Veil, the screen breakers, and the
+   terrain moves (Grassy Glide, Expanding Force, Misty Explosion, Rising
+   Voltage, Terrain Pulse).
+3. **More abilities and items** on the handler system, in usage order, Air
+   Balloon first. Choice items wait for the choice-lock volatile. Each one is
+   a small task with an objective pass or fail, which suits delegation.
 4. **Terastallization.**
 5. **Escape hatches** for the mechanics that resist the rule vocabulary, such
    as Substitute and Transform.

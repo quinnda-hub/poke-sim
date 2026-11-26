@@ -169,6 +169,34 @@ function assign(scenario, pool, seed) {
 	}
 	if (mirror) scenario.teams[1] = JSON.parse(JSON.stringify(scenario.teams[0]));
 	else for (const s of scenario.teams[1]) set(s);
+	// the leads (the first Pokemon of each team, chosen by a scripted team order) are paired on purpose in about one battle in
+	// six: a listener (a Protosynthesis or Quark Drive holder with Booster Energy, or a seed holder) that is FASTER than an
+	// opposing setter of the field condition it listens to (Drought, Electric Surge, or the seed's surge), at distinct speeds.
+	// At the turn-0 switch-in the two sit in one SwitchIn event, where the listener's onSwitchInPriority (-2 for the ability and
+	// Booster Energy, -1 for the seeds) is what makes it run after the setter: with it Drought sets sun first and Booster Energy
+	// is kept; without it the faster holder runs first and Booster Energy is used
+	const pairing = [];
+	if (pool.abilities.includes('protosynthesis') && pool.abilities.includes('drought') && pool.items.includes('boosterenergy')) pairing.push(['protosynthesis', 'boosterenergy', 'drought']);
+	if (pool.abilities.includes('quarkdrive') && pool.abilities.includes('electricsurge') && pool.items.includes('boosterenergy')) pairing.push(['quarkdrive', 'boosterenergy', 'electricsurge']);
+	for (const [seed, surge] of [['electricseed', 'electricsurge'], ['grassyseed', 'grassysurge'], ['mistyseed', 'mistysurge'], ['psychicseed', 'psychicsurge']]) {
+		if (pool.items.includes(seed) && pool.abilities.includes(surge)) pairing.push(['noability', seed, surge]);
+	}
+	if (pairing.length && int(100) < 16) {
+		const [listenerAbility, listenerItem, setterAbility] = pick(pairing.concat(pairing.slice(0, 2), pairing.slice(0, 2)));
+		const listenerSide = int(2);
+		const L = scenario.teams[listenerSide][0];
+		const S = JSON.parse(JSON.stringify(L));
+		scenario.teams[1 - listenerSide][0] = S;
+		L.level = 100; S.level = 50;
+		L.ability = listenerAbility === 'noability' ? 'No Ability' : dex.abilities.get(listenerAbility).name;
+		L.item = dex.items.get(listenerItem).name;
+		S.ability = dex.abilities.get(setterAbility).name;
+		S.item = '';
+		scenario.choices = [['team 123456', 'team 123456']];
+	} else if (mirror && (scenario.teams[0][0].ability !== 'No Ability' || scenario.teams[0][0].item !== '')) {
+		// a mirror match with a special lead: the same scripted team order, so the lead is the one that was set up
+		scenario.choices = [['team 123456', 'team 123456']];
+	}
 	return scenario;
 }
 
@@ -245,6 +273,8 @@ function newTally() {
 		// (no Unburden-after-Booster-Energy counter: Booster Energy is used only by a Protosynthesis or Quark Drive holder, and a
 		// Pokemon has one ability, so it can never also have Unburden: structurally zero)
 		listenerTieWeatherChange: 0, listenerTieTerrainChange: 0,
+		fasterListenerVsSetter: { proto: 0, quark: 0, seed: 0 },
+		boosterKeptBecauseSetterFirst: { proto: 0, quark: 0 },
 	};
 }
 
@@ -395,7 +425,9 @@ function install() {
 				if (!sc[id]) continue;
 				if (cat !== category) { if (!sc[id === 'reflect' ? 'lightscreen' : 'reflect']) c.screenOtherCategoryUnchanged++; continue; }
 				if (crit) c.screenIgnoredByCrit[id]++;
-				else if (r < rest[1]) c.screenReducedDamage[id]++;
+				// a drop attributable to the screen: the defender (the event's source) has no other damage reducer
+				// (Filter, Solid Rock and Prism Armor are the supported ones; the attacker's items only raise damage)
+				else if (r < rest[1] && !['filter', 'solidrock', 'prismarmor'].includes(source.ability)) c.screenReducedDamage[id]++;
 			}
 			return r;
 		}
@@ -513,11 +545,12 @@ function installWeather(t) {
 			const r = runEvent.call(this, eventid, target, source, ...rest);
 			if (hp > 0) {
 				if (holder.hp < hp) { c.sandChip++; if (holder.hp === 0) c.sandKO++; }
-				else if (holder.ability === 'sandrush') c.sandRushImmune++;
-				else if (holder.ability === 'overcoat') c.overcoatSandImmune++;
+				// the type is checked first: an ability is credited only where it is what made the Pokemon immune
 				else if (types.includes('Rock')) c.sandImmuneRock++;
 				else if (types.includes('Ground')) c.sandImmuneGround++;
 				else if (types.includes('Steel')) c.sandImmuneSteel++;
+				else if (holder.ability === 'sandrush') c.sandRushImmune++;
+				else if (holder.ability === 'overcoat') c.overcoatSandImmune++;
 			}
 			return r;
 		}
@@ -786,6 +819,27 @@ function installParadox(t) {
 			return r;
 		}
 		return runEvent.call(this, eventid, target, source, ...rest);
+	};
+
+	// a two-Pokemon switch-in with a faster listener against a slower setter of what it listens to: the listener's
+	// onSwitchInPriority puts it after the setter. For Booster Energy the outcome is visible: the item is kept
+	const fieldEvent = Battle.prototype.fieldEvent;
+	Battle.prototype.fieldEvent = function (eventid, targets, ...rest) {
+		const c = t();
+		if (!c || eventid !== 'SwitchIn' || !targets || targets.length !== 2) return fieldEvent.call(this, eventid, targets, ...rest);
+		const pairs = [];
+		for (const [a, b] of [[targets[0], targets[1]], [targets[1], targets[0]]]) {
+			if (a.speed <= b.speed) continue;
+			if (a.item === 'boosterenergy' && a.ability === 'protosynthesis' && b.ability === 'drought') pairs.push(['proto', a]);
+			else if (a.item === 'boosterenergy' && a.ability === 'quarkdrive' && b.ability === 'electricsurge') pairs.push(['quark', a]);
+			else if (SEEDS.includes(a.item) && b.ability === { electricseed: 'electricsurge', grassyseed: 'grassysurge', mistyseed: 'mistysurge', psychicseed: 'psychicsurge' }[a.item]) pairs.push(['seed', a]);
+		}
+		const r = fieldEvent.call(this, eventid, targets, ...rest);
+		for (const [kind, a] of pairs) {
+			c.fasterListenerVsSetter[kind]++;
+			if (kind !== 'seed' && a.item === 'boosterenergy') c.boosterKeptBecauseSetterFirst[kind]++;
+		}
+		return r;
 	};
 
 	// two listeners tie on speed at the same WeatherChange or TerrainChange
