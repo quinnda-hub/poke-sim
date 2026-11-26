@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
-// Generates random battles for "slice 3" (field state: 3a entry hazards, 3b screens, Tailwind and Trick Room) and
-// records each on Showdown.
+// Generates random battles for "slice 3" (field state: 3a entry hazards, 3b screens, Tailwind and Trick Room, 3c
+// weather) and records each on Showdown.
 //
 // Slice 3a adds side conditions (Stealth Rock, Spikes, Toxic Spikes, Sticky Web), Heavy-Duty Boots and Toxic Debris,
 // and with them the effect order (`battle.effectOrder`) that sorts two hazards on one side. Slice 3b adds durations:
@@ -11,6 +11,10 @@
 //   - a share of the Pokemon get a hazard setter in a move slot (two setters often, so a side holds two or three
 //     hazards and `effectOrder` decides their order), and a share get a field setter (Reflect, Light Screen,
 //     Tailwind, Trick Room: both screens on one side tie in ModifyDamage, a screen on each side tie in Residual);
+//   - a share get a weather move (Sunny Day, Rain Dance, Sandstorm, Snowscape) and a share a weather ability (Drought,
+//     Drizzle, Sand Stream, Snow Warning, or Swift Swim, Chlorophyll, Sand Rush, Slush Rush, Hydration) and a rock;
+//     Rock, Ground and Steel types meet the sand; in a mirror match the lead is often a weather setter, so the two
+//     leads tie on speed and both set weather at the turn-0 switch-in;
 //   - a share get a paralysing move (Tailwind and Trick Room against paralysed Pokemon), and in a mirror match the
 //     two sides tie on speed, under Trick Room too;
 //   - a share are Flying types (not grounded: the hazards skip them), Poison types (a grounded one absorbs Toxic
@@ -57,6 +61,11 @@ function mulberry32(seed) {
 const HAZARDS = ['stealthrock', 'spikes', 'toxicspikes', 'stickyweb'];
 const FIELD_SETTERS = ['reflect', 'lightscreen', 'tailwind', 'trickroom'];
 const SCREENS = ['reflect', 'lightscreen'];
+const WEATHER_MOVES = ['sunnyday', 'raindance', 'sandstorm', 'snowscape'];
+const WEATHER_SETTERS = ['drought', 'drizzle', 'sandstream', 'snowwarning'];
+const WEATHER_SPEED = ['swiftswim', 'chlorophyll', 'sandrush', 'slushrush'];
+const ROCKS = ['heatrock', 'damprock', 'smoothrock', 'icyrock'];
+const WEATHERS = ['sunnyday', 'raindance', 'sandstorm', 'snowscape'];
 const PARALYSERS = ['thunderwave', 'glare', 'stunspore', 'nuzzle'];
 
 function assign(scenario, pool, seed) {
@@ -70,10 +79,16 @@ function assign(scenario, pool, seed) {
 	const paralysers = PARALYSERS.filter(id => pool.moves.includes(id));
 	const bySpeciesType = (t) => pool.species.filter(id => dex.species.get(id).types.includes(t));
 	const flying = bySpeciesType('Flying'), poison = bySpeciesType('Poison'), steel = bySpeciesType('Steel');
+	const rock = bySpeciesType('Rock'), ground = bySpeciesType('Ground'), ice = bySpeciesType('Ice');
+	const weatherMoves = WEATHER_MOVES.filter(id => pool.moves.includes(id));
+	if (weatherMoves.length === 0) throw new Error('the pool has no weather move');
 	const abilities = pool.abilities.filter(id => id !== 'noability');
 	const items = pool.items.filter(id => id !== '');
-	const weightedAbilities = abilities.concat(abilities.filter(id => id === 'toxicdebris').flatMap(id => [id, id, id, id, id]));
-	const weightedItems = items.concat(items.filter(id => id === 'heavydutyboots' || id === 'lightclay').flatMap(id => [id, id, id, id]));
+	const weightedAbilities = abilities.concat(abilities.filter(id => id === 'toxicdebris').flatMap(id => [id, id, id, id, id]))
+		.concat(abilities.filter(id => WEATHER_SETTERS.includes(id) || WEATHER_SPEED.includes(id) || id === 'hydration').flatMap(id => [id, id, id]));
+	const weightedItems = items.concat(items.filter(id => id === 'heavydutyboots' || id === 'lightclay').flatMap(id => [id, id, id, id]))
+		.concat(items.filter(id => ROCKS.includes(id)).flatMap(id => [id, id, id]));
+	const setterAbilities = abilities.filter(id => WEATHER_SETTERS.includes(id));
 	const mirror = JSON.stringify(scenario.teams[0]) === JSON.stringify(scenario.teams[1]);
 	const set = (s) => {
 		// species
@@ -82,6 +97,9 @@ function assign(scenario, pool, seed) {
 		else if (k < 38 && poison.length) s.species = dex.species.get(pick(poison)).name;
 		else if (k < 46 && steel.length) s.species = dex.species.get(pick(steel)).name;
 		else if (k < 49 && pool.species.includes('shedinja')) s.species = 'Shedinja';
+		else if (k < 58 && rock.length) s.species = dex.species.get(pick(rock)).name;
+		else if (k < 66 && ground.length) s.species = dex.species.get(pick(ground)).name;
+		else if (k < 70 && ice.length) s.species = dex.species.get(pick(ice)).name;
 		// level: small Pokemon have little HP
 		if (int(100) < 14) s.level = 1 + int(20);
 		// hazard setters: one in two Pokemon has one, a quarter have two
@@ -91,6 +109,9 @@ function assign(scenario, pool, seed) {
 		// field setters: half of the Pokemon have one, a quarter of those two
 		const nField = int(100) < 55 ? (int(3) === 0 ? 2 : 1) : 0;
 		for (let i = 0; i < nField && slots.length; i++) s.moves[slots.splice(int(slots.length), 1)[0]] = pick(fieldSetters);
+		// weather moves: a third of the Pokemon have one, a quarter of those two
+		const nWeather = int(100) < 34 ? (int(4) === 0 ? 2 : 1) : 0;
+		for (let i = 0; i < nWeather && slots.length; i++) s.moves[slots.splice(int(slots.length), 1)[0]] = pick(weatherMoves);
 		// a paralysing move
 		if (paralysers.length && slots.length && int(100) < 22) s.moves[slots.splice(int(slots.length), 1)[0]] = pick(paralysers);
 		s.moves = [...new Set(s.moves)];
@@ -103,6 +124,8 @@ function assign(scenario, pool, seed) {
 		s.item = it === '' ? '' : dex.items.get(it).name;
 	};
 	for (const s of scenario.teams[0]) set(s);
+	// in a mirror match the lead is a weather setter in a third of the battles: two setters tie on speed at turn 0
+	if (mirror && setterAbilities.length && int(3) === 0) scenario.teams[0][0].ability = dex.abilities.get(pick(setterAbilities)).name;
 	if (mirror) scenario.teams[1] = JSON.parse(JSON.stringify(scenario.teams[0]));
 	else for (const s of scenario.teams[1]) set(s);
 	return scenario;
@@ -140,6 +163,21 @@ function newTally() {
 		tailwindSet: 0, tailwindExpired: 0, tailwindSpeedDoubled: 0, tailwindWithParalysis: 0, tailwindRestartRefused: 0,
 		trickRoomSet: 0, trickRoomRestartEnded: 0, trickRoomExpired: 0,
 		trickRoomSwitchInSpeedTie: 0, trickRoomMoveSpeedTie: 0, trickRoomTurns: 0,
+		weatherSetByMove: { sunnyday: 0, raindance: 0, sandstorm: 0, snowscape: 0 },
+		weatherSetByAbility: { sunnyday: 0, raindance: 0, sandstorm: 0, snowscape: 0 },
+		weatherReplaced: 0, weatherRefusedByAbility: 0, weatherRefusedByMove: 0,
+		weatherExpired: { sunnyday: 0, raindance: 0, sandstorm: 0, snowscape: 0 }, weatherSetAfterExpiry: 0,
+		weatherRock8: { sunnyday: 0, raindance: 0, sandstorm: 0, snowscape: 0 },
+		weatherNoRock5: { sunnyday: 0, raindance: 0, sandstorm: 0, snowscape: 0 },
+		leadSettersBothSet: 0, leadSettersTieOnSpeed: 0,
+		sandChip: 0, sandKO: 0, sandImmuneRock: 0, sandImmuneGround: 0, sandImmuneSteel: 0, sandRushImmune: 0,
+		sunFireBoost: 0, sunWaterSuppress: 0, rainWaterBoost: 0, rainFireSuppress: 0, weatherDamageOtherType: 0,
+		sandSpDBoost: 0, snowDefBoost: 0,
+		sunBlocksFreeze: 0, iceTypeFreezeImmune: 0,
+		swiftSwimDoubled: 0, chlorophyllDoubled: 0, sandRushDoubled: 0, slushRushDoubled: 0,
+		weatherSpeedWithTailwind: 0, weatherSpeedUnderTrickRoom: 0,
+		hydrationCure: 0, hydrationRainNoStatus: 0, hydrationStatusNoRain: 0,
+		weatherEventSpeedTie: 0, weatherChangeSpeedTie: 0,
 	};
 }
 
@@ -323,6 +361,8 @@ function install() {
 		return r;
 	};
 
+	installWeather(t);
+
 	// speed ties among the Pokemon in play when they switch in (runSwitch's speedSort of getAllActive)
 	const speedSort = Battle.prototype.speedSort;
 	Battle.prototype.speedSort = function (list, ...rest) {
@@ -348,6 +388,133 @@ function install() {
 			}
 		}
 		return speedSort.call(this, list, ...rest);
+	};
+}
+
+// The weather observations (3c): all observation only.
+function installWeather(t) {
+	const wmap = new WeakMap(); // per battle: has a weather expired
+	const Field = new Battle({ formatid: 'gen9ou' }).field.constructor;
+	const setWeather = Field.prototype.setWeather;
+	Field.prototype.setWeather = function (status, source, sourceEffect) {
+		const c = t();
+		if (!c) return setWeather.call(this, status, source, sourceEffect);
+		const id = typeof status === 'string' ? status.toLowerCase().replace(/[^a-z0-9]/g, '') : status.id;
+		const prev = this.weather;
+		const eff = sourceEffect || this.battle.effect;
+		const byAbility = !!eff && eff.effectType === 'Ability';
+		const r = setWeather.call(this, status, source, sourceEffect);
+		if (prev === id && r === false) {
+			if (byAbility) c.weatherRefusedByAbility++; else c.weatherRefusedByMove++;
+		} else if (r === true && WEATHERS.includes(id)) {
+			(byAbility ? c.weatherSetByAbility : c.weatherSetByMove)[id]++;
+			if (prev && prev !== id) c.weatherReplaced++;
+			if (!prev && wmap.get(this.battle)) c.weatherSetAfterExpiry++;
+			if (this.weatherState.duration === 8) c.weatherRock8[id]++; else if (this.weatherState.duration === 5) c.weatherNoRock5[id]++;
+		}
+		return r;
+	};
+
+	const singleEvent = Battle.prototype.singleEvent;
+	Battle.prototype.singleEvent = function (eventid, effect, state, target, ...rest) {
+		const c = t();
+		if (!c || !effect) return singleEvent.call(this, eventid, effect, state, target, ...rest);
+		if (eventid === 'FieldEnd' && WEATHERS.includes(effect.id)) {
+			c.weatherExpired[effect.id]++;
+			wmap.set(this, true);
+		}
+		if (eventid === 'Residual' && effect.id === 'hydration' && target && target.hp !== undefined) {
+			const status = target.status, w = this.field.weather;
+			const r = singleEvent.call(this, eventid, effect, state, target, ...rest);
+			if (status && w === 'raindance') { if (!target.status) c.hydrationCure++; } else if (!status && w === 'raindance') c.hydrationRainNoStatus++;
+			else if (status) c.hydrationStatusNoRain++;
+			return r;
+		}
+		return singleEvent.call(this, eventid, effect, state, target, ...rest);
+	};
+
+	const runEvent = Battle.prototype.runEvent;
+	Battle.prototype.runEvent = function (eventid, target, source, ...rest) {
+		const c = t();
+		const holder = Array.isArray(target) ? target[0] : target;
+		if (!c || !holder || holder.hp === undefined) return runEvent.call(this, eventid, target, source, ...rest);
+		const w = this.field.weather;
+		if (eventid === 'Weather' && w === 'sandstorm') {
+			const hp = holder.hp, types = holder.types;
+			const r = runEvent.call(this, eventid, target, source, ...rest);
+			if (hp > 0) {
+				if (holder.hp < hp) { c.sandChip++; if (holder.hp === 0) c.sandKO++; }
+				else if (holder.ability === 'sandrush') c.sandRushImmune++;
+				else if (types.includes('Rock')) c.sandImmuneRock++;
+				else if (types.includes('Ground')) c.sandImmuneGround++;
+				else if (types.includes('Steel')) c.sandImmuneSteel++;
+			}
+			return r;
+		}
+		if (eventid === 'WeatherModifyDamage' && source && rest[0] && typeof rest[1] === 'number') {
+			const r = runEvent.call(this, eventid, target, source, ...rest);
+			const type = rest[0].type;
+			if (w === 'sunnyday' && type === 'Fire') { if (r > rest[1]) c.sunFireBoost++; }
+			else if (w === 'sunnyday' && type === 'Water') { if (r < rest[1]) c.sunWaterSuppress++; }
+			else if (w === 'raindance' && type === 'Water') { if (r > rest[1]) c.rainWaterBoost++; }
+			else if (w === 'raindance' && type === 'Fire') { if (r < rest[1]) c.rainFireSuppress++; }
+			else if (w) c.weatherDamageOtherType++;
+			return r;
+		}
+		if ((eventid === 'ModifySpD' || eventid === 'ModifyDef') && typeof rest[1] === 'number') {
+			const r = runEvent.call(this, eventid, target, source, ...rest);
+			if (eventid === 'ModifySpD' && w === 'sandstorm' && holder.types.includes('Rock') && r > rest[1]) c.sandSpDBoost++;
+			if (eventid === 'ModifyDef' && w === 'snowscape' && holder.types.includes('Ice') && r > rest[1]) c.snowDefBoost++;
+			return r;
+		}
+		if (eventid === 'ModifySpe' && typeof rest[1] === 'number' && ['swiftswim', 'chlorophyll', 'sandrush', 'slushrush'].includes(holder.ability)) {
+			const r = runEvent.call(this, eventid, target, source, ...rest);
+			const ability = holder.ability;
+			const doubled = ability === 'swiftswim' ? w === 'raindance' : ability === 'chlorophyll' ? w === 'sunnyday' :
+				ability === 'sandrush' ? w === 'sandstorm' : w === 'snowscape';
+			if (doubled && r > rest[1]) {
+				c[{ swiftswim: 'swiftSwimDoubled', chlorophyll: 'chlorophyllDoubled', sandrush: 'sandRushDoubled', slushrush: 'slushRushDoubled' }[ability]]++;
+				if (holder.side.sideConditions.tailwind) c.weatherSpeedWithTailwind++;
+				if (this.field.pseudoWeather.trickroom) c.weatherSpeedUnderTrickRoom++;
+			}
+			return r;
+		}
+		return runEvent.call(this, eventid, target, source, ...rest);
+	};
+
+	// the Immunity event on a status: Sunny Day blocks freezing, and an Ice type is immune anyway
+	const Pokemon = require(path.join(SHOWDOWN_DIR, 'dist', 'sim')).Pokemon;
+	const runStatusImmunity = Pokemon.prototype.runStatusImmunity;
+	Pokemon.prototype.runStatusImmunity = function (type, message) {
+		const r = runStatusImmunity.call(this, type, message);
+		const c = t();
+		if (c && type === 'frz' && !r && !this.fainted) {
+			if (this.types.includes('Ice')) c.iceTypeFreezeImmune++;
+			else if (this.battle.field.weather === 'sunnyday') c.sunBlocksFreeze++;
+		}
+		return r;
+	};
+
+	// weather events sort the Pokemon in play by speed: equal speeds draw
+	const eachEvent = Battle.prototype.eachEvent;
+	Battle.prototype.eachEvent = function (eventid, ...rest) {
+		const c = t();
+		if (c && (eventid === 'Weather' || eventid === 'WeatherChange')) {
+			const a = this.getAllActive();
+			if (a.length === 2 && a[0].speed === a[1].speed) { if (eventid === 'Weather') c.weatherEventSpeedTie++; else c.weatherChangeSpeedTie++; }
+		}
+		return eachEvent.call(this, eventid, ...rest);
+	};
+
+	// both leads are weather setters: they switch in together at turn 0
+	const fieldEvent = Battle.prototype.fieldEvent;
+	Battle.prototype.fieldEvent = function (eventid, targets, ...rest) {
+		const c = t();
+		if (c && eventid === 'SwitchIn' && targets && targets.length === 2 && targets.every(p => WEATHER_SETTERS.includes(p.ability))) {
+			c.leadSettersBothSet++;
+			if (targets[0].speed === targets[1].speed) c.leadSettersTieOnSpeed++;
+		}
+		return fieldEvent.call(this, eventid, targets, ...rest);
 	};
 }
 

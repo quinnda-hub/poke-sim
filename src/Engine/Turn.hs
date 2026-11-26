@@ -497,8 +497,7 @@ sideMove dx user target mv = do
 -- the damage is @undefined@ (basePower 0), so only the effect on the target's side runs.
 -- The @TryHitSide@ and @TryHitField@ callbacks of the move itself (@onTryHitSide@, ...) are not supported.
 -- A failed effect (the condition is already there and cannot restart) fails the move; nothing else follows.
--- LATENT: @weather@ and @terrain@ (@field.setWeather@, @setTerrain@) are not run: no move that has one is executable
--- yet (phases 3c, 3d).
+-- LATENT: @terrain@ (@field.setTerrain@) is not run: no terrain move is executable yet (phase 3d).
 {-# INLINABLE moveHitSide #-}
 moveHitSide :: MonadChance m => Dex -> Actor -> Actor -> MoveData -> Eng m ()
 moveHitSide dx user (Actor tp _) mv = do
@@ -506,6 +505,8 @@ moveHitSide dx user (Actor tp _) mv = do
   forM_ (mrSideCondition rule) $ \ci -> void (addSideCondition dx tp ci user)
   -- `this.battle.field.addPseudoWeather(moveData.pseudoWeather, source, move)`
   forM_ (mrPseudoWeather rule) $ \ci -> void (addPseudoWeather dx ci user)
+  -- `this.battle.field.setWeather(moveData.weather, source, move)`
+  forM_ (mrWeather rule) $ \ci -> void (setWeather dx ci user False)
   where
     rule = mvRule mv
 
@@ -659,9 +660,13 @@ hitMove fmt dx user target mv = do
   attack <- fromRelay attack0 <$> runEvent dx atkEv user (Just target) (Just mv) (RInt attack0)
   defense <- fromRelay defense0 <$> runEvent dx defEv target (Just user) (Just mv) (RInt defense0)
   let base = baseDamage fmt (monLevel um) power attack defense
+  -- modifyDamage (battle-actions.ts 1783-1804): `baseDamage += 2`, then (the spread and Parental Bond modifiers are not
+  -- here) the weather modifier, `priorityEvent('WeatherModifyDamage', pokemon, target, move, baseDamage)`, before the
+  -- crit multiplier and the random factor. The event draws nothing.
+  weathered <- fromRelay (base + 2) <$> runEvent dx EvWeatherModifyDamage user (Just target) (Just mv) (RInt (base + 2))
   r <- roll 0 16
   -- modifyDamage: ... runEvent('ModifyDamage', pokemon, target, move, baseDamage), then the minimum 1 and the 16-bit truncation
-  let pre = modifyDamage fmt dx um tm mv crit r base
+  let pre = modifyDamage fmt dx um tm mv crit r weathered
   dmg <- finalDamage fmt . fromRelay pre <$> runEventCrit dx crit EvModifyDamage user (Just target) (Just mv) (RInt pre)
   let -- spreadDamage: clamp to at least 1 unless 0, then Pokemon.damage; `dealt` is the damage returned
       requested = if dmg == 0 then 0 else max 1 dmg

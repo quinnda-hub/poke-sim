@@ -7,6 +7,7 @@ module Engine.Event
   , SortKind (..)
   , eventSort
   , eventPrefixed
+  , eventFastExit
   , eventName
   , Prefix (..)
   , prefixName
@@ -32,6 +33,7 @@ module Engine.Event
   , SortKey (..)
   , compareKey
   , compareLeftToRight
+  , compareRedirect
   ) where
 
 import qualified Data.Text as T
@@ -70,6 +72,14 @@ data EventId
   | EvDurationCallback
   -- ^ Not an event: the export lists a condition's @durationCallback@ as a handler, and the engine keeps it as the
   -- handler @(POwn, EvDurationCallback)@, run where side.ts @addSideCondition@ and field.ts @addPseudoWeather@ call it.
+  | EvWeather
+  -- ^ @Weather@ (@eachEvent('Weather')@ from a weather's @onFieldResidual@): the handler @onWeather@ of sandstorm.
+  | EvWeatherChange
+  | EvWeatherModifyDamage
+  -- ^ @priorityEvent('WeatherModifyDamage', attacker, defender, move, damage)@ in @modifyDamage@.
+  | EvImmunity
+  -- ^ @runEvent('Immunity', pokemon, null, null, type)@ in @runStatusImmunity@; the relay value is the type or status key.
+  | EvSetWeather
   deriving (Eq, Show, Enum, Bounded)
 
 -- | How @runEvent@ orders the handlers of an event (battle.ts 797-803).
@@ -78,6 +88,8 @@ data SortKind
     SpeedSort
   | -- | @compareLeftToRightOrder@: a stable sort, never draws.
     LeftToRight
+  | -- | @compareRedirectOrder@ (@priorityEvent@, @fastExit@): a stable sort, never draws.
+    RedirectSort
   deriving (Eq, Show)
 
 -- | @['Invulnerability', 'TryHit', 'DamagingHit', 'EntryHazard'].includes(eventid)@ sorts left to right; every
@@ -86,7 +98,14 @@ data SortKind
 eventSort :: EventId -> SortKind
 eventSort e = case e of
   EvDamagingHit -> LeftToRight
+  EvWeatherModifyDamage -> RedirectSort
   _ -> SpeedSort
+
+-- | @priorityEvent@ is @runEvent(..., fastExit = true)@: the event ends at the first handler that returns a value (not
+-- @undefined@), and its handlers sort with @compareRedirectOrder@ (battle.ts 927-934, 797-803). Only
+-- @WeatherModifyDamage@ is one here.
+eventFastExit :: EventId -> Bool
+eventFastExit e = e == EvWeatherModifyDamage
 
 -- | Whether the @onAlly@, @onFoe@, @onAny@ and @onSource@ handlers of the event take part
 -- (battle.ts @findEventHandlers@ 1055: not for @BeforeTurn@, @Update@, @Weather@, @WeatherChange@,
@@ -95,6 +114,8 @@ eventPrefixed :: EventId -> Bool
 eventPrefixed e = case e of
   EvBeforeTurn -> False
   EvUpdate -> False
+  EvWeather -> False
+  EvWeatherChange -> False
   _ -> True
 
 -- | The event's name in Showdown (@on<Name>@ is a handler).
@@ -124,6 +145,11 @@ eventName e = case e of
   EvTryHitField -> "TryHitField"
   EvEnd -> "End"
   EvDurationCallback -> "DurationCallback"
+  EvWeather -> "Weather"
+  EvWeatherChange -> "WeatherChange"
+  EvWeatherModifyDamage -> "WeatherModifyDamage"
+  EvImmunity -> "Immunity"
+  EvSetWeather -> "SetWeather"
 
 -- | Which Pokemon a handler reacts to: the holder (@onX@), its allies (@onAllyX@), its foes (@onFoeX@), the
 -- source of the event (@onSourceX@) or anyone (@onAnyX@).
@@ -233,6 +259,9 @@ data RuleCond
     CMoveType !Int
   | -- | @holder.hp <= holder.maxhp * n / d@.
     CHolderHpAtMost !Int !Int
+  | -- | The effective weather is one of these field-condition ids (@pokemon.effectiveWeather()@ or
+    -- @field.isWeather(...)@: swiftswim, chlorophyll, sandrush, slushrush).
+    CWeather ![Int]
   deriving (Eq, Show)
 
 -- | What a handler does.
@@ -246,7 +275,8 @@ data Body
 
 -- | The value an event threads through its handlers (Showdown's @relayVar@). 'RNone' is the hidden @true@ of an
 -- event run without one: it is not passed to the handlers and it is relayTruthy.
-data Relay = RNone | RBool !Bool | RInt !Int
+data Relay = RNone | RBool !Bool | RInt !Int | RText !T.Text
+  -- ^ 'RText' is a type or status key (@Immunity@: @'frz'@, @'sandstorm'@).
   deriving (Eq, Show)
 
 -- | Showdown's truthiness of a relay value: @false@ and 0 are falsy.
@@ -254,6 +284,7 @@ relayTruthy :: Relay -> Bool
 relayTruthy r = case r of
   RBool False -> False
   RInt 0 -> False
+  RText t | T.null t -> False
   _ -> True
 
 -- | The handlers written in Haskell. Each is named after the condition and event it implements.
@@ -299,6 +330,25 @@ data NativeId
   | NReflectDamage
   | NLightScreenDamage
   | NTrickRoomRestart
+  | NWeatherDuration
+  -- ^ A weather's @durationCallback@: 8 turns when the setter holds its rock (heatrock, damprock, smoothrock, icyrock).
+  | NWeatherResidual
+  -- ^ @onFieldResidual@: a log line, then @eachEvent('Weather')@.
+  | NWeatherResidualIfActive
+  -- ^ The same when @field.isWeather(own id)@ (sandstorm, snowscape).
+  | NSandstormWeather
+  -- ^ sandstorm @onWeather@: chip damage of @baseMaxhp / 16@ behind the weather immunity.
+  | NSandstormSpD
+  | NSnowscapeDef
+  | NSunnyDayDamage
+  | NRainDanceDamage
+  | NSunnyDayImmunity
+  | NSandRushImmunity
+  | NHydration
+  | NDrought
+  | NDrizzle
+  | NSandStream
+  | NSnowWarning
   deriving (Eq, Show)
 
 -- | The body of each handler the engine implements (written by hand: Showdown's handlers are code). A condition
@@ -370,3 +420,10 @@ absentLast o = if o == 0 then 4294967296 else o
 compareLeftToRight :: SortKey -> SortKey -> Ordering
 compareLeftToRight a b =
   compare (absentLast (skOrder a)) (absentLast (skOrder b)) <> compare (skPriority b) (skPriority a)
+
+-- | @battle.compareRedirectOrder@ (battle.ts 420): priority descending, speed descending, then (both holders being
+-- Pokemon) the order of their ability states, which is not modelled: its only other user is @RedirectTarget@, and a
+-- @WeatherModifyDamage@ list holds one handler.
+-- LATENT: the ability-state tie-break of @compareRedirectOrder@.
+compareRedirect :: SortKey -> SortKey -> Ordering
+compareRedirect a b = compare (skPriority b) (skPriority a) <> compare (skSpeed b) (skSpeed a)

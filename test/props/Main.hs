@@ -27,7 +27,7 @@ import Engine
 import Engine.Chance (runSample)
 import Engine.Dex (Condition (..), Dex (..), dexCondLookup, supportedMoves)
 import Engine.Effects (abilityBodies, fieldCondBodies, itemBodies)
-import Engine.Event (CondId (..), HandlerSpec (..), condName)
+import Engine.Event (CondId (..), EventId (..), HandlerSpec (..), Prefix (..), condName)
 import Engine.Format (trunc, truncBits)
 import Engine.Rule (executable, moveRule)
 import Engine.State
@@ -281,6 +281,7 @@ conditionsSupported dex = withTests 1 $ property $ do
 effectsSupported :: Dex -> Property
 effectsSupported dex = withTests 1 $ property $ do
   let ty name = V.findIndex (== name) (dxTypeNames dex)
+      wx name = V.findIndex ((== name) . cnId) (dxFieldConds dex)
       checkTable what bodiesOf table = mapM_ (\c -> case bodiesOf ty (cnId c) of
         Nothing -> do
           footnote (what ++ " " ++ T.unpack (cnId c) ++ " is supported without bodies")
@@ -290,11 +291,13 @@ effectsSupported dex = withTests 1 $ property $ do
             ++ maybe "" T.unpack (cnReject c))
           assert (cnSupported c)
           let run = [(p, e) | (p, e, spec) <- cnHandlers c, Just _ <- [hsBody spec]]
+              -- an onStart is also run as the onSwitchIn (battle.ts getCallback 1025-1036)
               written = [(p, e) | (p, e, _) <- bs]
+              expected = written ++ [(POwn, EvSwitchIn) | (POwn, EvStart) <- written, (POwn, EvSwitchIn) `notElem` written]
           footnote (what ++ " " ++ T.unpack (cnId c) ++ ": bodies " ++ show written ++ ", run " ++ show run)
-          assert (all (`elem` run) written && all (`elem` written) run && length run == length written))
+          assert (all (`elem` run) expected && all (`elem` expected) run && length run == length expected))
         (V.toList table)
-  checkTable "ability" abilityBodies (dxAbilities dex)
+  checkTable "ability" (\t -> abilityBodies t wx) (dxAbilities dex)
   checkTable "item" itemBodies (dxItems dex)
 
 -- | A field condition (side condition, weather, terrain, pseudo-weather) is supported exactly when "Engine.Effects"

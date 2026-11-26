@@ -117,7 +117,7 @@ data MoveRule = MoveRule
   , mrSideCondition :: !(Maybe Int)
   -- ^ @move.sideCondition@: @side.addSideCondition@ in @runMoveEffects@ (battle-actions.ts ~1300).
   , mrWeather :: !(Maybe Int)
-  -- ^ @move.weather@: @field.setWeather@ (phase 3c; not executable yet).
+  -- ^ @move.weather@: @field.setWeather@ in @runMoveEffects@.
   , mrTerrain :: !(Maybe Int)
   -- ^ @move.terrain@: @field.setTerrain@ (phase 3d; not executable yet).
   , mrPseudoWeather :: !(Maybe Int)
@@ -159,18 +159,19 @@ executable :: MoveRule -> Bool
 executable r =
   (not (mrThawsTarget r) || mrDamaging r)
     && all boostOnly (mrSelf r) && all (\s -> all targetEffect (secTarget s) && all boostOnly (secSelf s)) (mrSecondaries r)
-    && mrWeather r == Nothing && mrTerrain r == Nothing
+    && mrTerrain r == Nothing
     && if mrDamaging r
       then null (mrOnHit r) && not (mrIgnoreImmunity r) && mrTarget r == TargetFoe && mrSideCondition r == Nothing
-        && mrPseudoWeather r == Nothing
+        && mrPseudoWeather r == Nothing && mrWeather r == Nothing
       else mrHits r == OneHit && mrDrain r == Nothing && mrRecoil r == Nothing
         && null (mrSelf r) && null (mrSecondaries r)
-        && (case (mrOnHit r, mrTarget r, mrSideCondition r, mrPseudoWeather r) of
-              ([EHeal _ _], TargetSelf, Nothing, Nothing) -> True
-              ([EBoost _], t, Nothing, Nothing) -> t == TargetFoe || t == TargetSelf
-              ([EStatus _], TargetFoe, Nothing, Nothing) -> True
-              ([], t, Just _, Nothing) -> t == TargetFoeSide || t == TargetAllySide
-              ([], TargetAll, Nothing, Just _) -> True
+        && (case (mrOnHit r, mrTarget r, mrSideCondition r, mrPseudoWeather r, mrWeather r) of
+              ([EHeal _ _], TargetSelf, Nothing, Nothing, Nothing) -> True
+              ([EBoost _], t, Nothing, Nothing, Nothing) -> t == TargetFoe || t == TargetSelf
+              ([EStatus _], TargetFoe, Nothing, Nothing, Nothing) -> True
+              ([], t, Just _, Nothing, Nothing) -> t == TargetFoeSide || t == TargetAllySide
+              ([], TargetAll, Nothing, Just _, Nothing) -> True
+              ([], TargetAll, Nothing, Nothing, Just _) -> True
               _ -> False)
   where
     boostOnly (EBoost _) = True

@@ -22,6 +22,9 @@ module Engine.Dispatch
   , addSideCondition
   , removeSideCondition
   , addPseudoWeather
+  , setWeather
+  , runStatusImmunity
+  , effectiveWeather
   , boostMon
   , clampStage
   , trySetStatus
@@ -37,12 +40,13 @@ import Control.Monad (forM_, unless, void, when)
 import Control.Monad.Trans.State.Strict (StateT, get, gets, modify')
 import Data.List (sortBy)
 import qualified Data.Map.Strict as M
+import qualified Data.Text as T
 import Data.Maybe (fromMaybe, isJust)
 import qualified Data.Vector.Strict as SV
 import qualified Data.Vector.Unboxed as U
 
 import Engine.Chance
-import Engine.Damage (hasItemNamed, hasTypeNamed, isGrounded, statusImmune, typeIdNamed, typeIsNamed, typeMod)
+import Engine.Damage (hasItemNamed, hasTypeNamed, isGrounded, statusKey, typeIdNamed, typeImmuneTo, typeIsNamed, typeMod)
 import Engine.Dex
 import Engine.Event
 import Engine.Modifier (baseMod, chainModify, modify)
@@ -163,7 +167,12 @@ trySetStatus dx a st = do
   b <- get
   let m = monOf b a
       has = monStatus m `elem` [StatusBrn, StatusPar, StatusPsn, StatusTox, StatusFrz]
-  if monHp m <= 0 || not (monActive m) || has || statusImmune dx st m
+  -- setStatus: `this.runStatusImmunity(status.id === 'tox' ? 'psn' : status.id)`: the type table, then the Immunity event
+  -- (Sunny Day's frz, Sand Rush's sandstorm), which only runs when the type does not already block it
+  ok <- if monHp m <= 0 || not (monActive m) || has || typeImmuneTo dx (statusKey st) m
+    then pure False
+    else runStatusImmunity dx a (statusKey st)
+  if not ok
     then pure False
     else do
       -- this.status = status.id; this.statusState = initEffectState({id, target: this}) (pokemon.ts 1754);
@@ -185,6 +194,68 @@ trySetStatus dx a st = do
       Psn -> CPsn
       Tox -> CTox
       Frz -> CFrz
+
+-- | @pokemon.runStatusImmunity(type)@ (pokemon.ts 2299): false for a fainted Pokemon, when a type of it is immune to the
+-- key (@dex.getImmunity@: types.json @otherDamageTaken@), or when the @Immunity@ event returns false (the
+-- handlers: Sunny Day's @frz@, Sand Rush's @sandstorm@). The relay value is the key.
+runStatusImmunity :: MonadChance m => Dex -> Actor -> T.Text -> Eng m Bool
+runStatusImmunity dx a key = do
+  b <- get
+  let m = monOf b a
+  if monFainted m
+    then pure False
+    else if typeImmuneTo dx key m
+      then pure False
+      else relayTruthy <$> runEvent dx EvImmunity a Nothing Nothing (RText key)
+
+-- | @field.suppressingWeather()@ (field.ts 101): an active Pokemon with an ability that suppresses weather (Air Lock,
+-- Cloud Nine). The gates of @singleEvent@ (battle.ts 624-627) and @runEvent@ (897-900) and 'effectiveWeather' read it.
+-- LATENT: no supported ability has @suppressWeather@, so this is always false.
+suppressingWeather :: Battle -> Bool
+suppressingWeather _ = False
+
+-- | @field.effectiveWeather()@: the weather, unless it is suppressed. 'Nothing' is @''@.
+effectiveWeather :: Battle -> Maybe Int
+effectiveWeather b
+  | suppressingWeather b = Nothing
+  | fWeather (bField b) == noCond = Nothing
+  | otherwise = Just (fWeather (bField b))
+
+-- | @pokemon.effectiveWeather()@ (pokemon.ts 2212): the field's, except that a Pokemon holding Utility Umbrella ignores
+-- sun and rain.
+-- LATENT: Utility Umbrella (an unsupported item) and Mega Sol (an unsupported ability) are not consulted.
+effectiveWeatherOf :: Battle -> Actor -> Maybe Int
+effectiveWeatherOf b _ = effectiveWeather b
+
+-- | @field.setWeather(status, source, sourceEffect)@ (field.ts 39-100) by a source Pokemon, from an ability (@isAbility@)
+-- or a move. The same weather already in place fails (gen > 5 for an ability, gen > 2 otherwise). @SetWeather@ runs on
+-- the source (no handler) and a falsy result fails. The state is created with no target (so no @effectOrder@: field.ts
+-- 70) and the duration of the condition, then the @durationCallback@ (the rock); @FieldStart@ runs and a falsy result
+-- restores the previous weather. @eachEvent('WeatherChange')@ follows (no handler yet, but it sorts).
+setWeather :: MonadChance m => Dex -> Int -> Actor -> Bool -> Eng m Bool
+setWeather dx ci source isAbility = do
+  b <- get
+  let f = bField b
+      key = EffectKey EffWeather ci
+  -- `if (this.weather === status.id)`: an Ability source returns false when `gen > 5 || duration === 0`, any other source
+  -- when `gen > 2 || status.id === 'sandstorm'`; the format is gen 9
+  let gen = 9 :: Int
+      sameRefused = if isAbility then gen > 5 else gen > 2
+  if fWeather f == ci && sameRefused
+    then pure False
+    else do
+      r <- runEvent dx EvSetWeather source (Just source) Nothing RNone
+      if not (relayTruthy r)
+        then pure False
+        else do
+          modify' (\bb -> bb {bField = (bField bb) {fWeather = ci, fWeatherState = noEffectState {esDuration = maybe 0 cnDuration (effectOf dx key)}}})
+          setDurationFromCallback dx key OwnField source
+          started <- singleEvent dx EvStart key OwnField (Just source) Nothing RNone
+          if relayTruthy started
+            then eachEvent dx EvWeatherChange >> pure True
+            else do
+              modify' (\bb -> bb {bField = (bField bb) {fWeather = fWeather f, fWeatherState = fWeatherState f}})
+              pure False
 
 -- | @battle.initEffectState@ for a state with an id whose target is a Pokemon (battle.ts 3381-3392): the next
 -- @effectOrder@ when the Pokemon is active, else 0 and no increment.
@@ -237,21 +308,29 @@ removeSideCondition dx p ci = do
       void (singleEvent dx EvEnd key (OwnSide p) Nothing Nothing RNone)
       modify' (modifySide p (\s -> s {sConds = SV.filter (\(CondEntry j _) -> j /= ci) (sConds s)}))
 
--- | @field.removePseudoWeather@ (field.ts 223), @clearWeather@ and @clearTerrain@: the condition ends
--- (@singleEvent('FieldEnd')@) and goes.
--- LATENT: @clearWeather@ and @clearTerrain@ also run @WeatherChange@ / @TerrainChange@ (@eachEvent@) and reset the
--- state with @initEffectState({id: ''})@; no weather or terrain is supported yet (phases 3c, 3d).
-removeFieldCond :: MonadChance m => Dex -> EffectKey -> Eng m ()
-removeFieldCond dx key@(EffectKey kind i) = do
+-- | @field.removePseudoWeather@ (field.ts 223): a pseudo-weather the field has ends (@singleEvent('FieldEnd')@) and goes.
+-- It removes by id, and does nothing when it is absent.
+removePseudoWeather :: MonadChance m => Dex -> EffectKey -> Eng m ()
+removePseudoWeather dx key@(EffectKey _ i) = do
   b <- get
   case ownerState b OwnField key of
     Nothing -> pure ()
     Just _ -> do
       void (singleEvent dx EvEnd key OwnField Nothing Nothing RNone)
-      modify' $ \bb -> case kind of
-        EffWeather -> bb {bField = (bField bb) {fWeather = noCond, fWeatherState = noEffectState}}
-        EffTerrain -> bb {bField = (bField bb) {fTerrain = noCond, fTerrainState = noEffectState}}
-        _ -> bb {bField = (bField bb) {fPseudo = SV.filter (\(CondEntry j _) -> j /= i) (fPseudo (bField bb))}}
+      modify' (\bb -> bb {bField = (bField bb) {fPseudo = SV.filter (\(CondEntry j _) -> j /= i) (fPseudo (bField bb))}})
+
+-- | @field.clearWeather@ (field.ts 90): it ignores which weather asked for it (the residual @end@ is called with the
+-- holder and the effect id, but @clearWeather@ takes no argument): whatever weather is in place ends
+-- (@singleEvent('FieldEnd')@), the weather and its state are reset (@clearEffectState@: no id, no duration, effectOrder 0,
+-- but the target stays) and @eachEvent('WeatherChange')@ runs. Nothing happens with no weather.
+clearWeather :: MonadChance m => Dex -> Eng m ()
+clearWeather dx = do
+  b <- get
+  let f = bField b
+  when (fWeather f /= noCond) $ do
+    void (singleEvent dx EvEnd (EffectKey EffWeather (fWeather f)) OwnField Nothing Nothing RNone)
+    modify' (\bb -> bb {bField = (bField bb) {fWeather = noCond, fWeatherState = noEffectState {esHasTarget = esHasTarget (fWeatherState (bField bb))}}})
+    eachEvent dx EvWeatherChange
 
 -- | @field.addPseudoWeather@ (field.ts 187-212) of a field-condition id by a source Pokemon. A pseudo-weather the field
 -- already has restarts through its @onFieldRestart@ (none: the move fails); otherwise its state is created (no
@@ -308,6 +387,8 @@ data Handler = Handler
   , hDuration :: !Int
   -- ^ The state's duration when collected (Showdown's @handler.state@ is that object: while it is in place the live
   -- duration is its own, once it is stale only this copy counts down).
+  , hHasTarget :: !Bool
+  -- ^ A field state's 'esHasTarget' when collected.
   , hStateOrder :: !Int
   -- ^ The @effectOrder@ of the state when collected: the identity of the state object (battle.ts 535-560 compares
   -- the object itself).
@@ -334,8 +415,9 @@ getAllActive includeFainted b =
 -- Keys are those of @resolvePriority@ (957-1032): order, priority and subOrder from the spec, the holder's cached
 -- speed (scaled), and for @SwitchIn@ the holder's @effectOrder@ and the half-speed step by its position in
 -- @battle.speedOrder@ (an absent position is -1, as @indexOf@).
--- LATENT: battle.ts getCallback runs an ability's or item's @onStart@ as its @onSwitchIn@ handler when it has none
--- (abilities with onStart: Intimidate, the weather setters, ...). No supported ability or item has onStart yet.
+-- An ability's or item's @onStart@ is also its @onSwitchIn@ when it has none (battle.ts getCallback 1025-1036): the
+-- dex table gives it the handler @(POwn, EvSwitchIn)@ ('Engine.Dex.effectFor'), so it is collected here and sorted with
+-- the holder's speed and its ability state's @effectOrder@ (the weather setters).
 pokemonHandlers :: Dex -> Battle -> Bool -> Prefix -> EventId -> Actor -> [Handler]
 pokemonHandlers dx b byDuration pfx ev a =
   statusPart ++ volatilePart ++ one (EffectKey EffAbility (monAbility m)) (monAbilityState m) ++ itemPart
@@ -348,7 +430,7 @@ pokemonHandlers dx b byDuration pfx ev a =
     itemPart = if monItem m == noItem then [] else one (EffectKey EffItem (monItem m)) (monItemState m)
     one key st = case effectOf dx key >>= \cn -> condSpec cn pfx ev of
       Just spec | isJust (hsBody spec) || (byDuration && esDuration st /= 0) ->
-        [Handler key (OwnMon a) (Just a) spec (sortKey ev spec (monSpeedKey b ev a) st) (esDuration st) (esOrder st) True]
+        [Handler key (OwnMon a) (Just a) spec (sortKey ev spec (monSpeedKey b ev a) st) (esDuration st) False (esOrder st) True]
       _ -> []
 
 -- | @resolvePriority@ (battle.ts 957-1032): order, priority and subOrder from the spec, the speed given, and for
@@ -394,7 +476,7 @@ collectParts b ev ownPfx how = case how of
 -- (957-1032): the side condition's subOrder (4 unless the export gives one), @effectOrder@ for @SwitchIn@.
 sideHandlers :: Dex -> Battle -> Bool -> Collect -> EventId -> Player -> [Handler]
 sideHandlers dx b byDuration how ev p =
-  [ Handler key (OwnSide p) holder spec (sortKey ev spec speed st) (esDuration st) (esOrder st) end
+  [ Handler key (OwnSide p) holder spec (sortKey ev spec speed st) (esDuration st) False (esOrder st) end
   | CondEntry i st <- SV.toList (sConds (sideOf p b))
   , let key = EffectKey EffSideCond i
   , Just cn <- [effectOf dx key]
@@ -417,7 +499,7 @@ fieldHandlers dx b byDuration how ev =
         let (pfx, speed, holder, end) = collectParts b ev PField how
          in case condSpec cn pfx ev of
               Just spec | isJust (hsBody spec) || (byDuration && esDuration st /= 0) ->
-                [Handler key OwnField holder spec (sortKey ev spec speed st) (esDuration st) (esOrder st) end]
+                [Handler key OwnField holder spec (sortKey ev spec speed st) (esDuration st) (esHasTarget st) (esOrder st) end]
               _ -> []
       Nothing -> []
 
@@ -464,6 +546,7 @@ sortHandlers :: MonadChance m => EventId -> [Handler] -> m [Handler]
 sortHandlers ev hs = case eventSort ev of
   SpeedSort -> speedSortWith (\x y -> compareKey (hSortKey x) (hSortKey y)) hs
   LeftToRight -> pure (sortBy (\x y -> compareLeftToRight (hSortKey x) (hSortKey y)) hs)
+  RedirectSort -> pure (sortBy (\x y -> compareRedirect (hSortKey x) (hSortKey y)) hs)
 
 -- ---------------------------------------------------------------------------
 -- The events
@@ -535,12 +618,19 @@ runEventCrit dx crit ev target source mv relay0 = do
         else case hsBody (hSpec h) of
           Nothing -> go fmt hs r md
           Just body -> do
+            -- `this.effectState.target = effectHolder` (battle.ts 908-909) when the callback is a function: a field state
+            -- gets its target (the Field) the first time one of its callbacks runs through runEvent
+            case (hOwner h, body) of
+              (OwnField, BConst _) -> pure ()
+              (OwnField, _) -> modify' (\bb -> maybe bb (\st -> setOwnerState OwnField (hKey h) st {esHasTarget = True} bb) (ownerState bb OwnField (hKey h)))
+              _ -> pure ()
             -- a side or field handler is called with the event's own arguments: the Pokemon is the event's target
             Res out md' <- runBody dx body (Ctx (fromMaybe target (hHolder h)) (hOwner h) (hKey h) source mv md crit) r
             case out of
               Keep -> go fmt hs r md'
               Replace r'
-                | relayTruthy r' -> go fmt hs r' md'
+                -- priorityEvent (fastExit): `if (!relayVar || fastExit) break` on the first returned value (927-934)
+                | relayTruthy r' && not (eventFastExit ev) -> go fmt hs r' md'
                 | otherwise -> pure (finish fmt r' md')
 
 -- | The call-time gates of @runEvent@ (battle.ts 870-914), as documented there. They concern a Pokemon's own
@@ -552,6 +642,9 @@ skipped dx ev b h = case (hKey h, hOwner h) of
     (maybe False cnBreakable (effectOf dx (hKey h)) && suppressingAbility b a)
       || not (monActive (monOf b a)) -- ignoringAbility, gen >= 5
   (EffectKey EffItem _, OwnMon a) -> ev /= EvStart && ev /= EvSwitchIn && not (monActive (monOf b a)) -- ignoringItem, gen >= 5
+  -- battle.ts 897-900: `(effect.effectType === 'Weather' || eventid === 'Weather') && eventid !== 'Residual' && eventid !== 'End'
+  -- && this.field.suppressingWeather()` (Air Lock, Cloud Nine: 'suppressingWeather' is always false here)
+  (EffectKey kind _, _) | (kind == EffWeather || ev == EvWeather) && ev /= EvResidual && ev /= EvEnd -> suppressingWeather b
   _ -> False
 
 -- | @battle.suppressingAbility(target)@: Mold Breaker and its kin. No ability that suppresses exists yet.
@@ -587,9 +680,11 @@ singleBody dx ev body key owner holder source mv relay = do
       off = case (key, owner) of
         (EffectKey EffStatus _, OwnMon _) -> not (isJust (effectState m key)) -- it's changed; call it off
         (EffectKey EffItem _, OwnMon _) -> ev /= EvStart && not (monActive m)
-        -- LATENT: battle.ts 621 exempts @End@ (`eventid !== 'End'`); there is no End event yet, so an ability's End
-        -- handler would be wrongly skipped on an inactive holder once one exists.
-        (EffectKey EffAbility _, OwnMon _) -> not (monActive m)
+        -- battle.ts 621: `eventid !== 'End' && effect.effectType === 'Ability' && target.ignoringAbility()`
+        (EffectKey EffAbility _, OwnMon _) -> ev /= EvEnd && not (monActive m)
+        -- battle.ts 624-627: a weather's callbacks other than FieldStart, FieldResidual and FieldEnd while the weather is
+        -- suppressed (Air Lock, Cloud Nine; 'suppressingWeather' is always false here)
+        (EffectKey EffWeather _, _) -> ev /= EvStart && ev /= EvResidual && ev /= EvEnd && suppressingWeather b0
         _ -> False
   if off
     then pure relay
@@ -597,7 +692,7 @@ singleBody dx ev body key owner holder source mv relay = do
       Res out _ <- runBody dx body (Ctx holder owner key source mv baseMod False) relay
       pure (case out of Keep -> relay; Replace r -> r)
 
--- | @battle.eachEvent@ (battle.ts 470), for @Update@ and @BeforeTurn@: speed-sort the active Pokemon by their cached
+-- | @battle.eachEvent@ (battle.ts 470), for @Update@, @BeforeTurn@, @Weather@ and @WeatherChange@: speed-sort the active Pokemon by their cached
 -- @speed@ (ties are shuffled) and run the event on each.
 eachEvent :: MonadChance m => Dex -> EventId -> Eng m ()
 eachEvent dx ev = do
@@ -605,6 +700,8 @@ eachEvent dx ev = do
   let speedOf a = monSpeed (monOf b a)
   actives <- speedSortWith (\x y -> compare (speedOf y) (speedOf x)) (getAllActive False b)
   forM_ actives $ \a -> runEvent dx ev a Nothing Nothing RNone
+  -- `if (eventid === 'Weather' && this.gen >= 7) this.eachEvent('Update')` (battle.ts 477)
+  when (ev == EvWeather) (eachEvent dx EvUpdate)
 
 -- | @battle.fieldEvent@ (battle.ts 489-577), for @Residual@ and @SwitchIn@. The handlers of the field, then of each
 -- side and of each Pokemon in play (fainted ones too: they still take part in the sort, and are skipped when
@@ -662,12 +759,17 @@ fieldEvent dx ev targets = do
           fainted = maybe False (monFainted . monOf b) (hHolder h)
           current = ownerState b owner key
           -- battle.ts 535-560: the state object is still where it was. A side condition is compared by its
-          -- effectOrder, unique to each creation; a Pokemon's effect and a field condition by id.
+          -- effectOrder, unique to each creation; a Pokemon's effect by id. A field state is checked only once it has a
+          -- target (548-561; docs/handlers.md "A field state gains a target"): before that the callback runs
+          -- whatever has become of the state. The bit is the live state's, or the collected one's when it is gone.
           -- LATENT: Showdown compares the state object itself for a Pokemon's effect (an effect removed and re-added
-          -- in one fieldEvent would pass here) and, for a field state, only once it has a target (battle.ts 548-561;
-          -- docs/handlers.md "A field state gains a target").
+          -- in one fieldEvent would pass here) and for a field state with a target (a weather cleared and set again
+          -- with the same id would pass here; clearWeather also resets the same object in place, so it would pass there
+          -- too).
+          hasTarget = maybe (hHasTarget h) esHasTarget current
           inPlace = case (current, owner) of
             (Just st, OwnSide _) -> esOrder st == hStateOrder h
+            (_, OwnField) | not hasTarget -> True
             (Just _, _) -> True
             (Nothing, _) -> False
           -- `handler.state.duration`: the live state while it is in place, else the object as it was collected
@@ -711,7 +813,8 @@ fieldEvent dx ev targets = do
       -- pokemon.removeVolatile: `if (!this.hp) return false`, then by id (false when it is not there)
       (OwnMon holder, EffectKey EffVolatile i) -> modify' (modifyMon holder (\x -> if monHp x > 0 then removeVolatile i x else x))
       (OwnSide p, EffectKey EffSideCond i) -> removeSideCondition dx p i
-      (OwnField, _) -> removeFieldCond dx key
+      (OwnField, EffectKey EffWeather _) -> clearWeather dx
+      (OwnField, _) -> removePseudoWeather dx key
       _ -> pure () -- abilities and items have no duration, so never end here
 
 -- ---------------------------------------------------------------------------
@@ -726,6 +829,9 @@ runBody dx body c relay = case body of
         holds cond = case cond of
           CMoveType t -> maybe False ((== t) . mvType) (cMove c)
           CHolderHpAtMost x y -> monHp m * y <= monMaxHp m * x
+          -- `pokemon.effectiveWeather()` (swiftswim, chlorophyll, slushrush) or `field.isWeather(...)` (sandrush), which
+          -- differ only for Utility Umbrella (unsupported)
+          CWeather ids -> maybe False (`elem` ids) (effectiveWeatherOf b (cHolder c))
     pure (Res Keep (if all holds conds then chainModify (bFormat b) (cMod c) (n, d) else cMod c))
   BConst r -> pure (Res (Replace r) (cMod c))
   BNative n -> runNative dx n c relay
@@ -902,7 +1008,75 @@ runNative dx n c relay = do
     -- lightscreen.onAnyModifyDamage: the same for a Special move
     NLightScreenDamage -> screenDamage False
     -- trickroom.onFieldRestart: this.field.removePseudoWeather('trickroom'); it returns undefined, so the move succeeds
-    NTrickRoomRestart -> removeFieldCond dx (cKey c) >> keep
+    NTrickRoomRestart -> removePseudoWeather dx (cKey c) >> keep
+    -- sunnyday, raindance, sandstorm, snowscape durationCallback(source, effect): 8 when the source holds the weather's rock
+    -- (heatrock, damprock, smoothrock, icyrock), else 5
+    NWeatherDuration -> do
+      b <- get
+      let rock = case maybe "" cnId (effectOf dx (cKey c)) of
+            "sunnyday" -> "heatrock"
+            "raindance" -> "damprock"
+            "sandstorm" -> "smoothrock"
+            _ -> "icyrock"
+      duration (if maybe False (hasItemNamed dx rock . monOf b) (cSource c) then 8 else 5)
+    -- onFieldResidual: `this.add('-weather', ..., '[upkeep]'); this.eachEvent('Weather')`. Sandstorm and snowscape do it
+    -- `if (this.field.isWeather(own id))`
+    NWeatherResidual -> eachEvent dx EvWeather >> keep
+    NWeatherResidualIfActive -> do
+      b <- get
+      let EffectKey _ ci = cKey c
+      when (effectiveWeather b == Just ci) (eachEvent dx EvWeather)
+      keep
+    -- sandstorm.onWeather(target): this.damage(target.baseMaxhp / 16). spreadDamage first asks
+    -- `target.runStatusImmunity('sandstorm')` of a Weather effect (battle.ts 2133): Rock, Ground and Steel types, and
+    -- the Immunity event (Sand Rush), skip it
+    NSandstormWeather -> do
+      ok <- runStatusImmunity dx holder "sandstorm"
+      when ok (modify' (applyDamage holder (max 1 (monMaxHp m `quot` 16))))
+      keep
+    -- sandstorm.onModifySpD(spd, pokemon): `pokemon.hasType('Rock') && pokemon.effectiveWeather() === 'sandstorm'` ->
+    -- this.modify(spd, 1.5) (a modify, not a chainModify: the stat itself changes)
+    NSandstormSpD -> weatherStat "Rock"
+    -- snowscape.onModifyDef(def, pokemon): the same for an Ice type
+    NSnowscapeDef -> weatherStat "Ice"
+    -- sunnyday.onWeatherModifyDamage(damage, attacker, defender, move): Hydro Steam by an attacker in sun, then
+    -- `defender.effectiveWeather() !== 'sunnyday'` returns; Fire 1.5, Water 0.5
+    NSunnyDayDamage -> do
+      b <- get
+      case (cMove c, cSource c) of
+        (Just mv, Just defender)
+          | mvId mv == "hydrosteam", ownWeather b holder -> chained (3, 2)
+          | not (ownWeather b defender) -> keep
+          | typeIsNamed dx (mvType mv) "Fire" -> chained (3, 2)
+          | typeIsNamed dx (mvType mv) "Water" -> chained (1, 2)
+        _ -> keep
+    -- raindance.onWeatherModifyDamage: Water 1.5, Fire 0.5 in rain
+    NRainDanceDamage -> do
+      b <- get
+      case (cMove c, cSource c) of
+        (Just mv, Just defender)
+          | not (ownWeather b defender) -> keep
+          | typeIsNamed dx (mvType mv) "Water" -> chained (3, 2)
+          | typeIsNamed dx (mvType mv) "Fire" -> chained (1, 2)
+        _ -> keep
+    -- sunnyday.onImmunity(type, pokemon): in sun, freezing is blocked
+    NSunnyDayImmunity -> do
+      b <- get
+      if relay == RText "frz" && ownWeather b holder then returning stop else keep
+    -- sandrush.onImmunity(type, pokemon): `type === 'sandstorm'` -> false
+    NSandRushImmunity -> if relay == RText "sandstorm" then returning stop else keep
+    -- hydration.onResidual(pokemon): a status under rain (or Primordial Sea) -> pokemon.cureStatus()
+    NHydration -> do
+      b <- get
+      let rainy = [i | k <- ["raindance", "primordialsea" :: T.Text], Just i <- [M.lookup k (dxFieldIx dx)]]
+      when (monStatus m /= StatusNone && maybe False (`elem` rainy) (effectiveWeatherOf b holder)) (modify' (cureStatus holder))
+      keep
+    -- drought.onStart(source): `if (source.species.id === 'groudon' && source.item === 'redorb') return;`, then
+    -- this.field.setWeather('sunnyday'); drizzle the same for Kyogre and a Blue Orb; neither orb is a supported item
+    NDrought -> setWeatherNamed "sunnyday"
+    NDrizzle -> setWeatherNamed "raindance"
+    NSandStream -> setWeatherNamed "sandstorm"
+    NSnowWarning -> setWeatherNamed "snowscape"
     -- toxicdebris.onDamagingHit(damage, target, source, move): `side = source.isAlly(target) ? source.side.foe :
     -- source.side` (singles: the attacker's side); a Physical move with no Toxic Spikes there, or fewer than 2
     -- layers, calls side.addSideCondition('toxicspikes', target)
@@ -916,6 +1090,19 @@ runNative dx n c relay = do
         _ -> keep
   where
     duration d = pure (Res (Replace (RInt d)) (cMod c))
+    -- the weather this handler belongs to is the effective weather as the Pokemon sees it
+    ownWeather b a = let EffectKey _ ci = cKey c in effectiveWeatherOf b a == Just ci
+    setWeatherNamed name = case M.lookup name (dxFieldIx dx) of
+      Just ci -> setWeather dx ci (cHolder c) True >> pure (Res Keep (cMod c))
+      Nothing -> pure (Res Keep (cMod c))
+    weatherStat ty = do
+      b <- get
+      let mm = monOf b (cHolder c)
+      case relay of
+        RInt v | hasTypeNamed dx ty mm, ownWeather b (cHolder c) -> do
+          fmt <- gets bFormat
+          pure (Res (Replace (RInt (modify fmt v 6144))) (cMod c))
+        _ -> pure (Res Keep (cMod c))
     screenDamage physical = case (cMove c, cSource c, cOwner c) of
       (Just mv, Just defender@(Actor dp _), OwnSide sp)
         | defender /= cHolder c

@@ -4,7 +4,8 @@
 module Engine.Damage
   ( critDenominator
   , isImmune
-  , statusImmune
+  , typeImmuneTo
+  , statusKey
   , hasTypeNamed
   , hasItemNamed
   , typeIdNamed
@@ -70,21 +71,25 @@ isGrounded dx m = not (hasTypeNamed dx "Flying" m)
 typeIsNamed :: Dex -> Int -> T.Text -> Bool
 typeIsNamed dx t name = t >= 0 && t < V.length (dxTypeNames dx) && dxTypeNames dx V.! t == name
 
--- | The natural status immunity of @pokemon.runStatusImmunity@ / @dex.getImmunity@ (pokemon.ts @setStatus@:
--- @tox@ is checked as @psn@): a type is immune when its typechart @damageTaken@ entry for the status key is 3
--- (loaded from @types.json@ @otherDamageTaken@).
--- LATENT: abilities (Limber, Immunity, Water Veil, ...), Misty Terrain, Safeguard and the @Immunity@ event
--- are not modelled; nothing in the engine can attach to them yet.
-statusImmune :: Dex -> StatusId -> Mon -> Bool
-statusImmune dx st m = any immune [monType1 m, monType2 m]
+-- | The natural immunity of @dex.getImmunity(type, pokemon)@ (pokemon.ts @runStatusImmunity@): a type is immune when
+-- its typechart @damageTaken@ entry for the key is 3 (loaded from @types.json@ @otherDamageTaken@). The key is the
+-- status (@tox@ is checked as @psn@: pokemon.ts @setStatus@) or the weather (@sandstorm@).
+-- The @Immunity@ event (Sunny Day, Sand Rush) runs after this in "Engine.Dispatch.runStatusImmunity".
+-- LATENT: Misty Terrain and Safeguard (@SetStatus@, @TryAddVolatile@), and the ability checks of @setStatus@
+-- (Corrosion), are not modelled; Overcoat's @Immunity@ (powder, sandstorm) comes with phase 3d.
+typeImmuneTo :: Dex -> T.Text -> Mon -> Bool
+typeImmuneTo dx key m = any immune [monType1 m, monType2 m]
   where
-    key = case st of
-      Brn -> "brn"
-      Par -> "par"
-      Psn -> "psn"
-      Tox -> "psn"
-      Frz -> "frz"
     immune t = t /= noType && key `elem` (dxTypeImmune dx V.! t)
+
+-- | The key @setStatus@ passes to @runStatusImmunity@ for a status.
+statusKey :: StatusId -> T.Text
+statusKey st = case st of
+  Brn -> "brn"
+  Par -> "par"
+  Psn -> "psn"
+  Tox -> "psn"
+  Frz -> "frz"
 
 -- | Total type effectiveness exponent (@runEffectiveness@): +1 per super-effective type, -1 per resisted, clamped to [-6, 6].
 typeMod :: Dex -> Int -> Mon -> Int
@@ -107,12 +112,13 @@ baseDamage f level power atk def =
     -- JS division by zero yields Infinity, which truncates to 0.
     quotZ a b = if b == 0 then 0 else a `quot` b
 
--- | @modifyDamage@ (battle-actions.ts ~1790-1890) up to the @ModifyDamage@ event: crit, random factor, STAB, type
--- effectiveness and the burn. 'finalDamage' is the rest. @roll16@ is the already drawn value of @random(16)@.
+-- | @modifyDamage@ (battle-actions.ts ~1790-1890) from after the @WeatherModifyDamage@ event, up to the @ModifyDamage@
+-- event: crit, random factor, STAB, type effectiveness and the burn. 'finalDamage' is the rest. The caller adds 2 to
+-- the base damage (`baseDamage += 2`), runs @WeatherModifyDamage@ on it (1804) and passes the result as @base1@.
+-- @roll16@ is the already drawn value of @random(16)@.
 modifyDamage :: Format -> Dex -> Mon -> Mon -> MoveData -> Bool -> Int -> Int -> Int
-modifyDamage f dx attacker defender mv crit roll16 base0 =
-  let base1 = base0 + 2
-      base2 = if crit then trunc f (base1 * 3 `quot` 2) else base1
+modifyDamage f dx attacker defender mv crit roll16 base1 =
+  let base2 = if crit then trunc f (base1 * 3 `quot` 2) else base1
       base3 = trunc f (trunc f (base2 * (100 - roll16)) `quot` 100)
       -- "???" never gets STAB (modifyDamage: `if (type !== '???')`); `baseDamage = this.battle.modify(baseDamage, stab)`
       -- with stab 1.5, a modify() of its own (battle-actions.ts ~1850), not a chainModify

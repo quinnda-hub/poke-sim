@@ -30,7 +30,8 @@
 -- Orb's recoil, and the Assault Vest's move disabling.
 --
 -- Tailwind's @onModifySpe@ is @RChainModify 2 1 []@, a rule with three whitelisted users now (hugepower,
--- purepower, tailwind). Reflect and Light Screen's damage halving, the duration callbacks and Trick Room's restart
+-- purepower, tailwind). The weather-conditioned doubling @RChainModify 2 1 [CWeather ids]@ is the condition kind
+-- @CWeather@, used by three whitelisted abilities (swiftswim, chlorophyll, sandrush; slushrush shares it). Reflect and Light Screen's damage halving, the duration callbacks and Trick Room's restart
 -- are native: one or two users each.
 --
 -- The field conditions of slice 3a are all native, none of them reaches the bar: layers (spikes, toxicspikes) have
@@ -48,10 +49,10 @@ import qualified Data.Text as T
 
 import Engine.Event
 
--- | The bodies of an ability, or 'Nothing' when the engine does not implement it. The argument resolves a
--- type name to its id.
-abilityBodies :: (T.Text -> Maybe Int) -> T.Text -> Maybe [(Prefix, EventId, Body)]
-abilityBodies ty name = case name of
+-- | The bodies of an ability, or 'Nothing' when the engine does not implement it. The arguments resolve a type
+-- name and a weather name to their ids.
+abilityBodies :: (T.Text -> Maybe Int) -> (T.Text -> Maybe Int) -> T.Text -> Maybe [(Prefix, EventId, Body)]
+abilityBodies ty wx name = case name of
   "noability" -> Just []
   -- data/abilities.ts blaze, overgrow, torrent, swarm: ModifyAtk and ModifySpA,
   -- `move.type === T && attacker.hp <= attacker.maxhp / 3` -> chainModify(1.5)
@@ -62,6 +63,20 @@ abilityBodies ty name = case name of
   -- hugepower, purepower: onModifyAtk -> chainModify(2)
   "hugepower" -> Just [(POwn, EvModifyAtk, BRule (RChainModify 2 1 []))]
   "purepower" -> Just [(POwn, EvModifyAtk, BRule (RChainModify 2 1 []))]
+  -- data/abilities.ts swiftswim, chlorophyll, slushrush: onModifySpe, `weather` is one of ... -> chainModify(2);
+  -- sandrush the same with `this.field.isWeather('sandstorm')`, and onImmunity (type 'sandstorm' -> false)
+  "swiftswim" -> speed ["raindance", "primordialsea"]
+  "chlorophyll" -> speed ["sunnyday", "desolateland"]
+  "slushrush" -> speed ["hail", "snowscape"]
+  "sandrush" -> (++ [(POwn, EvImmunity, BNative NSandRushImmunity)]) <$> speed ["sandstorm"]
+  -- hydration: onResidual, a status under rain -> cureStatus
+  "hydration" -> Just [(POwn, EvResidual, BNative NHydration)]
+  -- drought, drizzle, sandstream, snowwarning: onStart sets the weather (Drought and Drizzle return for Groudon with a
+  -- Red Orb and Kyogre with a Blue Orb: neither orb is a supported item)
+  "drought" -> Just [(POwn, EvStart, BNative NDrought)]
+  "drizzle" -> Just [(POwn, EvStart, BNative NDrizzle)]
+  "sandstream" -> Just [(POwn, EvStart, BNative NSandStream)]
+  "snowwarning" -> Just [(POwn, EvStart, BNative NSnowWarning)]
   -- toxicdebris: onDamagingHit, a Physical move sets Toxic Spikes on the attacker's side
   "toxicdebris" -> Just [(POwn, EvDamagingHit, BNative NToxicDebris)]
   -- technician: onBasePower, basePower after the accumulated modifier <= 60 -> chainModify(1.5)
@@ -72,6 +87,9 @@ abilityBodies ty name = case name of
   "prismarmor" -> Just [(PSource, EvModifyDamage, BNative NFilterLike)]
   _ -> Nothing
   where
+    speed ws = do
+      ids <- traverse wx ws
+      Just [(POwn, EvModifySpe, BRule (RChainModify 2 1 [CWeather ids]))]
     pinch t = do
       i <- ty t
       let r = BRule (RChainModify 3 2 [CMoveType i, CHolderHpAtMost 1 3])
@@ -106,6 +124,11 @@ itemBodies ty name = case name of
   "heavydutyboots" -> Just []
   -- lightclay: no handlers ("implemented in the corresponding thing": the screens' durationCallback reads the item)
   "lightclay" -> Just []
+  -- heatrock, damprock, smoothrock, icyrock: no handlers (the weathers' durationCallback reads the item)
+  "heatrock" -> Just []
+  "damprock" -> Just []
+  "smoothrock" -> Just []
+  "icyrock" -> Just []
   _ -> case lookup name typeItems of
     -- onBasePower, `move.type === T` -> chainModify([4915, 4096]) (data/items.ts; each body checked against the
     -- source: the plain type check and nothing else)
@@ -159,8 +182,22 @@ fieldCondBodies name = case name of
   "trickroom" ->
     Just [ (POwn, EvDurationCallback, BNative NTrickRoomDuration), (PField, EvStart, BNative NLogOnly)
          , (PField, EvRestart, BNative NTrickRoomRestart), (PField, EvEnd, BNative NLogOnly) ]
+  -- sunnyday, raindance, sandstorm, snowscape (data/conditions.ts): durationCallback (8 with the setter's rock, else 5),
+  -- onFieldStart and onFieldEnd (log lines), onFieldResidual (a log line and eachEvent('Weather'), for sandstorm and
+  -- snowscape only while it is the weather), and each weather's own handlers
+  "sunnyday" ->
+    Just (weather NSunnyDayDamage NWeatherResidual ++ [(POwn, EvImmunity, BNative NSunnyDayImmunity)])
+  "raindance" -> Just (weather NRainDanceDamage NWeatherResidual)
+  "sandstorm" ->
+    Just ([ (POwn, EvModifySpD, BNative NSandstormSpD), (POwn, EvWeather, BNative NSandstormWeather) ]
+           ++ common NWeatherResidualIfActive)
+  "snowscape" -> Just ((POwn, EvModifyDef, BNative NSnowscapeDef) : common NWeatherResidualIfActive)
   _ -> Nothing
   where
+    common residual =
+      [ (POwn, EvDurationCallback, BNative NWeatherDuration), (PField, EvStart, BNative NLogOnly)
+      , (PField, EvResidual, BNative residual), (PField, EvEnd, BNative NLogOnly) ]
+    weather dmg residual = (POwn, EvWeatherModifyDamage, BNative dmg) : common residual
     screen dmg =
       Just [ (POwn, EvDurationCallback, BNative NLightClayDuration), (PAny, EvModifyDamage, BNative dmg)
            , (PSide, EvStart, BNative NLogOnly), (PSide, EvEnd, BNative NLogOnly) ]

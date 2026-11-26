@@ -239,9 +239,15 @@ loadDex dir = do
     conds <- traverse (conditionFor conditionsV) [minBound .. maxBound]
     let tyOf n = M.lookup n tix
     abilityEntries <- objectEntries abilitiesV
-    abilityL <- traverse (\(k, v) -> effectFor k 7 POwn v (abilityBodies tyOf k)) abilityEntries
+    -- the weathers lead the field-condition table, in the order of conditions.json ('fieldConditions'), so their ids
+    -- are known before the table is built (the weather rules of abilities name them)
+    condEntries <- objectEntries conditionsV
+    let weatherKeys = [k | (k, v) <- condEntries, field "effectType" v == Right (String "Weather")]
+        weatherIx = M.fromList (zip weatherKeys [0 ..])
+        wxOf n = M.lookup n weatherIx
+    abilityL <- traverse (\(k, v) -> effectFor k 7 POwn True v (abilityBodies tyOf wxOf k)) abilityEntries
     itemEntries <- objectEntries itemsV
-    itemL <- traverse (\(k, v) -> effectFor k 8 POwn v (itemBodies tyOf k)) itemEntries
+    itemL <- traverse (\(k, v) -> effectFor k 8 POwn True v (itemBodies tyOf k)) itemEntries
     speciesL <- objectEntries speciesV >>= traverse (speciesOf tix . snd)
     moveEntries <- objectEntries movesV
     fieldL <- fieldConditions conditionsV moveEntries
@@ -342,7 +348,7 @@ conditionFor conditionsV c = do
         "Item" -> 8
         _ -> 0 :: Int
       bodies = [(p, e, b) | p <- [minBound .. maxBound], e <- [minBound .. maxBound], Just b <- [nativeBody c p e]]
-  effectFor (condName c) typeOrder POwn v (Just bodies)
+  effectFor (condName c) typeOrder POwn False v (Just bodies)
 
 -- | A move's field condition by key, if the engine runs it ('Engine.Rule.CondLookup').
 fieldLookup :: M.Map T.Text Int -> V.Vector Condition -> CondLookup
@@ -368,11 +374,12 @@ fieldConditions conditionsV moveEntries = do
   -- LATENT (pseudo-weather entries below): Showdown's runEvent sets `effectState.target = effectHolder` on each callback
   -- it runs (battle.ts 908-909), so after a pseudo-weather's first runEvent callback its subOrder fallback is 5, not 2
   -- (resolvePriority 995-998), and fieldEvent's in-place check (548-561) starts to apply to that field state.
-  -- Unreachable in slice 3 (Trick Room has no runEvent handlers); live with the first pseudo-weather that has runEvent
-  -- handlers (Gravity, ...), and for weather and terrain in phases 3c and 3d.
-  weathers <- traverse (\(k, v) -> (,) k <$> effectFor k 5 PField v (fieldCondBodies k))
+  -- The in-place half is modelled ('Engine.State.esHasTarget'); the subOrder half is not, and is unreachable while no
+  -- pseudo-weather has a runEvent handler without an explicit subOrder (Trick Room has no runEvent handler). A weather's
+  -- subOrder is 5 and a terrain's 0 whatever their target.
+  weathers <- traverse (\(k, v) -> (,) k <$> effectFor k 5 PField False v (fieldCondBodies k))
     [(k, v) | (k, v) <- condEntries, field "effectType" v == Right (String "Weather")]
-  fromMoves <- traverse (\(k, order, own, v) -> (,) k <$> effectFor k order own v (fieldCondBodies k))
+  fromMoves <- traverse (\(k, order, own, v) -> (,) k <$> effectFor k order own False v (fieldCondBodies k))
     [ (k, order, own, Object (KM.insert "handlers" (Array (V.fromList [String (T.drop 10 h) | String h <- hs, "condition." `T.isPrefixOf` h])) c))
     | (k, Object m) <- moveEntries
     , Just key <- [conditionField k m] -- the move defines the condition (the same test as the translation's)
@@ -391,8 +398,12 @@ fieldConditions conditionsV moveEntries = do
 -- supported). An effect with a duration also gets a @Residual@ entry without a body when it has no
 -- @onResidual@ (for a side or field condition, @onSideResidual@ / @onFieldResidual@, the prefix @ownPfx@): Showdown
 -- collects it (@getKey = 'duration'@) to count the duration down.
-effectFor :: T.Text -> Int -> Prefix -> Value -> Maybe [(Prefix, EventId, Body)] -> Either String Condition
-effectFor ident typeOrder ownPfx v mbodies = do
+-- With @startAsSwitchIn@ (abilities and items), an @onStart@ with no @onSwitchIn@ and no @onAnySwitchIn@ is also the
+-- @(POwn, EvSwitchIn)@ handler, with its order, priority and subOrder read from the @onSwitchIn@ keys: Showdown runs
+-- the Start of an ability or item as its SwitchIn (battle.ts @getCallback@ 1025-1036; the gen 3 clause and the
+-- status-with-@ability:@-id case are not reachable here).
+effectFor :: T.Text -> Int -> Prefix -> Bool -> Value -> Maybe [(Prefix, EventId, Body)] -> Either String Condition
+effectFor ident typeOrder ownPfx startAsSwitchIn v mbodies = do
   names <- case v of
     Object o | Just hs <- KM.lookup "handlers" o -> asArray hs >>= traverse asText
     _ -> Right []
@@ -420,13 +431,17 @@ effectFor ident typeOrder ownPfx v mbodies = do
   specs <- if reject == Nothing
     then traverse (\(pe, b) -> spec pe (Just b)) [((p, e), b) | (_, Just (p, e)) <- parsed, Just b <- [bodyOf p e]]
     else Right []
+  startSwitchIn <- case bodyOf POwn EvStart of
+    Just b | startAsSwitchIn, reject == Nothing, "onStart" `elem` names
+           , "onSwitchIn" `notElem` names, "onAnySwitchIn" `notElem` names -> (: []) <$> spec (POwn, EvSwitchIn) (Just b)
+    _ -> Right []
   residual <- if reject == Nothing && duration /= 0 && null [() | (p, EvResidual, _) <- specs, p == ownPfx]
     then (: []) <$> spec (ownPfx, EvResidual) Nothing
     else Right []
   let breakable = case v of
         Object o | Just (Object fl) <- KM.lookup "flags" o -> maybe False truthy (KM.lookup "breakable" fl)
         _ -> False
-  pure (Condition duration (specs ++ residual) (reject == Nothing) reject breakable ident)
+  pure (Condition duration (specs ++ startSwitchIn ++ residual) (reject == Nothing) reject breakable ident)
 
 speciesOf :: M.Map T.Text Int -> Value -> Either String SpeciesData
 speciesOf tix v = do

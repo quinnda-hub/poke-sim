@@ -144,12 +144,17 @@ data EffectState = EffectState
   -- ^ @duration@; 0 = none.
   , esA :: !Int
   , esB :: !Int
+  , esHasTarget :: !Bool
+  -- ^ Whether @effectState.target@ is set, for a field state (weather, terrain, pseudo-weather): it has none when
+  -- created (field.ts 70, 141, 200) and @runEvent@ sets it to the Field when it runs one of its callbacks
+  -- (battle.ts 908-909); @clearEffectState@ keeps it (3394). It changes the in-place check of @fieldEvent@
+  -- (battle.ts 548-561). Pokemon and side states are created with their target, and do not read this.
   }
   deriving (Eq, Show)
 
 -- | A fresh @initEffectState({})@: no duration, no keys.
 noEffectState :: EffectState
-noEffectState = EffectState 0 0 (-1) (-1)
+noEffectState = EffectState 0 0 (-1) (-1) False
 
 -- | An entry of @pokemon.volatiles@: the condition id (a 'Engine.Event.CondId' index) and its state. The vector
 -- keeps insertion order, as a JavaScript object does.

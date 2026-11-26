@@ -344,6 +344,15 @@ is the attacker (the event's target), and `target` is the defender (the
 event's source). Native handlers map them by position, as Showdown does, not
 by name.
 
+### Priority events stop at the first value
+
+`priorityEvent` is `runEvent` with `fastExit` (battle.ts 950-953, 798,
+921): the first handler that returns anything other than `undefined` ends the
+event, and its value is the result. `WeatherModifyDamage`
+(battle-actions.ts 1804) is one. A handler on a priority event therefore
+returns a value only when it means to stop the event; `chainModify` returns
+`undefined`, so the weathers' damage modifiers all run.
+
 ### Effect order
 
 `bEffectOrder` joins the battle state. It increments exactly where
