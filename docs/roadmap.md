@@ -148,8 +148,24 @@ Last updated 2026-11-25.
     Hurricane waits for confusion, and Misty Explosion for `selfdestruct`.
   - 600 slice-4 battles are recorded. Parity checks 4,400 traces, 311,612
     decision points and 681,577 draws.
+- **Slice 4b: healing, Roost and the stat overrides.**
+  - Healing moves' own `onHit`: Moonlight, Synthesis, Morning Sun, Shore Up,
+    Strength Sap, Pain Split, Jungle Healing and Lunar Blessing. A heal that
+    returns `NOT_FAIL` at full HP still counts as a hit, unlike the `heal`
+    key.
+  - Roost and the `Type` event. Types are computed per read, as Showdown's
+    `getTypes` does (pokemon.ts 2160-2168), and every type read goes through
+    that one function. The parity test compares it with the recorded
+    `getTypes()`; before, it compared the stored types, which was right only
+    while nothing changed them.
+  - New move-rule fields: offensive and defensive stat overrides, the
+    offensive Pokémon override, `ignoreDefensive`, `ignoreEvasion`,
+    `selfBoost` (once, after the hit loop) and fixed or level damage.
+  - 22 more moves (380 in all), Howl and Life Dew among them through the
+    `allies` target. The slice-4 set is re-recorded at 900 battles. Parity
+    checks 4,700 traces, 351,543 decision points and 768,002 draws.
 - **Test tiers.** The fast tier (`POKESIM_TIER=fast`) replays every 10th trace
-  and runs the hedgehog properties at 100 tests each, in about 15 s. The long
+  and runs the hedgehog properties at 100 tests each, in about 18 s. The long
   tier, which gates merges into main, replays everything and runs the
   properties at 2000 tests each.
 
@@ -214,6 +230,21 @@ and `ModifyType`, `ModifyMove` and `PrepareHit` on every move use. An exact
 skip, for an event with no listener anywhere in the Dex, is a candidate for
 the optimisation step: an event with no handlers sorts and draws nothing.
 
+**Showdown's own throughput, as the reference.** Measured on 2026-11-26 with
+`tools/bench/showdown-bench.js` against `cabal bench` on slice 4b, on the same
+teams (the first 20 traces of a set), alternating runs on one pinned laptop
+core:
+
+| Teams | Engine steps/s | Showdown steps/s | Engine battles/s | Showdown battles/s |
+|---|---|---|---|---|
+| slice 3 | 9,200-11,000 | 800-990 | 118-139 | 9.9-12.4 |
+| slice 4 | 11,400-11,600 | 1,110-1,120 | 115-117 | 10.6-10.7 |
+
+The engine is about 10-12 times faster per step. Showdown builds a battle in
+about 0.9 ms, so its time goes into the turns, at about 1 ms per decision
+step: it runs its full event system, logging and request building on every
+turn.
+
 ## Known gaps in slice 0
 
 - **The 1000-turn tie is implemented but never exercised.** No recorded battle
@@ -259,6 +290,32 @@ Each step is gated by the parity test. See
 1. **Cheaper event points.** Slice 2b costs about 38% on the plain path and
    3a about another 13% (see the benchmark log). Optimise with draws and state unchanged, measured on
    the workstation.
+
+   Throughput is counted in decision steps per second per core (one `step`
+   resolving a turn or a forced switch), since that is what search and
+   training consume. Battles per second follow at about 80 steps per battle
+   with slice-3 teams. Slice 4a runs at about 11,500 steps/s (146 battles/s)
+   on one laptop core.
+
+   | | Steps/s per core | Battles/s per core | Purpose |
+   |---|---|---|---|
+   | Floor | 12,000 | 150 | Do not fall below as coverage grows |
+   | Target | 50,000 | 600 | Comfortable search on one machine |
+   | Stretch | 100,000 | 1,200 | Deeper search and more sampled worlds |
+
+   - **Why these numbers.** Self-play training needs little: about a billion
+     steps a week is under 2,000 steps/s in all, and a batched network on the
+     GPU is the tighter limit, at about 5,000 steps/s per core across the
+     workstation's 20 cores. Test-time search sets the bar. A search of
+     10⁶ simulated steps in 5 s on 20 cores needs 10,000 steps/s per core,
+     and deeper search, more sampled worlds or a shorter budget multiply that.
+   - **How to measure.** On the workstation, concurrently on pinned cores
+     against a baseline (the benchmark log's method), with teams that use the
+     engine's full coverage. Per-step cost rises as mechanics are added, so
+     simplified teams flatter it.
+   - **Reference.** Showdown's own throughput on the same recorded scenarios,
+     so that the engine's speed is also stated as a multiple of the
+     reference's.
 2. **Moves' own handler code** (`onHit`, `onAfterHit`, `onTry`,
    `onModifyMove`, `basePowerCallback`, ...), which the rule translation
    rejects today. It brings hazard removal (Rapid Spin, Defog, Mortal Spin,
@@ -284,7 +341,7 @@ Alongside:
 - **Scenario generation from rules.** For each rule, generate battles that
   exercise it with each random outcome forced both ways, and report coverage
   per rule.
-- **Trace size.** 4,400 battles take about 2.3 GB. Snapshots should become
+- **Trace size.** 4,700 battles take about 2.6 GB. Snapshots should become
   deltas.
 - **Benchmark tracking.** Record throughput at each slice so slowdowns are
   measured when they appear.

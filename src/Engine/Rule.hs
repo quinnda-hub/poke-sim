@@ -15,6 +15,7 @@ module Engine.Rule
   , Hits (..)
   , RuleTarget (..)
   , Effect (..)
+  , DamageKind (..)
   , Secondary (..)
   , BoostStat (..)
   , StatusId (..)
@@ -47,7 +48,7 @@ data Hits
   -- ^ @multihit: [2, 5]@: @battle.sample@ over the 35-35-15-15 table (one @random(20)@ draw).
   deriving (Eq, Show)
 
--- | Who the move acts on in singles. Spread targets (@allAdjacentFoes@, @allAdjacent@) and @randomNormal@
+-- | Who the move acts on in singles. @allies@ is the user (see 'moveRule'). Spread targets (@allAdjacentFoes@, @allAdjacent@) and @randomNormal@
 -- reach the one foe, so they reduce to 'TargetFoe' (pokemon.ts @getMoveTargets@, battle.ts @getRandomTarget@).
 -- The side and field targets take @tryMoveHit@ rather than the hit steps of @trySpreadMoveHit@ (battle-actions.ts
 -- 573): @foeSide@, @allySide@ and @all@.
@@ -77,6 +78,20 @@ data Effect
   -- ^ @status@ (pokemon.ts @trySetStatus@). Phase 3.
   | EFlinch
   -- ^ @volatileStatus: 'flinch'@ (only ever a secondary effect). Phase 3.
+  | ERoost
+  -- ^ @self.volatileStatus: 'roost'@ (a self effect of the move, @selfDrops@ -> @moveHit(..., moveData.self, isSelf)@).
+  | EOwnHit
+  -- ^ The move's own @onHit@ handler: @singleEvent('Hit', moveData, {}, target, source, move)@ in @runMoveEffects@, after the
+  -- @boosts@, @heal@ and @status@ of the move (battle-actions.ts 1338). Slice 4b.
+  deriving (Eq, Show)
+
+-- | @move.damage@ (battle-actions.ts 1666-1670): the damage is fixed, and @getDamage@ returns it before the crit roll, the
+-- base power and every modifier.
+data DamageKind
+  = DamageLevel
+  -- ^ @damage: 'level'@: the user's level (Seismic Toss, Night Shade).
+  | DamageFixed !Int
+  -- ^ @damage: n@ (Dragon Rage, Sonic Boom).
   deriving (Eq, Show)
 
 -- | One entry of @move.secondaries@ (battle-actions.ts @secondaries@): Showdown draws @random(100)@ for
@@ -125,6 +140,20 @@ data MoveRule = MoveRule
   -- ^ @move.terrain@: @field.setTerrain@ in @runMoveEffects@.
   , mrPseudoWeather :: !(Maybe Int)
   -- ^ @move.pseudoWeather@: @field.addPseudoWeather@ in @runMoveEffects@.
+  , mrDamage :: !(Maybe DamageKind)
+  -- ^ @move.damage@: 'Engine.Turn' returns it from @getDamage@ before the crit roll (battle-actions.ts 1666-1670).
+  , mrOverrideOffensiveStat :: !(Maybe BoostStat)
+  -- ^ @move.overrideOffensiveStat@ (Body Press: Defense): the attack stat and its stage are this stat's (getDamage 1730).
+  , mrOverrideDefensiveStat :: !(Maybe BoostStat)
+  -- ^ @move.overrideDefensiveStat@ (Psyshock, Secret Sword: Defense): the defense stat, its stage and its @Modify<Stat>@ event.
+  , mrOverrideOffensivePokemon :: !Bool
+  -- ^ @move.overrideOffensivePokemon === 'target'@ (Foul Play): the attack stat and its stage are the target's.
+  , mrIgnoreDefensive :: !Bool
+  -- ^ @move.ignoreDefensive@: the target's defensive stage counts as 0 (getDamage 1745).
+  , mrIgnoreEvasion :: !Bool
+  -- ^ @move.ignoreEvasion@: the accuracy check ignores the target's evasion stage (hitStepAccuracy 785).
+  , mrSelfBoost :: ![(BoostStat, Int)]
+  -- ^ @move.selfBoost.boosts@: applied to the user once, after the hit steps, when the move succeeded (battle-actions.ts 588).
   }
   deriving (Eq, Show)
 
@@ -148,6 +177,13 @@ plainRule = MoveRule
   , mrWeather = Nothing
   , mrTerrain = Nothing
   , mrPseudoWeather = Nothing
+  , mrDamage = Nothing
+  , mrOverrideOffensiveStat = Nothing
+  , mrOverrideDefensiveStat = Nothing
+  , mrOverrideOffensivePokemon = False
+  , mrIgnoreDefensive = False
+  , mrIgnoreEvasion = False
+  , mrSelfBoost = []
   }
 
 -- | The part of the vocabulary the engine can run in the current phase (phases 1 to 3: HP effects, stat stages
@@ -162,20 +198,24 @@ plainRule = MoveRule
 executable :: MoveRule -> Bool
 executable r =
   (not (mrThawsTarget r) || mrDamaging r)
-    && all boostOnly (mrSelf r) && all (\s -> all targetEffect (secTarget s) && all boostOnly (secSelf s)) (mrSecondaries r)
+    && all (\s -> all targetEffect (secTarget s) && all boostOnly (secSelf s)) (mrSecondaries r)
     && if mrDamaging r
-      then null (mrOnHit r) && not (mrIgnoreImmunity r) && mrTarget r == TargetFoe && mrSideCondition r == Nothing
+      then all boostOnly (mrSelf r) && null (mrOnHit r) && not (mrIgnoreImmunity r) && mrTarget r == TargetFoe && mrSideCondition r == Nothing
         && mrPseudoWeather r == Nothing && mrWeather r == Nothing && mrTerrain r == Nothing
       else mrHits r == OneHit && mrDrain r == Nothing && mrRecoil r == Nothing
-        && null (mrSelf r) && null (mrSecondaries r)
-        && (case (mrOnHit r, mrTarget r, mrSideCondition r, mrPseudoWeather r, mrWeather r, mrTerrain r) of
-              ([EHeal _ _], TargetSelf, Nothing, Nothing, Nothing, Nothing) -> True
-              ([EBoost _], t, Nothing, Nothing, Nothing, Nothing) -> t == TargetFoe || t == TargetSelf
-              ([EStatus _], TargetFoe, Nothing, Nothing, Nothing, Nothing) -> True
-              ([], t, Just _, Nothing, Nothing, Nothing) -> t == TargetFoeSide || t == TargetAllySide
-              ([], TargetAll, Nothing, Just _, Nothing, Nothing) -> True
-              ([], TargetAll, Nothing, Nothing, Just _, Nothing) -> True
-              ([], TargetAll, Nothing, Nothing, Nothing, Just _) -> True
+        && null (mrSecondaries r) && mrDamage r == Nothing && not (damageStats r) && null (mrSelfBoost r)
+        && (case (mrSelf r, mrOnHit r, mrTarget r, mrSideCondition r, mrPseudoWeather r, mrWeather r, mrTerrain r) of
+              ([], [EHeal _ _], TargetSelf, Nothing, Nothing, Nothing, Nothing) -> True
+              -- roost: a self-targeted heal, then the volatile
+              ([ERoost], [EHeal _ _], TargetSelf, Nothing, Nothing, Nothing, Nothing) -> True
+              ([], [EBoost _], t, Nothing, Nothing, Nothing, Nothing) -> t == TargetFoe || t == TargetSelf
+              ([], [EStatus _], TargetFoe, Nothing, Nothing, Nothing, Nothing) -> True
+              -- the move's own onHit alone, on the user or the foe
+              ([], [EOwnHit], t, Nothing, Nothing, Nothing, Nothing) -> t == TargetFoe || t == TargetSelf
+              ([], [], t, Just _, Nothing, Nothing, Nothing) -> t == TargetFoeSide || t == TargetAllySide
+              ([], [], TargetAll, Nothing, Just _, Nothing, Nothing) -> True
+              ([], [], TargetAll, Nothing, Nothing, Just _, Nothing) -> True
+              ([], [], TargetAll, Nothing, Nothing, Nothing, Just _) -> True
               _ -> False)
   where
     boostOnly (EBoost _) = True
@@ -185,6 +225,11 @@ executable r =
       EStatus _ -> True
       EFlinch -> True
       EHeal _ _ -> False
+      ERoost -> False
+      EOwnHit -> False
+    -- the damage-formula fields only a damaging move can use
+    damageStats m = mrOverrideOffensiveStat m /= Nothing || mrOverrideDefensiveStat m /= Nothing
+      || mrOverrideOffensivePokemon m || mrIgnoreDefensive m || mrIgnoreEvasion m
 
 -- ---------------------------------------------------------------------------
 -- Translation
@@ -202,6 +247,8 @@ ruleKeys =
   [ "target", "flags", "multihit", "drain", "recoil", "heal", "boosts", "self", "secondary"
   , "secondaries", "status", "thawsTarget", "ignoreImmunity"
   , "sideCondition", "weather", "terrain", "pseudoWeather"
+  , "damage", "overrideOffensiveStat", "overrideDefensiveStat", "overrideOffensivePokemon", "ignoreDefensive", "ignoreEvasion"
+  , "selfBoost"
   ]
 
 -- | Keys that are truthy on moves the engine accepts but cannot change the outcome, and why.
@@ -275,7 +322,14 @@ moveRule condOf ownRejected (Object o) = do
     Just hs | truthy hs, not (null ownNames), Just why <- ownRejected ->
       Left ("has handler code " <> showHandlers (Array (V.fromList (map String ownNames))) <> ": " <> why)
     _ -> Right ()
-  let hasCondField = conditionField (case KM.lookup "id" o of Just (String i) -> i; _ -> "") o /= Nothing
+  let moveId = case KM.lookup "id" o of Just (String i) -> i; _ -> ""
+      -- roost: `self.volatileStatus` is the move's own id, so the move's @condition@ block is that volatile's (found the way
+      -- @dex.conditions.get@ finds a condition that data/conditions.ts does not define). 'Engine.Dex' checks the volatile is
+      -- supported before it accepts the move.
+      ownVolatile = case KM.lookup "self" o of
+        Just (Object s) | Just (String v) <- KM.lookup "volatileStatus" s -> v == moveId && moveId == "roost"
+        _ -> False
+      hasCondField = conditionField moveId o /= Nothing || ownVolatile
   when (not (null conditionNames) && not hasCondField) $
     Left ("has handler code " <> showHandlers (Array (V.fromList (map String conditionNames))))
   mapM_ (checkKey hasCondField) [(K.toText k, v) | (k, v) <- KM.toList o, truthy v]
@@ -297,6 +351,10 @@ moveRule condOf ownRejected (Object o) = do
     Just (String t)
       | t `elem` ["normal", "any", "randomNormal", "allAdjacentFoes", "allAdjacent"] -> Right TargetFoe
       | t == "self" -> Right TargetSelf
+      -- `allies`: useMoveInner sets `target = pokemon` (battle-actions.ts 478) and getMoveTargets gives alliesAndSelf(), which is
+      -- the user alone in singles; the move is a self-targeted one. (The `BeforeMove` event gets the foe as its target
+      -- argument, where a self move gets the user: no handler reads it.)
+      | t == "allies" -> Right TargetSelf
       | t == "foeSide" -> Right TargetFoeSide
       | t == "allySide" -> Right TargetAllySide
       | t == "all" -> Right TargetAll
@@ -327,11 +385,34 @@ moveRule condOf ownRejected (Object o) = do
   weather <- condition "weather"
   terrain <- condition "terrain"
   pseudo <- condition "pseudoWeather"
+  dmg <- case look "damage" of
+    Nothing -> Right Nothing
+    Just (String "level") -> Right (Just DamageLevel)
+    Just (Number n) | Just k <- toBoundedInteger n, k > 0 -> Right (Just (DamageFixed k))
+    Just v -> Left ("damage " <> showV v)
+  overOff <- statKey "overrideOffensiveStat"
+  overDef <- statKey "overrideDefensiveStat"
+  -- `move.overrideOffensivePokemon === 'target'`; the other value (`overrideDefensivePokemon: 'source'`) has no user here
+  overPoke <- case look "overrideOffensivePokemon" of
+    Nothing -> Right False
+    Just (String "target") -> Right True
+    Just v -> Left ("overrideOffensivePokemon " <> showV v)
+  ignoreDef <- flag "ignoreDefensive"
+  ignoreEva <- flag "ignoreEvasion"
+  selfBoost <- case look "selfBoost" of
+    Nothing -> Right []
+    Just (Object sb) -> do
+      mapM_ (\(k, _) -> if k == "boosts" then Right () else Left ("not modelled: selfBoost." <> k))
+        [(K.toText k, v) | (k, v) <- KM.toList sb, truthy v]
+      case KM.lookup "boosts" sb of
+        Just v | truthy v -> boostTable v
+        _ -> Right []
+    Just v -> Left ("selfBoost " <> showV v)
   pure MoveRule
     { mrDamaging = damaging
     , mrHits = hits
     , mrTarget = target
-    , mrOnHit = [EHeal a b | Just (a, b) <- [heal]] ++ boosts ++ status
+    , mrOnHit = [EHeal a b | Just (a, b) <- [heal]] ++ boosts ++ status ++ [EOwnHit | "onHit" `elem` ownNames]
     , mrSelf = self
     , mrSecondaries = secondaries
     , mrDrain = drain
@@ -345,8 +426,25 @@ moveRule condOf ownRejected (Object o) = do
     , mrWeather = weather
     , mrTerrain = terrain
     , mrPseudoWeather = pseudo
+    , mrDamage = dmg
+    , mrOverrideOffensiveStat = overOff
+    , mrOverrideDefensiveStat = overDef
+    , mrOverrideOffensivePokemon = overPoke
+    , mrIgnoreDefensive = ignoreDef
+    , mrIgnoreEvasion = ignoreEva
+    , mrSelfBoost = selfBoost
     }
   where
+    -- a flag that is true or absent
+    flag k = case look k of
+      Nothing -> Right False
+      Just (Bool b) -> Right b
+      Just v -> Left (k <> " " <> showV v)
+    -- a stat key (atk, def, spa, spd, spe) of an override
+    statKey k = case look k of
+      Nothing -> Right Nothing
+      Just (String t) | Just st <- lookup t [("atk", BAtk), ("def", BDef), ("spa", BSpa), ("spd", BSpd), ("spe", BSpe)] -> Right (Just st)
+      Just v -> Left (k <> " " <> showV v)
     condition k = case look k of
       Nothing -> Right Nothing
       Just (String c) -> Just <$> condOf (toKey c)
@@ -430,11 +528,17 @@ statusOf v = Left ("status " <> showV v)
 -- | @move.self@ / @secondary.self@: only stat boosts are translated.
 selfEffects :: T.Text -> KM.KeyMap Value -> Either Reason [Effect]
 selfEffects what s = do
-  mapM_ (\(k, _) -> if k == "boosts" then Right () else Left ("not modelled: " <> what <> "." <> k))
+  mapM_ (\(k, _) -> if k == "boosts" || (k == "volatileStatus" && what == "self") then Right () else Left ("not modelled: " <> what <> "." <> k))
     [(K.toText k, v) | (k, v) <- KM.toList s, truthy v]
-  case KM.lookup "boosts" s of
+  boosts <- case KM.lookup "boosts" s of
     Just v | truthy v -> (: []) . EBoost <$> boostTable v
     _ -> Right []
+  -- `self.volatileStatus: 'roost'` is the only volatile translated; its condition is checked by 'Engine.Dex'
+  volatile <- case KM.lookup "volatileStatus" s of
+    Just (String "roost") -> Right [ERoost]
+    Just v | truthy v -> Left ("self.volatileStatus " <> showV v)
+    _ -> Right []
+  pure (boosts ++ volatile)
 
 -- | @secondaries@, checked against its @secondary@ alias (Showdown's dex copies a lone @secondary@ into
 -- @secondaries@).

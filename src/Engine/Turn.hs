@@ -16,7 +16,7 @@ module Engine.Turn
 
 import Control.Monad (forM_, unless, void, when)
 import Control.Monad.Trans.State.Strict (execStateT, get, gets, modify')
-import Data.Maybe (isNothing)
+import Data.Maybe (fromMaybe, isNothing)
 import qualified Data.Vector.Strict as SV
 import qualified Data.Vector.Unboxed as U
 
@@ -490,11 +490,20 @@ useMoveWith fmt dx user target mv = case mrTarget rule of
        unless (mrPowder rule && typeImmuneTo dx "powder" tm) $ do
         -- hitStepAccuracy
         hits <- if mvAccuracy mv == neverMisses || (isToxic && hasTypeNamed dx "Poison" um) then pure True
-          else randomChance (stagedAccuracy fmt (mvAccuracy mv) (monBoosts um) (monBoosts tm)) 100
+          -- `if (!move.ignoreEvasion)` the target's evasion stage joins the accuracy stage (battle-actions.ts 785-788)
+          else randomChance (stagedAccuracy fmt (mvAccuracy mv) (monBoosts um)
+                 (if mrIgnoreEvasion rule then (monBoosts tm) {bsEvasion = 0} else monBoosts tm)) 100
         when hits $
           if mrDamaging rule
             then do
               hitLoop fmt dx user target mv
+              -- useMoveInner (battle-actions.ts 588): `if (move.selfBoost && moveResult) this.moveHit(pokemon, pokemon, move,
+              -- move.selfBoost, false, true)`, once, after the whole hit loop (trySpreadMoveHit returned): the boosts go
+              -- through battle.boost with isSelf (no draw, no Update). The move succeeded: the first hit always lands
+              -- once accuracy passed. A user with no HP gets nothing.
+              -- LATENT: a first hit that fails (a move TryHit that returns false, as Low Kick's against a Dynamaxed target) would
+              -- make `moveResult` false and skip the boost; no supported selfBoost move has one.
+              unless (null (mrSelfBoost rule)) (void (boostMon user (mrSelfBoost rule)))
               -- useMoveInner: the move succeeded (`moveResult`), the user is queued to faint if it has no HP, then
               -- runEvent('AfterMoveSecondarySelf', pokemon, target, move): Life Orb's recoil. A status move
               -- raises it too, but no supported handler acts on one.
@@ -567,8 +576,16 @@ statusMove dx user tgt mv = do
     [EHeal n d]
       | monHp tm >= monMaxHp tm -> pure False
       -- amount = baseMaxhp * n / d; battle.heal(Math.round(amount), ...) (gen >= 5)
-      | otherwise -> modify' (healMon tgt (roundDiv (monMaxHp tm * n) d)) >> pure True
+      | otherwise -> do
+          modify' (healMon tgt (roundDiv (monMaxHp tm * n) d))
+          -- selfDrops (battle-actions.ts 1157, 1383-1395), after runMoveEffects of the same hit and only when it did not
+          -- fail: `moveHit(source, source, move, moveData.self, ..., true)` adds roost's volatile (no draw)
+          forM_ (mrSelf (mvRule mv)) (applyEffect dx tgt)
+          pure True
     [EBoost bs] -> boostMon tgt bs
+    -- the move's own onHit (singleEvent('Hit'), battle-actions.ts 1338): its result decides whether the hit did
+    -- something. A heal that fails with NOT_FAIL still counts as a hit (see 'HitResult'), a false return fails the move
+    [EOwnHit] -> (/= HitFail) <$> moveOwnHit dx user tgt mv
     -- `target.trySetStatus(moveData.status, ...)`; `!hitResult && move.status` fails the move
     [EStatus st] -> trySetStatus dx tgt st
     _ -> pure False -- not executable ('Engine.Rule.executable' admits one effect)
@@ -659,6 +676,9 @@ applyEffect dx a e = case e of
   -- TryAddVolatile handler, duration 1
   EFlinch -> void (addVolatile dx a CFlinch)
   EHeal _ _ -> pure () -- not executable as a secondary
+  -- addVolatile('roost', source, move): `self.volatileStatus` of Roost; needs HP, and Terastallization (not modelled) fails it
+  ERoost -> void (addVolatile dx a CRoost)
+  EOwnHit -> pure () -- run by 'moveOwnHit', never as a secondary
 
 -- | One @spreadMoveHit@ of a damaging move: crit roll, random factor, damage, drain. Returns the damage
 -- actually dealt (@move.totalDamage@ accumulates it).
@@ -672,7 +692,15 @@ hitMove fmt dx user target mv = do
   void (singleMoveEvent dx EvTryHit target (Just user) mv)
   -- getDamage (battle-actions.ts 1665): `if (move.damageCallback) return move.damageCallback.call(...)`: the damage, with no
   -- crit roll, BasePower, random factor or modifier (and so no draw)
-  fixed <- damageCallback mv target
+  callback <- damageCallback mv target
+  -- `if (move.damage === 'level') return source.level; else if (move.damage) return move.damage` (1666-1670), right after the
+  -- damageCallback line and before the crit roll too: the same early return, so no draw (Seismic Toss, Night Shade)
+  let um = monOf b user
+      fixed = case (callback, mrDamage (mvRule mv)) of
+        (Just d, _) -> Just d
+        (_, Just DamageLevel) -> Just (monLevel um)
+        (_, Just (DamageFixed n)) -> Just n
+        _ -> Nothing
   dmg <- maybe (getDamage fmt dx user target mv) pure fixed
   let -- spreadDamage: clamp to at least 1 unless 0, then Pokemon.damage; `dealt` is the damage returned
       requested = if dmg == 0 then 0 else max 1 dmg
@@ -685,8 +713,9 @@ hitMove fmt dx user target mv = do
     _ -> pure ()
   pure dealt
 
--- | @getDamage@ (battle-actions.ts 1650-1779) of a move with no @damageCallback@: base power (its callback, the crit
--- roll, @BasePower@), the stats, the base damage, then @modifyDamage@.
+-- | @getDamage@ (battle-actions.ts 1650-1779) of a move with no @damageCallback@ and no fixed @damage@: base power (its callback,
+-- the crit roll, @BasePower@), the stats (with the overrides of Body Press, Psyshock, Foul Play and the ignored defensive stage of
+-- Sacred Sword), the base damage, then @modifyDamage@.
 {-# INLINABLE getDamage #-}
 getDamage :: MonadChance m => Format -> Dex -> Actor -> Actor -> MoveData -> Eng m Int
 getDamage fmt dx user target mv = do
@@ -705,17 +734,29 @@ getDamage fmt dx user target mv = do
   -- ('runEventOnEffect'); Fickle Beam's randomChance is drawn when its handler runs, after the crit roll. A handler only ever
   -- raises the power here, so the `!basePower` early return (damage 0, no further draw) is unreachable
   power <- (\r -> case r of RInt p -> max 1 p; _ -> max 1 bp0) <$> runEventOnEffect dx EvBasePower user (Just target) mv (RInt (max 1 bp0))
-  let st = monStats
-      (atkStat, defStat, atkStage0, defStage0)
-        | mvPhysical mv = (stAtk (st um), stDef (st tm), bsAtk (monBoosts um), bsDef (monBoosts tm))
-        | otherwise = (stSpa (st um), stSpd (st tm), bsSpa (monBoosts um), bsSpd (monBoosts tm))
-      -- getDamage: a critical hit sets ignoreNegativeOffensive / ignorePositiveDefensive, which zero the
-      -- attacker's negative offensive stage and the defender's positive defensive stage
+  -- getDamage (battle-actions.ts 1729-1756): the Pokemon and the stat each side of the formula reads.
+  -- `attacker = move.overrideOffensivePokemon === 'target' ? target : source` (Foul Play: the target's Attack and stage),
+  -- `attackStat = move.overrideOffensiveStat || (isPhysical ? 'atk' : 'spa')` (Body Press: Defense), `defenseStat =
+  -- move.overrideDefensiveStat || (isPhysical ? 'def' : 'spd')` (Psyshock, Secret Sword: Defense). The defender is the
+  -- target (`overrideDefensivePokemon` is not supported). The stage is the one of that Pokemon's own stat.
+  let rule = mvRule mv
+      attacker = if mrOverrideOffensivePokemon rule then tm else um
+      atkSel = fromMaybe (if mvPhysical mv then BAtk else BSpa) (mrOverrideOffensiveStat rule)
+      defSel = fromMaybe (if mvPhysical mv then BDef else BSpd) (mrOverrideDefensiveStat rule)
+      atkStage0 = boostOf atkSel (monBoosts attacker)
+      defStage0 = boostOf defSel (monBoosts tm)
+      -- a critical hit sets ignoreNegativeOffensive / ignorePositiveDefensive: the attacker's negative stage of the stat read
+      -- and the defender's positive one count as 0; `move.ignoreDefensive` (Sacred Sword) zeroes the defender's stage
+      -- whatever its sign (`ignoreOffensive` has no user)
       atkStage = if crit && atkStage0 < 0 then 0 else atkStage0
-      defStage = if crit && defStage0 > 0 then 0 else defStage0
-      attack0 = boostedStat atkStat atkStage
-      defense0 = boostedStat defStat defStage
-      (atkEv, defEv) = if mvPhysical mv then (EvModifyAtk, EvModifyDef) else (EvModifySpA, EvModifySpD)
+      defStage = if mrIgnoreDefensive rule || (crit && defStage0 > 0) then 0 else defStage0
+      attack0 = boostedStat (statOf atkSel (monStats attacker)) atkStage
+      defense0 = boostedStat (statOf defSel (monStats tm)) defStage
+      -- `attackStat = (category === 'Physical' ? 'atk' : 'spa')` is assigned again before the events (1763), so the
+      -- attacker's event follows the move's category; the defender's follows `defenseStat`, which is not reassigned: Psyshock
+      -- (Special, Defense) runs ModifyDef on the target
+      atkEv = if mvPhysical mv then EvModifyAtk else EvModifySpA
+      defEv = eventOfStat defSel
   -- getDamage: attack = runEvent('ModifyAtk' | 'ModifySpA', source, target, move, attack) and the defender's
   -- runEvent('ModifyDef' | 'ModifySpD', target, source, move, defense)
   attack <- fromRelay attack0 <$> runEvent dx atkEv user (Just target) (Just mv) (RInt attack0)
@@ -729,6 +770,24 @@ getDamage fmt dx user target mv = do
   -- modifyDamage: ... runEvent('ModifyDamage', pokemon, target, move, baseDamage), then the minimum 1 and the 16-bit truncation
   let pre = modifyDamage fmt dx um tm mv crit r weathered
   finalDamage fmt . fromRelay pre <$> runEventCrit dx crit EvModifyDamage user (Just target) (Just mv) (RInt pre)
+
+-- | The stat of a Pokemon a stat selector names (only the five stats the overrides can name).
+statOf :: BoostStat -> Stats -> Int
+statOf sel st = case sel of
+  BAtk -> stAtk st
+  BDef -> stDef st
+  BSpa -> stSpa st
+  BSpd -> stSpd st
+  _ -> stSpe st
+
+-- | The @Modify<Stat>@ event of @'Modify' + statTable[defenseStat]@ (battle-actions.ts 1767).
+eventOfStat :: BoostStat -> EventId
+eventOfStat sel = case sel of
+  BAtk -> EvModifyAtk
+  BDef -> EvModifyDef
+  BSpa -> EvModifySpA
+  BSpd -> EvModifySpD
+  _ -> EvModifySpe
 
 -- | The integer an event returned, or the one it started with.
 fromRelay :: Int -> Relay -> Int

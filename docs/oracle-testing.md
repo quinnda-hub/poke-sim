@@ -128,7 +128,7 @@ Slice 4 (a move's own handlers) records the same way:
 
 ```sh
 cabal run -v0 engine-pool > local/traces/slice4-pool.json
-node tools/oracle/gen-slice4.js local/traces/slice4 600 local/traces/slice4-pool.json
+node tools/oracle/gen-slice4.js local/traces/slice4 900 local/traces/slice4-pool.json
 ```
 
 Its teams put the moves with handler code where their bodies branch: weights
@@ -156,7 +156,7 @@ pass every argument through and run nothing Showdown would not run.
 
 Traces live under `local/` and are not committed. Slice 0's 800 battles take
 about 280 MB, slice 1's 600 about 320 MB, slice 2's 900 about 340 MB and slice 3's 1,500
-about 1.0 GB and slice 4's 600 about 380 MB. They
+about 1.0 GB and slice 4's 900 about 690 MB. They
 are reproducible from the seeds.
 
 To isolate one behaviour, write a scenario by hand and give it explicit choices:

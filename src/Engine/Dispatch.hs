@@ -13,6 +13,8 @@ module Engine.Dispatch
   , runEventCrit
   , runEventOnEffect
   , singleMoveEvent
+  , HitResult (..)
+  , moveOwnHit
   , basePowerCallback
   , damageCallback
   , movePriorityEvent
@@ -43,6 +45,7 @@ module Engine.Dispatch
   , win
   , applyDamage
   , healMon
+  , battleHeal
   ) where
 
 import Control.Monad (forM_, unless, void, when)
@@ -1136,6 +1139,14 @@ runNative dx n c relay = do
     NFlyingPressEffectiveness -> keep
     NGrassyGlidePriority -> keep
     NHalfHpDamage -> keep
+    -- the moves' onHit bodies are run by 'moveOwnHit'
+    NWeatherHeal -> keep
+    NShoreUpHeal -> keep
+    NHealCureStatus -> keep
+    NStrengthSapHit -> keep
+    NPainSplitHit -> keep
+    -- roost.condition.onType is applied by 'Engine.Damage.monTypes' at every read of the types, not run here
+    NRoostType -> keep
     -- leftovers.onResidual: this.heal(pokemon.baseMaxhp / 16); battle.heal turns an amount in (0, 1] into 1 and
     -- truncates, so the amount is floor(maxhp / 16), at least 1
     NLeftovers -> modify' (healMon holder (max 1 (monMaxHp m `quot` 16))) >> keep
@@ -1605,6 +1616,88 @@ singleMoveEvent dx ev user target mv = case moveSpec mv POwn ev >>= hsBody of
       , (["sandstorm"], "Rock"), (["hail", "snowscape"], "Ice") ] :: [([T.Text], T.Text)]
     terrainTypes =
       [ ("electricterrain", "Electric"), ("grassyterrain", "Grass"), ("mistyterrain", "Fairy"), ("psychicterrain", "Psychic") ] :: [(T.Text, T.Text)]
+
+-- | What a move's @onHit@ returned, as @runMoveEffects@ reads it (battle-actions.ts 1338, @combineResults@ 1619):
+-- the move's own @Hit@ event is its whole effect, so its result decides how the hit went.
+data HitResult
+  = HitOk
+  -- ^ @true@ or @undefined@: the hit did something. The hit loop goes on to its @Update@ events.
+  | HitNotFail
+  -- ^ @this.NOT_FAIL@ (@''@): the heal failed ("-fail") and the move reports no failure. @combineResults@ keeps @''@, which
+  -- @spreadMoveHit@ treats as falsy (the target is dropped), but @hitStepMoveHitLoop@ reads it as damage that is not
+  -- @false@ (@!moveDamage.some(val => val !== false)@, 1019) and counts it as 0: the loop runs its @Update@ events as for a
+  -- hit that did something, and the move succeeds.
+  | HitFail
+  -- ^ @false@ or @null@: the move fails ("-fail"), with none of the hit loop's @Update@ events.
+  deriving (Eq, Show)
+
+-- | @this.heal(amount)@ (battle.ts 2277-2312) for a Pokemon: the amount is truncated, @TryHeal@ has no listener (Heal Block
+-- is unsupported); nothing is healed for 0, for a Pokemon with no HP, off the field or at full HP, and then the result is
+-- falsy. Returns whether any HP was restored (the result is the amount healed, at least 1, otherwise).
+battleHeal :: Monad m => Actor -> Int -> Eng m Bool
+battleHeal a amount = do
+  m <- gets (`monOf` a)
+  if amount <= 0 || monHp m <= 0 || not (monActive m) || monHp m >= monMaxHp m
+    then pure False
+    else modify' (healMon a amount) >> pure True
+
+-- | @battle.singleEvent('Hit', moveData, {}, target, source, move)@ (battle-actions.ts 1338) for the move in use: the
+-- body of its own @onHit@. @target@ is the Pokemon hit (the user for a move on itself) and @user@ its source. Its result
+-- is the move's 'HitResult'. A move with no @onHit@ body returns 'HitOk'. The @runEvent('Hit')@ that follows (1342) has
+-- no listener.
+-- LATENT: Heal Block (@TryHeal@), Substitute, Dynamax and the abilities that change a drop (@TryBoost@, @ChangeBoost@:
+-- Contrary, Clear Body, Defiant, Mirror Armor) have no supported user, so the bodies read none of them.
+moveOwnHit :: MonadChance m => Dex -> Actor -> Actor -> MoveData -> Eng m HitResult
+moveOwnHit dx user target mv = case moveSpec mv POwn EvHit >>= hsBody of
+  Just (BNative n) -> do
+    b <- get
+    let fmt = bFormat b
+        t = monOf b target
+        weatherFactor = case () of
+          -- moonlight, synthesis, morningsun: `switch (pokemon.effectiveWeather(undefined, true))`: sun 0.667, the other
+          -- weathers 0.25, none 0.5; `this.modify(pokemon.maxhp, factor)` is modify(maxhp, trunc(factor * 4096))
+          _ | weatherIs dx b target ["sunnyday", "desolateland"] -> 2732
+            | weatherIs dx b target ["raindance", "primordialsea", "sandstorm", "hail", "snowscape"] -> 1024
+            | otherwise -> 2048
+    case n of
+      NWeatherHeal -> healResult (battleHeal target (modify fmt (monMaxHp t) weatherFactor))
+      -- shoreup: `this.field.isWeather('sandstorm')` (the field's, not the Pokemon's) -> 0.667, else 0.5
+      NShoreUpHeal ->
+        let factor = if maybe False (`elem` fieldIds dx ["sandstorm"]) (effectiveWeather b) then 2732 else 2048
+         in healResult (battleHeal target (modify fmt (monMaxHp t) factor))
+      -- junglehealing, lunarblessing: `const success = !!this.heal(this.modify(pokemon.maxhp, 0.25));
+      -- return pokemon.cureStatus() || success;` The heal comes first, then cureStatus (which needs HP and a status), and
+      -- both always run: the result is false only when neither did anything
+      NHealCureStatus -> do
+        healed <- battleHeal target (modify fmt (monMaxHp t) 1024)
+        cured <- gets (\bb -> let x = monOf bb target in monHp x > 0 && monStatus x /= StatusNone)
+        when cured (modify' (cureStatus target))
+        pure (if healed || cured then HitOk else HitFail)
+      -- strengthsap.onHit(target, source): `if (target.boosts.atk === -6) return false;`, `atk = target.getStat('atk',
+      -- false, true)` (the stat with its stage, no modifier events) read before the drop, then
+      -- `this.boost({atk: -1}, target, source, null, false, true)`, then `!!(this.heal(atk, source, target) || success)`:
+      -- the user heals by that Attack, and the move succeeds if either happened
+      NStrengthSapHit
+        | bsAtk (monBoosts t) == -6 -> pure HitFail
+        | otherwise -> do
+            let atk = boostedStat (stAtk (monStats t)) (bsAtk (monBoosts t))
+            boosted <- boostMon target [(BAtk, -1)]
+            healed <- battleHeal user atk
+            pure (if healed || boosted then HitOk else HitFail)
+      -- painsplit.onHit(target, pokemon): `averagehp = Math.floor((target.hp + pokemon.hp) / 2) || 1`, then
+      -- target.sethp(...) and pokemon.sethp(averagehp): sethp sets the HP (at least 1, at most max HP), with no damage and no
+      -- faint
+      NPainSplitHit -> do
+        let u = monOf b user
+            avg = max 1 ((monHp t + monHp u) `quot` 2)
+            setHp x = x {monHp = if monHp x <= 0 then monHp x else min (monMaxHp x) avg}
+        modify' (modifyMon target setHp . modifyMon user setHp)
+        pure HitOk
+      _ -> pure HitOk
+  _ -> pure HitOk
+  where
+    -- `const success = !!this.heal(...); if (!success) { this.add('-fail', pokemon, 'heal'); return this.NOT_FAIL; } return success`
+    healResult act = (\ok -> if ok then HitOk else HitNotFail) <$> act
 
 -- | A move action's priority (battle.ts 2690-2705, @getActionSpeed@): the base move's priority, then
 -- @singleEvent('ModifyPriority', move, null, pokemon, target, null, priority)@ and @runEvent('ModifyPriority', pokemon,

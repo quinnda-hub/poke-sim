@@ -525,6 +525,14 @@ Low Kick, Grass Knot and Heavy Slam read weights. `species.json` already
 exports `weighthg`, so the Dex loads it. `getWeight` is
 `max(1, runEvent('ModifyWeight', weighthg))` (pokemon.ts 706-709).
 
+A Pokémon's types are computed when read, as `getTypes` does (pokemon.ts
+2160-2168): the Tera type if terastallized, else the `Type` event over the
+stored types, then Normal if none are left, then any added type. Every type
+read in the engine (STAB, effectiveness, immunity, grounding, `hasType`) goes
+through one function, `Engine.Damage.monTypes`, and the stored types are never
+rewritten by an effect that only changes the reported types (Roost). The
+recorder snapshots `getTypes()`, so the parity test compares `monTypes`.
+
 Bodies that read per-turn history (Payback's `newlySwitched` and
 `queue.willMove`, `hurtThisTurn`, `lastDamage`, `attackedBy`) need state the
 engine does not hold, and wait for a phase that adds it.

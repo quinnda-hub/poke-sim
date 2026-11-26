@@ -33,7 +33,7 @@ import Engine.Dispatch (basePowerCallback)
 import Engine.Effects (abilityBodies, fieldCondBodies, itemBodies, moveBodies)
 import Engine.Event (CondId (..), EventId (..), HandlerSpec (..), Prefix (..), condName, parseHandlerName)
 import Engine.Format (trunc, truncBits)
-import Engine.Rule (executable, moveRule)
+import Engine.Rule (DamageKind (..), MoveRule (..), executable, moveRule)
 import Engine.State
 import Engine.Modifier (baseMod, chain, chainModify, finalModify, modify, modifyBy)
 import Engine.Stats (actionSpeed, boostedStat, finalSpeed, parSpe)
@@ -61,7 +61,7 @@ main = do
         , ("every move translates to Right or Left and supported moves are executable",
             withTests 1 (translation dex movesJson))
         , ("every condition the engine runs is supported: a body for each handler the export lists",
-            withTests 1 (conditionsSupported dex conditionsJson abilitiesJson))
+            withTests 1 (conditionsSupported dex conditionsJson abilitiesJson movesJson))
         , ("a field condition is supported exactly when it has bodies, one for each handler the export lists and no others",
             withTests 1 (fieldConditionsSupported dex))
         , ("an ability or item is supported exactly when it has bodies, one for each handler the export lists and no others",
@@ -70,6 +70,10 @@ main = do
             withTests 1 (movesSupported dex movesJson))
         , ("no ability, item, condition or field condition listens to an event only moves' own handlers run",
             withTests 1 (moveEventsOnlyOfMoves dex))
+        , ("only the Roost volatile listens to the Type event, so the types the state holds are getTypes()",
+            withTests 1 (onlyRoostListensToType dex))
+        , ("a fixed-damage move has no base power, and the damage-formula fields and the self boost belong to damaging moves",
+            withTests 1 (damageFields dex))
         , ("a move's own BasePower handler sorts after every other BasePower handler, so it never ties with one",
             withTests 1 (moveBasePowerSortsLast dex))
         , ("a weight-based base power never decreases as the target gets heavier or the user lighter",
@@ -295,14 +299,15 @@ propDamageModifiers = property $ do
 
 -- | Every condition the engine runs has a body for each handler the export lists for it (the support rule of
 -- docs/handlers.md section 2), and a duration only where Showdown has one.
-conditionsSupported :: Dex -> Value -> Value -> Property
-conditionsSupported dex conditionsV abilitiesV = withTests 1 $ property $ do
+conditionsSupported :: Dex -> Value -> Value -> Value -> Property
+conditionsSupported dex conditionsV abilitiesV movesV = withTests 1 $ property $ do
   mapM_ (\c -> do
     let cn = dxConditions dex V.! fromEnum c
     footnote (T.unpack (condName c) ++ " has a handler without a body")
     assert (cnSupported cn)) [minBound .. maxBound :: CondId]
   -- the duration of each condition is the export's: `duration` of its entry in conditions.json, or of the `condition`
-  -- block of its ability in abilities.json (flinch has 1; the statuses and the abilities' volatiles have none)
+  -- block of its ability in abilities.json or of its move in moves.json (flinch and roost have 1; the statuses and the
+  -- abilities' volatiles have none)
   let exported c = case [d | Object o <- [entry c], Just (Number d) <- [KM.lookup "duration" o]] of
         (d : _) -> round d
         [] -> 0 :: Int
@@ -310,6 +315,7 @@ conditionsSupported dex conditionsV abilitiesV = withTests 1 $ property $ do
         CProtosynthesis -> abilityCondition "protosynthesis"
         CQuarkDrive -> abilityCondition "quarkdrive"
         CUnburden -> abilityCondition "unburden"
+        CRoost -> lookupKey "condition" (lookupKey "roost" movesV)
         _ -> lookupKey (condName c) conditionsV
       abilityCondition name = lookupKey "condition" (lookupKey name abilitiesV)
       lookupKey k v = case v of
@@ -404,6 +410,40 @@ moveEventsOnlyOfMoves dex = withTests 1 $ property $ do
   mapM_ (\(what, table) -> mapM_ (\c -> do
     footnote (what ++ " " ++ T.unpack (cnId c) ++ " listens to an event only moves run")
     assert (null [() | (_, e, spec) <- cnHandlers c, e `elem` moveOnly, Just _ <- [hsBody spec]])) (V.toList table)) tables
+
+-- | @getTypes()@ is @runEvent('Type', ...)@. The engine keeps its result in 'monType1' and 'monType2' (applied when the Roost
+-- volatile starts, undone when it ends), which is exact only while the Roost volatile is the one effect with a handler for
+-- the event: an effect is supported only when every handler the export lists for it has a body, so no ability, item, field
+-- condition or other volatile may have one, and no move of its own. If one does, the types become a function of more state
+-- than the volatile and this fails.
+onlyRoostListensToType :: Dex -> Property
+onlyRoostListensToType dex = withTests 1 $ property $ do
+  let typeListeners cn = [(p, e) | (p, e, spec) <- cnHandlers cn, e == EvType, Just _ <- [hsBody spec]]
+      tables = [("ability", dxAbilities dex), ("item", dxItems dex), ("field condition", dxFieldConds dex)]
+  mapM_ (\(what, table) -> mapM_ (\c -> do
+    footnote (what ++ " " ++ T.unpack (cnId c) ++ " listens to the Type event")
+    assert (null (typeListeners c))) (V.toList table)) tables
+  mapM_ (\mv -> do
+    footnote ("the move " ++ T.unpack (mvId mv) ++ " has a Type handler")
+    assert (null (typeListeners (mvEffect mv)))) (V.toList (dxMoves dex))
+  -- among the conditions, only Roost's volatile
+  let listening = [c | c <- [minBound .. maxBound :: CondId], not (null (typeListeners (dxConditions dex V.! fromEnum c)))]
+  footnote ("conditions with a Type handler: " ++ show (map condName listening))
+  listening === [CRoost]
+
+-- | The fields of "Engine.Rule" that slice 4b added are read by the damage formula, which only a damaging move reaches: a
+-- supported move with fixed damage (Seismic Toss, Night Shade, Dragon Rage, Sonic Boom) has no base power in the export (its
+-- damage does not depend on it) and is damaging; an override of a stat, a defensive stage ignored or an evasion ignored, and a
+-- self boost, belong to damaging moves too.
+damageFields :: Dex -> Property
+damageFields dex = withTests 1 $ property $
+  mapM_ (\mv -> do
+    let r = mvRule mv
+        damageOnly = mrDamage r /= Nothing || mrOverrideOffensiveStat r /= Nothing || mrOverrideDefensiveStat r /= Nothing
+          || mrOverrideOffensivePokemon r || mrIgnoreDefensive r || mrIgnoreEvasion r || not (null (mrSelfBoost r))
+    footnote (T.unpack (mvId mv))
+    assert (not damageOnly || mrDamaging r)
+    assert (case mrDamage r of Nothing -> True; Just DamageLevel -> mvPower mv == 0; Just (DamageFixed _) -> mvPower mv == 0)) (filter mvSupported (V.toList (dxMoves dex)))
 
 -- | @runEvent('BasePower', ..., onEffect)@ puts the move's own @onBasePower@ in the list with order absent, priority 0 and subOrder
 -- 0 (docs/handlers.md, "A move's own handlers"). Every other supported BasePower handler has an explicit order or a positive

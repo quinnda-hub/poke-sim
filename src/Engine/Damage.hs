@@ -6,6 +6,7 @@ module Engine.Damage
   , isImmune
   , typeImmuneTo
   , statusKey
+  , monTypes
   , hasTypeNamed
   , hasItemNamed
   , typeIdNamed
@@ -20,14 +21,16 @@ module Engine.Damage
   ) where
 
 import qualified Data.Text as T
+import Data.Maybe (fromMaybe)
 import qualified Data.Vector as V
+import qualified Data.Vector.Strict as SV
 
 import Engine.Dex
-import Engine.Event (Body (..), EventId (..), HandlerSpec (..), NativeId (..), Prefix (..))
+import Engine.Event (Body (..), CondId, EventId (..), HandlerSpec (..), NativeId (..), Prefix (..))
 import Engine.Format (Format, trunc, truncBits)
 import Engine.Modifier (modify)
 import Engine.Rule (StatusId (..))
-import Engine.State (Mon (..), MonStatus (..), noItem)
+import Engine.State (Mon (..), MonStatus (..), Volatile (..), noItem)
 
 -- | Denominator of the crit chance for a crit stage, or 'Nothing' when the move cannot crit
 -- (gen 7+ table @[0, 24, 8, 2, 1]@ indexed by the clamped @critRatio@).
@@ -39,18 +42,53 @@ critDenominator ratio = case max 0 (min 4 ratio) of
   3 -> Just 2
   _ -> Just 1
 
--- | Type immunity of the defender to a move type (@runImmunity@ through the type chart).
-isImmune :: Dex -> Int -> Mon -> Bool
-isImmune dx atkType m =
-  -- pokemon.ts runImmunity: the typeless "???" (Struggle) is never blocked
-  -- LATENT: species types are used where Showdown calls getTypes() (Terastallization, Roost, type changes).
-  -- LATENT: Ground immunity in Showdown goes through isGrounded() (Levitate, Air Balloon, Gravity, Roost).
-  atkType /= noType && (typeEffect dx (monType1 m) atkType == 3
-    || (monType2 m /= noType && typeEffect dx (monType2 m) atkType == 3))
+-- | @pokemon.getTypes()@ (pokemon.ts 2160-2168): @runEvent('Type', this, null, null, this.types)@, then Normal for a Pokemon
+-- left with none (gen >= 5). The pair of types, 'noType' for a missing second one. Every read of a Pokemon's types goes
+-- through here (STAB, the type chart, @getImmunity@, @runImmunity@, @hasType@, @isGrounded@); 'monType1' and 'monType2' are
+-- Showdown's stored @this.types@.
+--
+-- The event's only listener is the Roost volatile (data/moves.ts @roost.condition.onType@: the types without Flying). An
+-- effect is supported only when every handler the export lists for it has a body, and "Engine.Effects" has none for
+-- @Type@ (a property checks that no table but Roost's volatile has one). So the @runEvent@ is a fold over the Pokemon's
+-- volatiles that have the handler, as a pure function; at most one does, so it sorts nothing and draws nothing. The fast path,
+-- a Pokemon with no volatile, returns the stored types: exact because no ability, item, status, side, field or foe handler of
+-- the event exists.
+-- LATENT: a Terastallized Pokemon returns @[terastallized]@ before the event (2161), and @addedType@ (Trick-or-Treat) is
+-- appended after it (2167); neither is modelled. @setType@ (Soak, Burn Up) would overwrite 'monType1'/'monType2'.
+monTypes :: Dex -> Mon -> (Int, Int)
+monTypes dx m
+  | SV.null vs = (monType1 m, monType2 m)
+  | otherwise = SV.foldl' apply (monType1 m, monType2 m) vs
+  where
+    vs = monVolatiles m
+    apply ts (Volatile i _) = case condSpec (conditionOf dx (toEnum i :: CondId)) POwn EvType >>= hsBody of
+      -- roost.onType(types): `types.filter(type => type !== 'Flying')`; an empty result is ['Normal'] (getTypes)
+      Just (BNative NRoostType) -> withoutFlying ts
+      _ -> ts
+    withoutFlying (t1, t2) =
+      case [t | t <- [t1, t2], t /= noType, not (typeIsNamed dx t "Flying")] of
+        [] -> (fromMaybe noType (typeIdNamed dx "Normal"), noType)
+        [a] -> (a, noType)
+        (a : b' : _) -> (a, b')
 
--- | Whether a Pokemon has the type with this name (@pokemon.hasType@ with no type changes yet).
+-- | Type immunity of the defender to a move type (@pokemon.runImmunity@, pokemon.ts 2258-2290; the move's own
+-- @ignoreImmunity@ is the caller's). The typeless "???" (Struggle) is never blocked. A Ground move goes through
+-- @isGrounded(negateImmunity)@ (a Roosted Flying type is grounded, so Ground hits it), every other type through
+-- @dex.getImmunity(type, this)@ on @getTypes()@ ('monTypes').
+-- LATENT: @runEvent('NegateImmunity')@ (Scrappy, Ring Target, Iron Ball) has no listener.
+isImmune :: Dex -> Int -> Mon -> Bool
+isImmune dx atkType m
+  | atkType == noType = False
+  | typeIsNamed dx atkType "Ground" = not (isGrounded dx m)
+  | otherwise = typeEffect dx t1 atkType == 3 || (t2 /= noType && typeEffect dx t2 atkType == 3)
+  where
+    (t1, t2) = monTypes dx m
+
+-- | Whether a Pokemon has the type with this name (@pokemon.hasType@, which reads @getTypes()@: 'monTypes').
 hasTypeNamed :: Dex -> T.Text -> Mon -> Bool
-hasTypeNamed dx name m = typeIsNamed dx (monType1 m) name || typeIsNamed dx (monType2 m) name
+hasTypeNamed dx name m = typeIsNamed dx t1 name || typeIsNamed dx t2 name
+  where
+    (t1, t2) = monTypes dx m
 
 -- | Whether a Pokemon holds the item with this id (@pokemon.hasItem@).
 -- LATENT: @hasItem@ is false while @ignoringItem()@ (Klutz, Embargo, Magic Room); none can happen yet.
@@ -62,11 +100,12 @@ typeIdNamed :: Dex -> T.Text -> Maybe Int
 typeIdNamed dx name = V.findIndex (== name) (dxTypeNames dx)
 
 -- | @pokemon.isGrounded()@ (pokemon.ts 2170) as a boolean (Showdown's @null@, Levitate, counts as not grounded):
--- a Flying type is not grounded.
+-- a Pokemon with the Flying type, as @getTypes()@ gives it (a Roosted Flying type has lost it: see 'isImmune'), is not
+-- grounded.
 -- LATENT: the rest of the function reads state the engine does not hold yet. Grounded regardless of type:
 -- Gravity (field pseudo-weather), Ingrain and Smack Down (volatiles), Iron Ball (item). Not grounded: Levitate (and
--- Eelevate), Magnet Rise and Telekinesis (volatiles), Air Balloon (item), and Roost's loss of the Flying type (a
--- volatile). None of these is supported, so a Pokemon is grounded exactly when it is not a Flying type.
+-- Eelevate), Magnet Rise and Telekinesis (volatiles), Air Balloon (item). None of these is supported, so a Pokemon is
+-- grounded exactly when it does not have the Flying type. (The Burn Up clause, a @???@ Roosted type, is not modelled.)
 -- The terrains' bodies also read @isSemiInvulnerable()@ ('isSemiInvulnerable').
 isGrounded :: Dex -> Mon -> Bool
 isGrounded dx m = not (hasTypeNamed dx "Flying" m)
@@ -88,8 +127,9 @@ typeIsNamed dx t name = t >= 0 && t < V.length (dxTypeNames dx) && dxTypeNames d
 -- LATENT: Misty Terrain and Safeguard (@SetStatus@, @TryAddVolatile@), and the ability checks of @setStatus@
 -- (Corrosion), are not modelled; Overcoat's @Immunity@ (powder, sandstorm) comes with phase 3d.
 typeImmuneTo :: Dex -> T.Text -> Mon -> Bool
-typeImmuneTo dx key m = any immune [monType1 m, monType2 m]
+typeImmuneTo dx key m = any immune [t1, t2]
   where
+    (t1, t2) = monTypes dx m
     immune t = t /= noType && key `elem` (dxTypeImmune dx V.! t)
 
 -- | The key @setStatus@ passes to @runStatusImmunity@ for a status.
@@ -105,8 +145,9 @@ statusKey st = case st of
 typeMod :: Dex -> Int -> Mon -> Int
 typeMod dx atkType m
   | atkType == noType = 0 -- dex.getEffectiveness: an unknown source type is neutral
-  | otherwise = max (-6) (min 6 (one (monType1 m) + (if monType2 m == noType then 0 else one (monType2 m))))
+  | otherwise = max (-6) (min 6 (one t1 + (if t2 == noType then 0 else one t2)))
   where
+    (t1, t2) = monTypes dx m
     one t = case typeEffect dx t atkType of
       1 -> 1
       2 -> -1
@@ -127,8 +168,9 @@ moveTypeMod dx mv m = case moveSpec mv POwn EvEffectiveness of
   Nothing -> typeMod dx (mvType mv) m
   Just spec
     | mvType mv == noType -> 0
-    | otherwise -> max (-6) (min 6 (one (monType1 m) + (if monType2 m == noType then 0 else one (monType2 m))))
+    | otherwise -> max (-6) (min 6 (one t1 + (if t2 == noType then 0 else one t2)))
     where
+      (t1, t2) = monTypes dx m
       one t =
         let base = case typeEffect dx t (mvType mv) of
               1 -> 1
@@ -166,8 +208,10 @@ modifyDamage f dx attacker defender mv crit roll16 base1 =
       base3 = trunc f (trunc f (base2 * (100 - roll16)) `quot` 100)
       -- "???" never gets STAB (modifyDamage: `if (type !== '???')`); `baseDamage = this.battle.modify(baseDamage, stab)`
       -- with stab 1.5, a modify() of its own (battle-actions.ts ~1850), not a chainModify
-      -- LATENT: Showdown uses hasType()/getTypes() and runs ModifySTAB (Adaptability, Terastallization).
-      stab = mvType mv /= noType && (mvType mv == monType1 attacker || mvType mv == monType2 attacker)
+      -- `pokemon.hasType(type) || pokemon.getTypes(false, true).includes(type)`: both read getTypes() ('monTypes')
+      -- LATENT: Showdown runs ModifySTAB (Adaptability, Terastallization).
+      (at1, at2) = monTypes dx attacker
+      stab = mvType mv /= noType && (mvType mv == at1 || mvType mv == at2)
       base4 = if stab then modify f base3 6144 else base3
       tm = moveTypeMod dx mv defender
       base5

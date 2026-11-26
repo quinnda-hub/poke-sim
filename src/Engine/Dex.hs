@@ -255,7 +255,7 @@ loadDex dir = do
     let tix = M.fromList (zip (V.toList tnames) [0 ..])
     chart <- chartOf tnames typesV
     immune <- immunityOf tnames typesV
-    conds <- traverse (conditionFor conditionsV abilitiesV) [minBound .. maxBound]
+    conds <- traverse (conditionFor conditionsV abilitiesV movesV) [minBound .. maxBound]
     let tyOf n = M.lookup n tix
     abilityEntries <- objectEntries abilitiesV
     -- the field-condition table first: its ids (the weathers, then the terrains and the rest in the order of moves.json)
@@ -270,7 +270,7 @@ loadDex dir = do
     itemEntries <- objectEntries itemsV
     itemL <- traverse (\(k, v) -> effectFor k 8 POwn True v (itemBodies tyOf fieldIdOf k)) itemEntries
     speciesL <- objectEntries speciesV >>= traverse (speciesOf tix . snd)
-    movesL <- traverse (moveOf tix condLookup . snd) moveEntries
+    movesL <- traverse (moveOf tix condLookup (V.fromList conds) . snd) moveEntries
     struggleV <- maybe (Left "moves.json has no struggle") Right (lookup "struggle" moveEntries)
     -- Struggle's onModifyMove makes 'moveRule' reject it, so 'moveOf' gives it 'plainRule'. Its flags still apply:
     -- data/moves.ts struggle `flags: {contact: 1, ...}`, read by checkMoveMakesContact (Rocky Helmet). Its other
@@ -279,7 +279,7 @@ loadDex dir = do
           Object o | Just (Object fl) <- KM.lookup "flags" o -> KM.member "contact" fl
           _ -> False
     struggle <- (\m -> m {mvType = noType, mvSupported = False, mvRule = (mvRule m) {mrContact = struggleContact}})
-      <$> moveOf tix condLookup struggleV
+      <$> moveOf tix condLookup (V.fromList conds) struggleV
     natureEntries <- objectEntries naturesV
     natureL <- traverse (natureOf . snd) natureEntries
     pure Dex
@@ -350,19 +350,15 @@ immunityOf names v = do
     _ -> Right []) names
 
 -- | A condition with the bodies of 'nativeBody': from @conditions.json@, or for the volatiles of the abilities
--- protosynthesis, quarkdrive and unburden the @condition@ block of the ability (@dex.conditions.get@ finds it there:
--- dex-conditions.ts 692-699), whose handler names are the ability's @condition.on...@ entries. See 'effectFor'.
-conditionFor :: Value -> Value -> CondId -> Either String Condition
-conditionFor conditionsV abilitiesV c = do
-  (v, typeOrder) <- case abilityOf c of
-    Just ab -> do
-      a <- field ab abilitiesV
-      cond <- field "condition" a
-      let hs = case a of
-            Object o | Just (Array xs) <- KM.lookup "handlers" o -> [String (T.drop 10 h) | String h <- V.toList xs, "condition." `T.isPrefixOf` h]
-            _ -> []
-      pure (case cond of Object o -> Object (KM.insert "handlers" (Array (V.fromList hs)) o); _ -> cond, 2) -- effectType Condition
-    Nothing -> do
+-- protosynthesis, quarkdrive and unburden the @condition@ block of the ability, and for roost's volatile the @condition@
+-- block of the move (@dex.conditions.get@ finds it there: dex-conditions.ts 692-699), whose handler names are the owner's
+-- @condition.on...@ entries. See 'effectFor'.
+conditionFor :: Value -> Value -> Value -> CondId -> Either String Condition
+conditionFor conditionsV abilitiesV movesV c = do
+  (v, typeOrder) <- case (abilityOf c, moveOf' c) of
+    (Just ab, _) -> owned abilitiesV ab
+    (_, Just mv) -> owned movesV mv
+    _ -> do
       v <- field (condName c) conditionsV
       effectType <- field "effectType" v >>= asText
       pure (v, case effectType of
@@ -377,10 +373,21 @@ conditionFor conditionsV abilitiesV c = do
   let bodies = [(p, e, b) | p <- [minBound .. maxBound], e <- [minBound .. maxBound], Just b <- [nativeBody c p e]]
   effectFor (condName c) typeOrder POwn False v (Just bodies)
   where
+    -- the @condition@ block of an ability or a move, with the owner's @condition.on...@ names as its handlers
+    owned table key = do
+      a <- field key table
+      cond <- field "condition" a
+      let hs = case a of
+            Object o | Just (Array xs) <- KM.lookup "handlers" o -> [String (T.drop 10 h) | String h <- V.toList xs, "condition." `T.isPrefixOf` h]
+            _ -> []
+      pure (case cond of Object o -> Object (KM.insert "handlers" (Array (V.fromList hs)) o); _ -> cond, 2) -- effectType Condition
     abilityOf x = case x of
       CProtosynthesis -> Just "protosynthesis"
       CQuarkDrive -> Just "quarkdrive"
       CUnburden -> Just "unburden"
+      _ -> Nothing
+    moveOf' x = case x of
+      CRoost -> Just "roost"
       _ -> Nothing
 
 -- | A move's field condition by key, if the engine runs it ('Engine.Rule.CondLookup').
@@ -515,8 +522,8 @@ speciesOf tix v = do
 typeIx :: M.Map T.Text Int -> T.Text -> Either String Int
 typeIx tix t = maybe (Left ("unknown type " ++ T.unpack t)) Right (M.lookup t tix)
 
-moveOf :: M.Map T.Text Int -> CondLookup -> Value -> Either String MoveData
-moveOf tix condLookup v = do
+moveOf :: M.Map T.Text Int -> CondLookup -> V.Vector Condition -> Value -> Either String MoveData
+moveOf tix condLookup conds v = do
   ident <- field "id" v >>= asText
   ty <- field "type" v >>= asText >>= typeIx tix
   cat <- field "category" v >>= asText
@@ -539,9 +546,14 @@ moveOf tix condLookup v = do
         Object o -> Object (KM.insert "handlers" (Array (V.fromList (map String ownNames))) o)
         _ -> v
   effect <- effectFor ident 0 POwn False ownV (if null ownNames then Just [] else moveBodies ident)
-  let (rule, rejected) = case moveRule condLookup (cnReject effect) v of
+  let (rule, rejected0) = case moveRule condLookup (cnReject effect) v of
         Left why -> (plainRule, Just why)
         Right r -> (r, Nothing)
+      -- a move that adds the roost volatile is supported when the volatile is (every handler the export lists for it has a body)
+      roost = conds V.! fromEnum CRoost
+      rejected = case rejected0 of
+        Nothing | ERoost `elem` mrSelf rule, not (cnSupported roost) -> Just ("condition roost is not supported: " <> fromMaybe "" (cnReject roost))
+        _ -> rejected0
       supported = isNothing rejected && executable rule
   pure (MoveData ident ty (cat == "Physical") (cat == "Status") bp acc prio crit pp noBoost (truthyField "struggleRecoil" v) rule rejected supported effect)
 
