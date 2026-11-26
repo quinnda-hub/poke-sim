@@ -10,7 +10,8 @@ const fs = require('fs');
 const path = require('path');
 
 const [repo, traceDir, secsArg, warmArg] = process.argv.slice(2);
-const SHOWDOWN_DIR = path.join(repo, 'local', 'showdown');
+// Absolute, so a relative repo root (`.`) is not taken for a package name by require.
+const SHOWDOWN_DIR = path.resolve(repo, 'local', 'showdown');
 const { Battle, PRNG } = require(path.join(SHOWDOWN_DIR, 'dist', 'sim'));
 const secs = Number(secsArg || 5);
 const warm = Number(warmArg || 2);
