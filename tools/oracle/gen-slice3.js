@@ -895,3 +895,5 @@ if (require.main === module) {
 	console.error('tally (from Showdown\'s own events):');
 	for (const [k, v] of Object.entries(tally)) console.error(`  ${k}: ${JSON.stringify(v)}`);
 }
+
+module.exports = { assign };

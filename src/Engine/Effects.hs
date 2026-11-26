@@ -7,6 +7,10 @@
 -- An ability or item is supported only when it is in these tables and the export lists no handler without a
 -- body here ('Engine.Dex').
 --
+-- A move's own handlers (slice 4a) are bodies in 'moveBodies', on the same terms: the move is an effect, and it is
+-- supported only when every handler the export lists for it (other than its @condition.*@ handlers, which belong to
+-- its field condition) has a body.
+--
 -- = Rule kinds
 --
 -- A body is a data rule only when the vocabulary expresses Showdown's handler exactly, and a rule kind or a
@@ -52,10 +56,23 @@
 -- (stealthrock: damage by Rock effectiveness; spikes: damage by layer; toxicspikes: poison or absorb; stickyweb: a
 -- Speed drop), each used by one whitelisted condition; toxicdebris is the one ability that sets a side condition
 -- on its attacker. Heavy-Duty Boots has no handler of its own: the hazard bodies read the item.
+--
+-- The moves' bodies (slice 4a) are all native. A move's @onBasePower@ is a modifier under a condition, but each
+-- condition has one whitelisted user: facade (the user has a status other than sleep), psyblade (Electric Terrain),
+-- expandingforce (Psychic Terrain and a grounded user) and ficklebeam (a draw), so none reaches the bar of three and no
+-- rule kind is added (venoshock, barbbarrage and brine, which are not whitelisted, do not count). The accuracy and type
+-- changes write to the move in use ('Engine.Dispatch.singleMoveEvent'), not to an event's modifier, which 'HandlerRule'
+-- does not express. "Accuracy by weather" (thunder, hurricane, blizzard, bleakwindstorm) has four whitelisted users and
+-- would meet the bar as a rule kind; it is not adopted, because the rule interpreter has no channel for a changed move, and
+-- the four bodies are three lines each: a candidate for folding when that channel exists. A body shared by several moves is one native: the weight
+-- bands (lowkick, grassknot), Stored Power's boost count (storedpower, powertrip), the rain accuracy (thunder, hurricane),
+-- the halving (ruination, superfang), the poisoned-target doubling (venoshock, barbbarrage) and the Dynamax check of
+-- onTryHit (lowkick, grassknot, heavyslam).
 module Engine.Effects
   ( abilityBodies
   , itemBodies
   , fieldCondBodies
+  , moveBodies
   ) where
 
 import qualified Data.Text as T
@@ -273,3 +290,58 @@ fieldCondBodies name = case name of
     screen dmg =
       Just [ (POwn, EvDurationCallback, BNative NLightClayDuration), (PAny, EvModifyDamage, BNative dmg)
            , (PSide, EvStart, BNative NLogOnly), (PSide, EvEnd, BNative NLogOnly) ]
+
+-- | The bodies of a move's own handlers (data/moves.ts), by its id, or 'Nothing' when the engine does not implement
+-- them. A move with no handler of its own needs no entry. The @condition.*@ handlers are not listed here.
+--
+-- Not implemented: mistyexplosion has the @onBasePower@ of expandingforce under Misty Terrain, but its @selfdestruct@
+-- keeps the move rejected, so a body would run on no path. Payback, triplekick and tripleaxel (per-turn history,
+-- per-hit accuracy), the healing and stat-override moves and knockoff are later phases.
+moveBodies :: T.Text -> Maybe [(Prefix, EventId, Body)]
+moveBodies name = case name of
+  -- lowkick, grassknot: basePowerCallback by the target's weight; onTryHit fails on a Dynamaxed target
+  "lowkick" -> Just [(POwn, EvBasePowerCallback, BNative NWeightPower), (POwn, EvTryHit, BNative NDynamaxTryHit)]
+  "grassknot" -> Just [(POwn, EvBasePowerCallback, BNative NWeightPower), (POwn, EvTryHit, BNative NDynamaxTryHit)]
+  -- heavyslam: basePowerCallback by the weight ratio; onTryHit as above
+  "heavyslam" -> Just [(POwn, EvBasePowerCallback, BNative NHeavySlamPower), (POwn, EvTryHit, BNative NDynamaxTryHit)]
+  -- hex: doubled against a target with a status
+  "hex" -> Just [(POwn, EvBasePowerCallback, BNative NHexPower)]
+  -- storedpower, powertrip: 20 more per positive stat stage of the user
+  "storedpower" -> Just [(POwn, EvBasePowerCallback, BNative NStoredPower)]
+  "powertrip" -> Just [(POwn, EvBasePowerCallback, BNative NStoredPower)]
+  -- acrobatics: doubled with no item
+  "acrobatics" -> Just [(POwn, EvBasePowerCallback, BNative NAcrobaticsPower)]
+  -- risingvoltage: doubled against a grounded target in Electric Terrain
+  "risingvoltage" -> Just [(POwn, EvBasePowerCallback, BNative NRisingVoltagePower)]
+  -- facade: onBasePower, chainModify(2) when the user has a status other than sleep
+  "facade" -> Just [(POwn, EvBasePower, BNative NFacadePower)]
+  -- psyblade: onBasePower, chainModify(1.5) under Electric Terrain
+  "psyblade" -> Just [(POwn, EvBasePower, BNative NPsybladePower)]
+  -- expandingforce: onBasePower, chainModify(1.5) under Psychic Terrain with a grounded user; onModifyMove widens the target
+  "expandingforce" -> Just [(POwn, EvBasePower, BNative NExpandingForcePower), (POwn, EvModifyMove, BNative NExpandingForceModifyMove)]
+  -- ficklebeam: onBasePower, randomChance(3, 10) -> chainModify(2)
+  "ficklebeam" -> Just [(POwn, EvBasePower, BNative NFickleBeamPower)]
+  -- venoshock, barbbarrage: onBasePower, chainModify(2) against a poisoned target; brine: against a target at half HP or less
+  "venoshock" -> Just [(POwn, EvBasePower, BNative NVenoshockPower)]
+  "barbbarrage" -> Just [(POwn, EvBasePower, BNative NVenoshockPower)]
+  "brine" -> Just [(POwn, EvBasePower, BNative NBrinePower)]
+  -- thunder, hurricane: onModifyMove, accuracy true in rain and 50 in sun; blizzard: true in snow; bleakwindstorm: true in rain
+  "thunder" -> Just [(POwn, EvModifyMove, BNative NRainAccuracyModifyMove)]
+  "hurricane" -> Just [(POwn, EvModifyMove, BNative NRainAccuracyModifyMove)]
+  "blizzard" -> Just [(POwn, EvModifyMove, BNative NBlizzardModifyMove)]
+  "bleakwindstorm" -> Just [(POwn, EvModifyMove, BNative NBleakwindModifyMove)]
+  -- weatherball: onModifyType by the weather, onModifyMove doubles the power in any weather the move knows
+  "weatherball" -> Just [(POwn, EvModifyType, BNative NWeatherBallType), (POwn, EvModifyMove, BNative NWeatherBallModifyMove)]
+  -- terrainpulse: onModifyType by the terrain, onModifyMove doubles the power, both for a grounded user
+  "terrainpulse" -> Just [(POwn, EvModifyType, BNative NTerrainPulseType), (POwn, EvModifyMove, BNative NTerrainPulseModifyMove)]
+  -- ivycudgel: onModifyType by Ogerpon's forms (no form is a species here), onPrepareHit only logs
+  "ivycudgel" -> Just [(POwn, EvModifyType, BNative NIvyCudgelType), (POwn, EvPrepareHit, BNative NLogOnly)]
+  -- freezedry: onEffectiveness, super effective against Water; flyingpress: adds Flying's effectiveness
+  "freezedry" -> Just [(POwn, EvEffectiveness, BNative NFreezeDryEffectiveness)]
+  "flyingpress" -> Just [(POwn, EvEffectiveness, BNative NFlyingPressEffectiveness)]
+  -- grassyglide: onModifyPriority, +1 under Grassy Terrain for a grounded user
+  "grassyglide" -> Just [(POwn, EvModifyPriority, BNative NGrassyGlidePriority)]
+  -- ruination, superfang: damageCallback, half of the target's HP (at least 1)
+  "ruination" -> Just [(POwn, EvDamageCallback, BNative NHalfHpDamage)]
+  "superfang" -> Just [(POwn, EvDamageCallback, BNative NHalfHpDamage)]
+  _ -> Nothing

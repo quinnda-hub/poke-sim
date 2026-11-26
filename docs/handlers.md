@@ -448,3 +448,106 @@ the traces that make its mechanics happen.
 5. **3e: weather- and terrain-driven boosts.**
    - Protosynthesis, Quark Drive, Booster Energy and the seeds;
    - `WeatherChange` and `TerrainChange`, `End`, and item use.
+
+## A move's own handlers (slice 4)
+
+Until slice 4 the rule translation rejects any move whose export lists handler
+code, except a move's `condition.*` handlers when the move defines the field
+condition. Slice 4 lets a move's own handlers in, on the same terms as an
+ability's or item's: the move is an effect, its handlers have bodies in
+`src/Engine/Effects.hs`, and a move is accepted only when every handler the
+export lists for it has a body and every other key is translated.
+
+### How Showdown calls them
+
+There are three forms, and each call site is mirrored exactly.
+
+- **`singleEvent` on the move.** Most of a move's handlers are called this
+  way, with the move as the effect and no sort:
+  - in useMove: `ModifyType` and `ModifyMove` (battle-actions.ts 494-495,
+    each followed by its `runEvent` at 497-498; 459-467 are the Z-Move and Max
+    Move paths), `TryMove` (554), `MoveFail` (595), `AfterMoveSecondarySelf`
+    (606), `AfterMoveSecondary` (878) and `AfterMove` (368);
+  - in the hit steps: `Try` and `PrepareHit` (656-657, 889-890),
+    `TryImmunity` (739), `TryHit`, `TryHitSide` and `TryHitField`
+    (1101-1105), `Hit`, `HitSide` and `HitField` (1328-1338), and `AfterHit`
+    (1186). The move's own `TryHit` is not paired with the `runEvent` of the
+    same name. `runEvent('TryHit')` is step 1 of trySpreadMoveHit (709),
+    before accuracy. The move's `singleEvent('TryHit')` runs at the start of
+    each `spreadMoveHit`, after accuracy and once per hit;
+  - elsewhere: `Effectiveness` (pokemon.ts 2237), inside the type-effectiveness
+    calculation, and `ModifyPriority` (battle.ts 2699), where an action's
+    priority is computed.
+
+  Most of these are followed by a `runEvent` of the same name for the other
+  effects. A `singleEvent` has no sort and draws only if its body does, so a
+  site with no supported move handler can be added when the first one needs
+  it.
+- **`runEvent` with `onEffect`.** `BasePower` (battle-actions.ts 1708),
+  `ModifyTarget` (480) and `Damage` (battle.ts 2138) pass `onEffect`. The
+  effect's own `on<Event>` callback is added to the collected handlers
+  (battle.ts 785-795), and then the whole list is sorted as usual. Its sort
+  keys come from resolvePriority:
+  - order, priority and subOrder from the move's own
+    `on<Event>Order`, `on<Event>Priority` and `on<Event>SubOrder`;
+  - a subOrder fallback of 0, since `Move` is not in effectTypeOrder;
+  - the speed of the event target, which is its effect holder;
+  - effectOrder 0, because `initEffectState({})` has no id and does not
+    advance the counter (battle.ts 3381-3391);
+  - no `end`.
+
+  For every supported effect the move's handler sorts strictly last. It has
+  priority 0 and no order, and every other supported `BasePower` handler has
+  an explicit order or a positive priority, so it ties with nothing. The
+  property `moveBasePowerSortsLast` checks this. A future effect that breaks
+  it makes the sort keys above observable.
+- **Direct calls.** `basePowerCallback` (battle-actions.ts 1676),
+  `damageCallback` (1665) and `beforeMoveCallback` (329) are plain function
+  calls, outside the event system. They parse as `(POwn, Ev...Callback)`
+  handlers, as `durationCallback` does, and run at their call site. A
+  `damageCallback` returns from getDamage before the crit roll, `BasePower`,
+  the random factor and every modifier, so Ruination and Super Fang make no
+  draw in getDamage.
+
+### The move in use
+
+Showdown's handlers mutate an `ActiveMove`, a copy made when the move is used,
+and later steps read the copy: `move.type`, `move.accuracy`,
+`move.basePower`, `move.category`, `move.target` and others. The engine makes
+the same copy: a per-use `MoveData` value created when the move is used,
+changed only by the handlers Showdown lets change it, and read by every later
+step of that use instead of the Dex's. It is never stored in `Battle`, since it
+does not survive a decision point, so the state layout is unchanged.
+
+### Data
+
+Low Kick, Grass Knot and Heavy Slam read weights. `species.json` already
+exports `weighthg`, so the Dex loads it. `getWeight` is
+`max(1, runEvent('ModifyWeight', weighthg))` (pokemon.ts 706-709).
+
+Bodies that read per-turn history (Payback's `newlySwitched` and
+`queue.willMove`, `hurtThisTurn`, `lastDamage`, `attackedBy`) need state the
+engine does not hold, and wait for a phase that adds it.
+
+### Phases
+
+1. **4a: the mechanism, and the moves it unlocks on its own.**
+   - Base-power callbacks: Low Kick, Grass Knot, Heavy Slam, Hex, Stored
+     Power, Acrobatics and Rising Voltage.
+   - `onBasePower`: Facade, Psyblade, Expanding Force, Misty Explosion and
+     Fickle Beam (its `randomChance` is a draw inside `BasePower`).
+   - Accuracy and type: Hurricane, Thunder, Blizzard and Bleakwind Storm
+     (accuracy by weather), Weather Ball, Terrain Pulse and Ivy Cudgel (type
+     changes), and Freeze-Dry (`Effectiveness`).
+   - Grassy Glide (`ModifyPriority`) and Ruination (`damageCallback`).
+2. **4b: healing and the stat overrides.** Moonlight, Synthesis, Morning Sun,
+   Strength Sap, Pain Split and Roost (its type-changing volatile); Body
+   Press, Psyshock, Foul Play, Sacred Sword, Scale Shot and level-based
+   damage.
+3. **4c: removing and moving field state.** Rapid Spin, Mortal Spin, Ice
+   Spinner, Defog, Court Change, Haze, Ceaseless Edge and Stone Axe; Aurora
+   Veil; the screen breakers.
+4. **4d: Knock Off and item removal** (`takeItem`, the `TakeItem` event, which
+   makes Booster Energy's and Unburden's `onTakeItem` reachable).
+
+Each phase is its own PR, stacked on the one before.

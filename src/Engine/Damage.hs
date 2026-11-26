@@ -13,6 +13,7 @@ module Engine.Damage
   , isSemiInvulnerable
   , typeIsNamed
   , typeMod
+  , moveTypeMod
   , baseDamage
   , modifyDamage
   , finalDamage
@@ -22,6 +23,7 @@ import qualified Data.Text as T
 import qualified Data.Vector as V
 
 import Engine.Dex
+import Engine.Event (Body (..), EventId (..), HandlerSpec (..), NativeId (..), Prefix (..))
 import Engine.Format (Format, trunc, truncBits)
 import Engine.Modifier (modify)
 import Engine.Rule (StatusId (..))
@@ -110,6 +112,40 @@ typeMod dx atkType m
       2 -> -1
       _ -> 0
 
+-- | @pokemon.runEffectiveness(move)@ (pokemon.ts 2230-2245) of the move in use: for each defending type,
+-- @dex.getEffectiveness(move, type)@, then @singleEvent('Effectiveness', move, null, this, type, move, typeMod)@, which a
+-- handler of the move may replace (Freeze-Dry, Flying Press), then @runEvent('Effectiveness', ...)@; the total is
+-- clamped to [-6, 6] by the caller (@modifyDamage@, battle-actions.ts 1855).
+--
+-- The fast path is 'typeMod': a move with no @Effectiveness@ handler of its own. It is sound because no other supported
+-- effect listens to @Effectiveness@: an ability, item or condition is supported only when each handler the export lists
+-- has a body, and "Engine.Effects" has none for this event except the moves' own (a property checks it). So the
+-- @runEvent@ has no handler to run, and with fewer than two it draws nothing.
+-- LATENT: Tera Shell and Terastallization (the other parts of @runEffectiveness@) are not supported.
+moveTypeMod :: Dex -> MoveData -> Mon -> Int
+moveTypeMod dx mv m = case moveSpec mv POwn EvEffectiveness of
+  Nothing -> typeMod dx (mvType mv) m
+  Just spec
+    | mvType mv == noType -> 0
+    | otherwise -> max (-6) (min 6 (one (monType1 m) + (if monType2 m == noType then 0 else one (monType2 m))))
+    where
+      one t =
+        let base = case typeEffect dx t (mvType mv) of
+              1 -> 1
+              2 -> -1
+              _ -> 0
+         in case hsBody spec of
+              Just (BNative n) -> effectiveness n t base
+              _ -> base
+  where
+    flying = typeIdNamed dx "Flying"
+    -- freezedry.onEffectiveness(typeMod, target, type): `if (type === 'Water') return 1`
+    effectiveness n t base = case n of
+      NFreezeDryEffectiveness | typeIsNamed dx t "Water" -> 1
+      -- flyingpress.onEffectiveness(typeMod, target, type, move): `typeMod + this.dex.getEffectiveness('Flying', type)`
+      NFlyingPressEffectiveness -> base + maybe 0 (\f -> case typeEffect dx t f of 1 -> 1; 2 -> -1; _ -> 0) flying
+      _ -> base
+
 -- | @tr(tr(tr(tr(2L/5 + 2) * BP * A) / D) / 50)@.
 baseDamage :: Format -> Int -> Int -> Int -> Int -> Int
 baseDamage f level power atk def =
@@ -133,16 +169,16 @@ modifyDamage f dx attacker defender mv crit roll16 base1 =
       -- LATENT: Showdown uses hasType()/getTypes() and runs ModifySTAB (Adaptability, Terastallization).
       stab = mvType mv /= noType && (mvType mv == monType1 attacker || mvType mv == monType2 attacker)
       base4 = if stab then modify f base3 6144 else base3
-      tm = typeMod dx (mvType mv) defender
+      tm = moveTypeMod dx mv defender
       base5
         | tm > 0 = base4 * 2 ^ tm
         | tm < 0 = iterate (\x -> trunc f (x `quot` 2)) base4 !! negate tm
         | otherwise = base4
       -- battle-actions.ts modifyDamage ~1874: `if (pokemon.status === 'brn' && move.category === 'Physical' &&
-      -- !pokemon.hasAbility('guts'))` and (gen >= 6) the move is not Facade (which has a handler, so is not
-      -- supported): `modify(baseDamage, 0.5)` (a modify() of its own, not a chainModify), after the type step and
-      -- before the final ModifyDamage event
-      base6 = if monStatus attacker == StatusBrn && mvPhysical mv then modify f base5 2048 else base5
+      -- !pokemon.hasAbility('guts'))` and (gen >= 6) the move is not Facade:
+      -- `modify(baseDamage, 0.5)` (a modify() of its own, not a chainModify), after the type
+      -- step and before the final ModifyDamage event
+      base6 = if monStatus attacker == StatusBrn && mvPhysical mv && mvId mv /= "facade" then modify f base5 2048 else base5
    in base6
 
 -- | The end of @modifyDamage@ after @runEvent('ModifyDamage')@: `if (this.battle.gen !== 5 && !baseDamage) return 1`,

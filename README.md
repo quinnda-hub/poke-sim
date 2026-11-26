@@ -60,6 +60,8 @@ node tools/oracle/gen-slice2.js local/traces/slice2 600 local/traces/slice2-pool
 node tools/oracle/gen-slice2.js local/traces/slice2 300 local/traces/slice2-pool.json 1 struggle
 cabal run -v0 engine-pool > local/traces/slice3-pool.json
 node tools/oracle/gen-slice3.js local/traces/slice3 1500 local/traces/slice3-pool.json
+cabal run -v0 engine-pool > local/traces/slice4-pool.json
+node tools/oracle/gen-slice4.js local/traces/slice4 600 local/traces/slice4-pool.json
 cabal test parity --test-show-details=direct
 ```
 

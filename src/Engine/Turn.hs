@@ -429,8 +429,6 @@ runMove fmt dx user@(Actor p _) slot = do
       proceed <- relayTruthy <$> runEvent dx EvBeforeMove user (Just eventTarget) (Just mv) RNone
       when proceed $ do
         void deductPP
-        -- useMove's ModifyMove event: a frozen user of a defrost move thaws (conditions.ts frz.onModifyMove)
-        void (runEvent dx EvModifyMove user (Just eventTarget) (Just mv) RNone)
         useMove fmt dx user target mv
         -- resolveFaints(); checkWin()
         resolveFaints dx False True
@@ -441,7 +439,24 @@ runMove fmt dx user@(Actor p _) slot = do
 -- user ('TargetSelf') skips immunity and accuracy (@hitStepAccuracy@: a self-targeted status move).
 {-# INLINABLE useMove #-}
 useMove :: MonadChance m => Format -> Dex -> Actor -> Actor -> MoveData -> Eng m ()
-useMove fmt dx user target mv = case mrTarget rule of
+useMove fmt dx user target mv0 = do
+  -- useMoveInner (battle-actions.ts 494-497): singleEvent('ModifyType') and singleEvent('ModifyMove') on the move change
+  -- the move in use (the copy made for this use: accuracy, type, power, ...), then runEvent('ModifyType') and
+  -- runEvent('ModifyMove') run the other effects' handlers (a frozen user of a defrost move thaws:
+  -- conditions.ts frz.onModifyMove; no other supported effect changes the move). The target they see is the one
+  -- `getRandomTarget` gives (a move on the user targets the user). Every later step of the use reads the changed move.
+  let eventTarget = if mrTarget (mvRule mv0) `elem` [TargetSelf, TargetAllySide, TargetAll] then user else target
+  mvT <- singleMoveEvent dx EvModifyType user (Just eventTarget) mv0
+  mv <- singleMoveEvent dx EvModifyMove user (Just eventTarget) mvT
+  void (runEvent dx EvModifyType user (Just eventTarget) (Just mv) RNone)
+  void (runEvent dx EvModifyMove user (Just eventTarget) (Just mv) RNone)
+  useMoveWith fmt dx user target mv
+
+-- | 'useMove' after the @ModifyType@ and @ModifyMove@ events: the rest of @useMoveInner@ and the hit steps, which read the
+-- move in use.
+{-# INLINABLE useMoveWith #-}
+useMoveWith :: MonadChance m => Format -> Dex -> Actor -> Actor -> MoveData -> Eng m ()
+useMoveWith fmt dx user target mv = case mrTarget rule of
   TargetSelf -> statusMove dx user user mv
   -- getMoveTargets (pokemon.ts 812): foeSide -> the foes (fainted ones too), allySide -> the allies and the user,
   -- all -> both, and tryMoveHit takes targets[0]: the foe for foeSide, the user for allySide and all
@@ -460,9 +475,12 @@ useMove fmt dx user target mv = case mrTarget rule of
      -- a falsy result removes the target and the move fails before any draw (Psychic Terrain, Overcoat). It is sorted
      -- left to right (never a draw). Self-targeted moves skip it here: no handler acts on one (Psychic Terrain returns
      -- for `effect.target === 'self'`, Overcoat for `target === source`).
-     -- LATENT: the Invulnerability event (step 0), the Try and PrepareHit events of the move and runEvent('PrepareHit')
-     -- of the hit steps have no handler.
-     tryHit <- relayTruthy <$> runEvent dx EvTryHit target (Just user) (Just mv) RNone
+     -- LATENT: the Invulnerability event (step 0) and the move's @Try@ event have no handler.
+     -- trySpreadMoveHit (battle-actions.ts 656-657): singleEvent('PrepareHit', move, {}, target, pokemon, move) (Ivy Cudgel
+     -- logs), then runEvent('PrepareHit', pokemon, target, move), before the hit steps
+     void (singleMoveEvent dx EvPrepareHit target (Just user) mv)
+     prepared <- relayTruthy <$> runEvent dx EvPrepareHit user (Just target) (Just mv) RNone
+     tryHit <- if prepared then relayTruthy <$> runEvent dx EvTryHit target (Just user) (Just mv) RNone else pure False
      when tryHit $
       -- hitStepTypeImmunity (before accuracy: an immune target consumes no draws); a move with
       -- ignoreImmunity (every status move but a few) skips it
@@ -648,17 +666,45 @@ applyEffect dx a e = case e of
 hitMove :: MonadChance m => Format -> Dex -> Actor -> Actor -> MoveData -> Eng m Int
 hitMove fmt dx user target mv = do
   b <- get
+  let tm = monOf b target
+  -- spreadMoveHit (battle-actions.ts 1101-1105): singleEvent('TryHit', moveData, {}, target, pokemon, move) opens every hit
+  -- (lowkick, grassknot and heavyslam fail against a Dynamaxed target: never here). The hit steps' runEvent('TryHit') already ran.
+  void (singleMoveEvent dx EvTryHit target (Just user) mv)
+  -- getDamage (battle-actions.ts 1665): `if (move.damageCallback) return move.damageCallback.call(...)`: the damage, with no
+  -- crit roll, BasePower, random factor or modifier (and so no draw)
+  fixed <- damageCallback mv target
+  dmg <- maybe (getDamage fmt dx user target mv) pure fixed
+  let -- spreadDamage: clamp to at least 1 unless 0, then Pokemon.damage; `dealt` is the damage returned
+      requested = if dmg == 0 then 0 else max 1 dmg
+      dealt = min requested (monHp tm)
+  modify' (applyDamage target requested)
+  -- spreadDamage, effect.drain (battle.ts ~2187): heal the user round(dealt * n / d); battle.heal turns a
+  -- positive amount below 1 into 1 and does nothing for 0, at full HP or when the user is down
+  case mrDrain (mvRule mv) of
+    Just (n, d) | dealt > 0 -> modify' (healMon user (roundDiv (dealt * n) d))
+    _ -> pure ()
+  pure dealt
+
+-- | @getDamage@ (battle-actions.ts 1650-1779) of a move with no @damageCallback@: base power (its callback, the crit
+-- roll, @BasePower@), the stats, the base damage, then @modifyDamage@.
+{-# INLINABLE getDamage #-}
+getDamage :: MonadChance m => Format -> Dex -> Actor -> Actor -> MoveData -> Eng m Int
+getDamage fmt dx user target mv = do
+  b <- get
   let um = monOf b user
       tm = monOf b target
+  -- getDamage: `basePower = move.basePowerCallback.call(this.battle, source, target, move)` (1675-1677, before the crit
+  -- roll), then `basePower = this.battle.clampIntRange(basePower, 1)`
+  bp0 <- basePowerCallback dx user target mv
   -- getDamage: crit roll, then modifyDamage's random(16)
   crit <- case critDenominator (mvCritRatio mv) of
     Nothing -> pure False
     Just d -> randomChance 1 d
-  -- getDamage: `basePower = this.battle.clampIntRange(basePower, 1)`, then (after the crit roll)
-  -- runEvent('BasePower', source, target, move, basePower, true) and the same clamp again; a handler only ever raises
-  -- the power here, so the `!basePower` early return (damage 0, no further draw) is unreachable
-  -- LATENT: the move's own BasePower callback (onEffect) is not run; moves with handlers are rejected.
-  power <- (\r -> case r of RInt p -> max 1 p; _ -> max 1 (mvPower mv)) <$> runEvent dx EvBasePower user (Just target) (Just mv) (RInt (max 1 (mvPower mv)))
+  -- getDamage: after the crit roll, runEvent('BasePower', source, target, move, basePower, true) and the same clamp
+  -- again. `onEffect` puts the move's own onBasePower first in the list, which is then sorted with the others
+  -- ('runEventOnEffect'); Fickle Beam's randomChance is drawn when its handler runs, after the crit roll. A handler only ever
+  -- raises the power here, so the `!basePower` early return (damage 0, no further draw) is unreachable
+  power <- (\r -> case r of RInt p -> max 1 p; _ -> max 1 bp0) <$> runEventOnEffect dx EvBasePower user (Just target) mv (RInt (max 1 bp0))
   let st = monStats
       (atkStat, defStat, atkStage0, defStage0)
         | mvPhysical mv = (stAtk (st um), stDef (st tm), bsAtk (monBoosts um), bsDef (monBoosts tm))
@@ -682,17 +728,7 @@ hitMove fmt dx user target mv = do
   r <- roll 0 16
   -- modifyDamage: ... runEvent('ModifyDamage', pokemon, target, move, baseDamage), then the minimum 1 and the 16-bit truncation
   let pre = modifyDamage fmt dx um tm mv crit r weathered
-  dmg <- finalDamage fmt . fromRelay pre <$> runEventCrit dx crit EvModifyDamage user (Just target) (Just mv) (RInt pre)
-  let -- spreadDamage: clamp to at least 1 unless 0, then Pokemon.damage; `dealt` is the damage returned
-      requested = if dmg == 0 then 0 else max 1 dmg
-      dealt = min requested (monHp tm)
-  modify' (applyDamage target requested)
-  -- spreadDamage, effect.drain (battle.ts ~2187): heal the user round(dealt * n / d); battle.heal turns a
-  -- positive amount below 1 into 1 and does nothing for 0, at full HP or when the user is down
-  case mrDrain (mvRule mv) of
-    Just (n, d) | dealt > 0 -> modify' (healMon user (roundDiv (dealt * n) d))
-    _ -> pure ()
-  pure dealt
+  finalDamage fmt . fromRelay pre <$> runEventCrit dx crit EvModifyDamage user (Just target) (Just mv) (RInt pre)
 
 -- | The integer an event returned, or the one it started with.
 fromRelay :: Int -> Relay -> Int
