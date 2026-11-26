@@ -95,7 +95,7 @@ Last updated 2026-11-25.
     about 10 GB for 2,000 traces, and was killed by the OOM killer on the
     15 GB laptop. It now peaks at about 80 MB.
 - **Test tiers.** The fast tier (`POKESIM_TIER=fast`) replays every 10th trace
-  and runs the hedgehog properties at 100 tests each, in about 7 s. The long
+  and runs the hedgehog properties at 100 tests each, in about 8 s. The long
   tier, which gates merges into main, replays everything and runs the
   properties at 2000 tests each.
 
@@ -139,6 +139,15 @@ The event points must stay, since Showdown runs them. The owner decided to
 optimise later, as its own step: draws and state unchanged, numbers before and
 after, measured on the workstation. The per-Pokémon bitmask of handled events
 (docs/handlers.md section 4) is the first candidate.
+
+**Slice 3a costs about another 13%.** This was measured on 2026-11-25 the
+same way, concurrently on two pinned cores with slice-0 teams, `main`
+(`d378a2b`) against 3a. The ratio over four runs was 0.870-0.876. The laptop
+was still throttled, at about 220 battles/s for `main`.
+
+The cause is the same: every event now also collects side and field holders,
+even when none are attached. Cumulatively, 3a runs at about 0.54 of slice
+2a's throughput. The same optimisation step covers it.
 
 ## Known gaps in slice 0
 
@@ -206,7 +215,7 @@ Alongside:
 - **Scenario generation from rules.** For each rule, generate battles that
   exercise it with each random outcome forced both ways, and report coverage
   per rule.
-- **Trace size.** 2,300 battles take about 930 MB. Snapshots should become
+- **Trace size.** 2,900 battles take about 1.2 GB. Snapshots should become
   deltas.
 - **Benchmark tracking.** Record throughput at each slice so slowdowns are
   measured when they appear.

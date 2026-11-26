@@ -6,6 +6,9 @@ module Engine.Damage
   , isImmune
   , statusImmune
   , hasTypeNamed
+  , hasItemNamed
+  , typeIdNamed
+  , isGrounded
   , typeIsNamed
   , typeMod
   , baseDamage
@@ -20,7 +23,7 @@ import Engine.Dex
 import Engine.Format (Format, trunc, truncBits)
 import Engine.Modifier (modify)
 import Engine.Rule (StatusId (..))
-import Engine.State (Mon (..), MonStatus (..))
+import Engine.State (Mon (..), MonStatus (..), noItem)
 
 -- | Denominator of the crit chance for a crit stage, or 'Nothing' when the move cannot crit
 -- (gen 7+ table @[0, 24, 8, 2, 1]@ indexed by the clamped @critRatio@).
@@ -44,6 +47,24 @@ isImmune dx atkType m =
 -- | Whether a Pokemon has the type with this name (@pokemon.hasType@ with no type changes yet).
 hasTypeNamed :: Dex -> T.Text -> Mon -> Bool
 hasTypeNamed dx name m = typeIsNamed dx (monType1 m) name || typeIsNamed dx (monType2 m) name
+
+-- | Whether a Pokemon holds the item with this id (@pokemon.hasItem@).
+-- LATENT: @hasItem@ is false while @ignoringItem()@ (Klutz, Embargo, Magic Room); none can happen yet.
+hasItemNamed :: Dex -> T.Text -> Mon -> Bool
+hasItemNamed dx name m = monItem m /= noItem && itemId dx (monItem m) == name
+
+-- | The id of the type with this name.
+typeIdNamed :: Dex -> T.Text -> Maybe Int
+typeIdNamed dx name = V.findIndex (== name) (dxTypeNames dx)
+
+-- | @pokemon.isGrounded()@ (pokemon.ts 2170) as a boolean (Showdown's @null@, Levitate, counts as not grounded):
+-- a Flying type is not grounded.
+-- LATENT: the rest of the function reads state the engine does not hold yet. Grounded regardless of type:
+-- Gravity (field pseudo-weather), Ingrain and Smack Down (volatiles), Iron Ball (item). Not grounded: Levitate (and
+-- Eelevate), Magnet Rise and Telekinesis (volatiles), Air Balloon (item), and Roost's loss of the Flying type (a
+-- volatile). None of these is supported, so a Pokemon is grounded exactly when it is not a Flying type.
+isGrounded :: Dex -> Mon -> Bool
+isGrounded dx m = not (hasTypeNamed dx "Flying" m)
 
 -- | Whether a type id ('noType' included) is the type with this name.
 typeIsNamed :: Dex -> Int -> T.Text -> Bool

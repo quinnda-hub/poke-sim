@@ -12,6 +12,7 @@ module Engine.Dex
   , Condition (..)
   , conditionOf
   , condSpec
+  , dexCondLookup
   , effectOf
   , abilityId
   , itemId
@@ -131,6 +132,11 @@ data Dex = Dex
   -- ^ Indexed by 'CondId'.
   , dxAbilities :: !(V.Vector Condition)
   , dxItems :: !(V.Vector Condition)
+  , dxFieldConds :: !(V.Vector Condition)
+  -- ^ Field conditions: the weathers of @conditions.json@, then the @condition@ blocks of the moves that carry
+  -- @sideCondition@, @terrain@ or @pseudoWeather@. The state holds indices into this table (side conditions, weather,
+  -- terrain and pseudo-weather share one id space; the 'EffectKind' says which holder an id is in).
+  , dxFieldIx :: !(M.Map T.Text Int)
   , dxAbilityIx :: !(M.Map T.Text Int)
   , dxItemIx :: !(M.Map T.Text Int)
   -- ^ @defendingType * typeCount + attackingType@, Showdown codes: 0 neutral, 1 super effective, 2 resisted, 3 immune.
@@ -177,6 +183,10 @@ effectOf dx (EffectKey kind i) = case kind of
   EffVolatile -> dxConditions dx V.!? i
   EffAbility -> dxAbilities dx V.!? i
   EffItem -> dxItems dx V.!? i
+  EffSideCond -> dxFieldConds dx V.!? i
+  EffWeather -> dxFieldConds dx V.!? i
+  EffTerrain -> dxFieldConds dx V.!? i
+  EffPseudoWeather -> dxFieldConds dx V.!? i
 {-# INLINE effectOf #-}
 
 -- | The id (@toID@ name) of an ability.
@@ -229,12 +239,16 @@ loadDex dir = do
     conds <- traverse (conditionFor conditionsV) [minBound .. maxBound]
     let tyOf n = M.lookup n tix
     abilityEntries <- objectEntries abilitiesV
-    abilityL <- traverse (\(k, v) -> effectFor k 7 v (abilityBodies tyOf k)) abilityEntries
+    abilityL <- traverse (\(k, v) -> effectFor k 7 POwn v (abilityBodies tyOf k)) abilityEntries
     itemEntries <- objectEntries itemsV
-    itemL <- traverse (\(k, v) -> effectFor k 8 v (itemBodies tyOf k)) itemEntries
+    itemL <- traverse (\(k, v) -> effectFor k 8 POwn v (itemBodies tyOf k)) itemEntries
     speciesL <- objectEntries speciesV >>= traverse (speciesOf tix . snd)
     moveEntries <- objectEntries movesV
-    movesL <- traverse (moveOf tix . snd) moveEntries
+    fieldL <- fieldConditions conditionsV moveEntries
+    let fieldV = V.fromList (map snd fieldL)
+        fieldIx = M.fromList (zip (map fst fieldL) [0 ..])
+        condLookup = fieldLookup fieldIx fieldV
+    movesL <- traverse (moveOf tix condLookup . snd) moveEntries
     struggleV <- maybe (Left "moves.json has no struggle") Right (lookup "struggle" moveEntries)
     -- Struggle's onModifyMove makes 'moveRule' reject it, so 'moveOf' gives it 'plainRule'. Its flags still apply:
     -- data/moves.ts struggle `flags: {contact: 1, ...}`, read by checkMoveMakesContact (Rocky Helmet). Its other
@@ -243,7 +257,7 @@ loadDex dir = do
           Object o | Just (Object fl) <- KM.lookup "flags" o -> KM.member "contact" fl
           _ -> False
     struggle <- (\m -> m {mvType = noType, mvSupported = False, mvRule = (mvRule m) {mrContact = struggleContact}})
-      <$> moveOf tix struggleV
+      <$> moveOf tix condLookup struggleV
     natureEntries <- objectEntries naturesV
     natureL <- traverse (natureOf . snd) natureEntries
     pure Dex
@@ -257,6 +271,8 @@ loadDex dir = do
       , dxConditions = V.fromList conds
       , dxAbilities = V.fromList abilityL
       , dxItems = V.fromList itemL
+      , dxFieldConds = fieldV
+      , dxFieldIx = fieldIx
       , dxAbilityIx = M.fromList (zip (map fst abilityEntries) [0 ..])
       , dxItemIx = M.fromList (zip (map fst itemEntries) [0 ..])
       , dxSpeciesIx = M.fromList (zip (map spId speciesL) [0 ..])
@@ -326,7 +342,46 @@ conditionFor conditionsV c = do
         "Item" -> 8
         _ -> 0 :: Int
       bodies = [(p, e, b) | p <- [minBound .. maxBound], e <- [minBound .. maxBound], Just b <- [nativeBody c p e]]
-  effectFor (condName c) typeOrder v (Just bodies)
+  effectFor (condName c) typeOrder POwn v (Just bodies)
+
+-- | A move's field condition by key, if the engine runs it ('Engine.Rule.CondLookup').
+fieldLookup :: M.Map T.Text Int -> V.Vector Condition -> CondLookup
+fieldLookup ix table c = case M.lookup c ix of
+  Nothing -> Left ("no condition " <> c)
+  Just i -> let cn = table V.! i in
+    if cnSupported cn then Right i else Left ("condition " <> c <> " is not supported: " <> fromMaybe "" (cnReject cn))
+
+-- | The lookup 'loadDex' gives the move translation, for a loaded dex.
+dexCondLookup :: Dex -> CondLookup
+dexCondLookup dx = fieldLookup (dxFieldIx dx) (dxFieldConds dx)
+
+-- | The field conditions, from two sources: the weathers of @conditions.json@ (@effectType: 'Weather'@), and the
+-- @condition@ block of each move whose @sideCondition@, @terrain@ or @pseudoWeather@ is the move's own id (the way
+-- @dex.conditions.get@ finds a condition that data/conditions.ts does not define). The handler names of the
+-- block are the move's @condition.on...@ entries. The default subOrder is per holder kind (battle.ts
+-- @resolvePriority@ 973-1011): a side condition 4 (@Condition@ with a side target), a weather 5, a terrain 0
+-- (@Terrain@ is not in @effectTypeOrder@) and a pseudo-weather 2 (@Condition@ with no side or field target). A
+-- field condition's own callbacks are @onSide<Event>@ ('PSide') or @onField<Event>@ ('PField').
+fieldConditions :: Value -> [(T.Text, Value)] -> Either String [(T.Text, Condition)]
+fieldConditions conditionsV moveEntries = do
+  condEntries <- objectEntries conditionsV
+  -- LATENT (pseudo-weather entries below): Showdown's runEvent sets `effectState.target = effectHolder` on each callback
+  -- it runs (battle.ts 908-909), so after a pseudo-weather's first runEvent callback its subOrder fallback is 5, not 2
+  -- (resolvePriority 995-998), and fieldEvent's in-place check (548-561) starts to apply to that field state.
+  -- Unreachable in slice 3 (Trick Room has no runEvent handlers); live with the first pseudo-weather that has runEvent
+  -- handlers (Gravity, ...), and for weather and terrain in phases 3c and 3d.
+  weathers <- traverse (\(k, v) -> (,) k <$> effectFor k 5 PField v (fieldCondBodies k))
+    [(k, v) | (k, v) <- condEntries, field "effectType" v == Right (String "Weather")]
+  fromMoves <- traverse (\(k, order, own, v) -> (,) k <$> effectFor k order own v (fieldCondBodies k))
+    [ (k, order, own, Object (KM.insert "handlers" (Array (V.fromList [String (T.drop 10 h) | String h <- hs, "condition." `T.isPrefixOf` h])) c))
+    | (k, Object m) <- moveEntries
+    , Just key <- [conditionField k m] -- the move defines the condition (the same test as the translation's)
+    , (key', order, own) <- [("sideCondition", 4 :: Int, PSide), ("terrain", 0, PField), ("pseudoWeather", 2, PField)]
+    , key' == key
+    , Just (Object c) <- [KM.lookup "condition" m]
+    , let hs = case KM.lookup "handlers" m of Just (Array xs) -> V.toList xs; _ -> []
+    ]
+  pure (weathers ++ fromMoves)
 
 -- | An effect from its export entry and its hand-written bodies ('Nothing': the engine does not implement it).
 -- Its handlers are the exported handler names that the engine knows ('parseHandlerName') and has a body for;
@@ -334,9 +389,10 @@ conditionFor conditionsV c = do
 -- subOrder otherwise from the effect type (battle.ts @resolvePriority@ 973-1011: @Condition@ 2, the statuses
 -- (@effectType@ @Status@) 0, abilities 7, items 8; the exceptions Poison Touch, Perish Body and Stall are not
 -- supported). An effect with a duration also gets a @Residual@ entry without a body when it has no
--- @onResidual@: Showdown collects it (@getKey = 'duration'@) to count the duration down.
-effectFor :: T.Text -> Int -> Value -> Maybe [(Prefix, EventId, Body)] -> Either String Condition
-effectFor ident typeOrder v mbodies = do
+-- @onResidual@ (for a side or field condition, @onSideResidual@ / @onFieldResidual@, the prefix @ownPfx@): Showdown
+-- collects it (@getKey = 'duration'@) to count the duration down.
+effectFor :: T.Text -> Int -> Prefix -> Value -> Maybe [(Prefix, EventId, Body)] -> Either String Condition
+effectFor ident typeOrder ownPfx v mbodies = do
   names <- case v of
     Object o | Just hs <- KM.lookup "handlers" o -> asArray hs >>= traverse asText
     _ -> Right []
@@ -364,8 +420,8 @@ effectFor ident typeOrder v mbodies = do
   specs <- if reject == Nothing
     then traverse (\(pe, b) -> spec pe (Just b)) [((p, e), b) | (_, Just (p, e)) <- parsed, Just b <- [bodyOf p e]]
     else Right []
-  residual <- if reject == Nothing && duration /= 0 && null [() | (POwn, EvResidual, _) <- specs]
-    then (: []) <$> spec (POwn, EvResidual) Nothing
+  residual <- if reject == Nothing && duration /= 0 && null [() | (p, EvResidual, _) <- specs, p == ownPfx]
+    then (: []) <$> spec (ownPfx, EvResidual) Nothing
     else Right []
   let breakable = case v of
         Object o | Just (Object fl) <- KM.lookup "flags" o -> maybe False truthy (KM.lookup "breakable" fl)
@@ -401,8 +457,8 @@ speciesOf tix v = do
 typeIx :: M.Map T.Text Int -> T.Text -> Either String Int
 typeIx tix t = maybe (Left ("unknown type " ++ T.unpack t)) Right (M.lookup t tix)
 
-moveOf :: M.Map T.Text Int -> Value -> Either String MoveData
-moveOf tix v = do
+moveOf :: M.Map T.Text Int -> CondLookup -> Value -> Either String MoveData
+moveOf tix condLookup v = do
   ident <- field "id" v >>= asText
   ty <- field "type" v >>= asText >>= typeIx tix
   cat <- field "category" v >>= asText
@@ -416,7 +472,7 @@ moveOf tix v = do
   noBoost <- field "noPPBoosts" v >>= \b -> case b of
     Bool x -> Right x
     _ -> Left "noPPBoosts is not a boolean"
-  let (rule, rejected) = case moveRule v of
+  let (rule, rejected) = case moveRule condLookup v of
         Left why -> (plainRule, Just why)
         Right r -> (r, Nothing)
       supported = isNothing rejected && executable rule

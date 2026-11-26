@@ -60,6 +60,8 @@ newBattle dx fmt t1 t2 = do
     , bQueue = SV.singleton start
     , bFaintQueue = SV.empty
     , bSpeedOrder = U.empty
+    , bField = noField
+    , bEffectOrder = 0
     , bP1 = s1
     , bP2 = s2
     }
@@ -337,6 +339,13 @@ switchIn dx p target = do
         modify' (modifySide p (\s -> s {sSlots = swapSlot0 target (sSlots s)}))
       Nothing -> pure ()
     modify' (modifyMon tgt (\m -> m {monActive = True}) . modifySide p (\s -> s {sHasActive = True}))
+    -- pokemon.abilityState = initEffectState({ id: pokemon.ability, target: pokemon }); pokemon.itemState =
+    -- initEffectState({ id: pokemon.item, target: pokemon }) (battle-actions.ts 185-186). The Pokemon is active, so a
+    -- state with an id takes the next effectOrder: the ability always (`noability` is an id), the item when held
+    let monT = monOf b0 tgt
+    abilityOrder <- nextEffectOrder (abilityId dx (monAbility monT) /= "")
+    itemOrder <- nextEffectOrder (monItem monT /= noItem)
+    modify' (modifyMon tgt (\m -> m {monAbilityState = noEffectState {esOrder = abilityOrder}, monItemState = noEffectState {esOrder = itemOrder}}))
     -- queue.insertChoice({ choice: 'runSwitch', pokemon }): updateSpeed first, then a tie-aware insert
     getActionSpeed dx tgt >>= \sp -> modify' (modifyMon tgt (\m -> m {monSpeed = sp}))
     new <- resolveAction dx Action
@@ -349,14 +358,24 @@ switchIn dx p target = do
       Just i | i /= 0 -> slots U.// [(0, slots U.! i), (i, slots U.! 0)]
       _ -> slots
 
+-- | @battle.initEffectState@'s counter (battle.ts 3381-3392) when the state has an id: its value, and the counter
+-- advances; a state with no id gets 0.
+nextEffectOrder :: Monad m => Bool -> Eng m Int
+nextEffectOrder False = pure 0
+nextEffectOrder True = do
+  b <- get
+  let (o, b') = takeEffectOrder b
+  modify' (const b')
+  pure o
+
 -- | @actions.runSwitch@ (battle-actions.ts 225-250): gather consecutive @runSwitch@ actions, speed-sort every
 -- Pokemon on the field (including fainted ones), record the result as @battle.speedOrder@ and run
 -- @fieldEvent('SwitchIn', switchersIn)@ for the switchers.
 --
 -- The @SwitchIn@ handlers' keys use @speedOrder@: @resolvePriority@ gives each the speed
 -- @pokemon.speed - speedOrder.indexOf(position) / 2@, so no two Pokemon tie and the sort draws nothing.
--- LATENT: @effectOrder@ (creation order of effect states, @bEffectOrder@) ties only handlers of one Pokemon or
--- hazards on one side; it joins with the field-state slice, which makes it observable.
+-- A Pokemon's own handlers and the hazards of its side tie on everything but @effectOrder@ (the order the states were
+-- created, 'bEffectOrder'), which is therefore what orders two hazards on one side.
 {-# INLINABLE runSwitch #-}
 runSwitch :: MonadChance m => Dex -> Actor -> Eng m ()
 runSwitch dx first = do
@@ -402,7 +421,8 @@ runMove fmt dx user@(Actor p _) slot = do
       -- runEvent('BeforeMove'): before PP is deducted; a move stopped here costs no PP and returns from
       -- runMove without the closing resolveFaints / checkWin (there is nothing to resolve)
       -- (a move on the user targets the user: battle.getRandomTarget returns the Pokemon for 'self')
-      let eventTarget = if mrTarget (mvRule mv) == TargetSelf then user else target
+      -- (battle.getRandomTarget: `self`, `all`, `allySide` and `allyTeam` return the Pokemon; foeSide the foe)
+      let eventTarget = if mrTarget (mvRule mv) `elem` [TargetSelf, TargetAllySide, TargetAll] then user else target
       proceed <- relayTruthy <$> runEvent dx EvBeforeMove user (Just eventTarget) (Just mv) RNone
       when proceed $ do
         void deductPP
@@ -420,6 +440,11 @@ runMove fmt dx user@(Actor p _) slot = do
 useMove :: MonadChance m => Format -> Dex -> Actor -> Actor -> MoveData -> Eng m ()
 useMove fmt dx user target mv = case mrTarget rule of
   TargetSelf -> statusMove dx user user mv
+  -- getMoveTargets (pokemon.ts 812): foeSide -> the foes (fainted ones too), allySide -> the allies and the user,
+  -- all -> both, and tryMoveHit takes targets[0]: the foe for foeSide, the user for allySide and all
+  TargetFoeSide -> sideMove dx user target mv
+  TargetAllySide -> sideMove dx user user mv
+  TargetAll -> sideMove dx user user mv
   TargetFoe -> do
     b <- get
     let tm = monOf b target
@@ -449,6 +474,38 @@ useMove fmt dx user target mv = case mrTarget rule of
     -- used by a Poison-type skips the accuracy check (`accuracy = true`), so it draws nothing
     isToxic = mrOnHit rule == [EStatus Tox] && mvId mv == "toxic"
 
+-- | @tryMoveHit@ (battle-actions.ts 883-919) of a move on a side or the field (@foeSide@, @allySide@, @all@): no
+-- type immunity, accuracy or crit draw. The event points are @singleEvent('Try')@, @singleEvent('PrepareHit')@,
+-- @runEvent('PrepareHit')@, then @runEvent('TryHitField')@ for @all@ or @runEvent('TryHitSide')@, then @moveHit@.
+-- The @Try@ and @PrepareHit@ callbacks are the move's own (@onTry@, @onPrepareHit@), which a supported move has none
+-- of; the @runEvent@s sort the handlers of the Pokemon in play (none attached today: Magic Bounce's
+-- @onAllyTryHitSide@ is unsupported), and a sort over fewer than two handlers draws nothing, but they stay so that
+-- a handler that appears later is sorted where Showdown sorts it. A falsy result fails the move.
+-- @useMoveInner@ then runs @AfterMoveSecondarySelf@ (battle-actions.ts ~607), which this path skips like the
+-- Pokemon-targeted status path: its only listener, Life Orb, is gated on @move.category !== 'Status'@, so no
+-- supported handler can act. Unlike a Pokemon-targeted status move there are no @Update@ events inside: @hitStepMoveHitLoop@ is not used.
+{-# INLINABLE sideMove #-}
+sideMove :: MonadChance m => Dex -> Actor -> Actor -> MoveData -> Eng m ()
+sideMove dx user target mv = do
+  prepared <- relayTruthy <$> runEvent dx EvPrepareHit user (Just target) (Just mv) RNone
+  when prepared $ do
+    let tryHit = if mrTarget (mvRule mv) == TargetAll then EvTryHitField else EvTryHitSide
+    ok <- relayTruthy <$> runEvent dx tryHit target (Just user) (Just mv) RNone
+    when ok (moveHitSide dx user target mv)
+
+-- | @moveHit@ -> @spreadMoveHit@ -> @runMoveEffects@ (battle-actions.ts 1430, 1175, 1330) of a side-targeted move:
+-- the damage is @undefined@ (basePower 0), so only the effect on the target's side runs.
+-- The @TryHitSide@ and @TryHitField@ callbacks of the move itself (@onTryHitSide@, ...) are not supported.
+-- A failed effect (the condition is already there and cannot restart) fails the move; nothing else follows.
+-- LATENT: @weather@, @terrain@ and @pseudoWeather@ (@field.setWeather@ ...) are not run: no move that has one is
+-- executable yet (phases 3b to 3d).
+{-# INLINABLE moveHitSide #-}
+moveHitSide :: MonadChance m => Dex -> Actor -> Actor -> MoveData -> Eng m ()
+moveHitSide dx user (Actor tp _) mv = case mrSideCondition (mvRule mv) of
+  -- `target.side.addSideCondition(moveData.sideCondition, source, move)`
+  Just ci -> void (addSideCondition dx tp ci user)
+  Nothing -> pure ()
+
 -- | @hitStepAccuracy@'s stage step (battle-actions.ts): the user's accuracy stage minus the target's evasion
 -- stage, each clamped to [-6, 6], scales the accuracy by @(3 + s) / 3@ or @3 / (3 - s)@, truncated.
 stagedAccuracy :: Format -> Int -> Boosts -> Boosts -> Int
@@ -458,26 +515,6 @@ stagedAccuracy fmt acc user tgt
   | otherwise = acc
   where
     stage = clampStage (clampStage (bsAccuracy user) - bsEvasion tgt)
-
-clampStage :: Int -> Int
-clampStage = max (-6) . min 6
-
--- | @battle.boost@ (battle.ts) of one target: each stage moves by its change clamped to [-6, 6]
--- (@getCappedBoost@). Returns whether any stage changed. It fails for a target with no HP or off the field,
--- and when the foe side has no Pokemon left. The order of the stats is unobservable (independent stages;
--- the boost events have no handlers).
-{-# INLINABLE boostMon #-}
-boostMon :: Monad m => Actor -> [(BoostStat, Int)] -> Eng m Bool
-boostMon a@(Actor p _) changes = do
-  b <- get
-  let m = monOf b a
-  if monHp m <= 0 || not (monActive m) || sLeft (sideOf (other p) b) == 0
-    then pure False
-    else do
-      let step' bs (s, d) = setBoostOf s (clampStage (boostOf s bs + d)) bs
-          new = foldl step' (monBoosts m) changes
-      modify' (modifyMon a (\x -> x {monBoosts = new}))
-      pure (new /= monBoosts m)
 
 -- | A status move's single hit (@trySpreadMoveHit@ -> @runMoveEffects@): a self-targeted heal, a stat
 -- change or a status condition on the target. When the effect does nothing (heal at full HP, a stage already

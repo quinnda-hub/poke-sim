@@ -149,6 +149,7 @@ buildSide fmt dx (Team team) = do
     , sSlots = U.fromList [0 .. length mons - 1]
     , sLeft = length mons
     , sHasActive = False
+    , sConds = SV.empty
     }
 
 {-# INLINABLE buildMon #-}

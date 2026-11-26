@@ -25,8 +25,8 @@ import System.Random.SplitMix (mkSMGen)
 
 import Engine
 import Engine.Chance (runSample)
-import Engine.Dex (Condition (..), Dex (..), supportedMoves)
-import Engine.Effects (abilityBodies, itemBodies)
+import Engine.Dex (Condition (..), Dex (..), dexCondLookup, supportedMoves)
+import Engine.Effects (abilityBodies, fieldCondBodies, itemBodies)
 import Engine.Event (CondId (..), HandlerSpec (..), condName)
 import Engine.Format (trunc, truncBits)
 import Engine.Rule (executable, moveRule)
@@ -56,6 +56,8 @@ main = do
             withTests 1 (translation dex movesJson))
         , ("every condition the engine runs is supported: a body for each handler the export lists",
             withTests 1 (conditionsSupported dex))
+        , ("a field condition is supported exactly when it has bodies, one for each handler the export lists and no others",
+            withTests 1 (fieldConditionsSupported dex))
         , ("an ability or item is supported exactly when it has bodies, one for each handler the export lists and no others",
             withTests 1 (effectsSupported dex))
         ]
@@ -131,12 +133,12 @@ translation dex movesJson = withTests 1 $ property $ do
     Object o -> pure (KM.toList o)
     _ -> footnote "moves.json is not an object" >> failure
   mapM_ (\(k, v) -> do
-    r <- evalIO (try (evaluate (forceResult (moveRule v)))) :: PropertyT IO (Either SomeException Int)
+    r <- evalIO (try (evaluate (forceResult (moveRule (dexCondLookup dex) v)))) :: PropertyT IO (Either SomeException Int)
     case r of
       Left ex -> footnote (show (K.toText k) ++ ": " ++ show ex) >> failure
       Right _ -> success) entries
   mapM_ (\name -> case [v | (k, v) <- entries, K.toText k == name] of
-    [v] -> case moveRule v of
+    [v] -> case moveRule (dexCondLookup dex) v of
       Right rule -> assert (executable rule) >> pure ()
       Left why -> footnote (T.unpack name ++ " is supported but does not translate: " ++ T.unpack why) >> failure
     _ -> footnote (T.unpack name ++ ": not exactly one entry in moves.json") >> failure) (supportedMoves dex)
@@ -285,3 +287,23 @@ effectsSupported dex = withTests 1 $ property $ do
         (V.toList table)
   checkTable "ability" abilityBodies (dxAbilities dex)
   checkTable "item" itemBodies (dxItems dex)
+
+-- | A field condition (side condition, weather, terrain, pseudo-weather) is supported exactly when "Engine.Effects"
+-- has bodies for it, and then the handlers the engine runs are exactly those bodies: one for each handler the export
+-- lists (a move's @condition.on...@ entries, or the entry of @conditions.json@), and none the export does not list.
+-- A move that names a supported condition translates, and one that names an unsupported condition does not.
+fieldConditionsSupported :: Dex -> Property
+fieldConditionsSupported dex = withTests 1 $ property $ do
+  assert (not (V.null (dxFieldConds dex)))
+  mapM_ (\c -> case fieldCondBodies (cnId c) of
+    Nothing -> do
+      footnote ("field condition " ++ T.unpack (cnId c) ++ " is supported without bodies")
+      assert (not (cnSupported c))
+    Just bs -> do
+      footnote ("field condition " ++ T.unpack (cnId c) ++ " has bodies but is not supported: " ++ maybe "" T.unpack (cnReject c))
+      assert (cnSupported c)
+      let run = [(p, e) | (p, e, spec) <- cnHandlers c, Just _ <- [hsBody spec]]
+          written = [(p, e) | (p, e, _) <- bs]
+      footnote ("field condition " ++ T.unpack (cnId c) ++ ": bodies " ++ show written ++ ", run " ++ show run)
+      assert (all (`elem` run) written && all (`elem` written) run && length run == length written))
+    (V.toList (dxFieldConds dex))

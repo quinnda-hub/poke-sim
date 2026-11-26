@@ -19,12 +19,15 @@ module Engine.Rule
   , BoostStat (..)
   , StatusId (..)
   , Reason
+  , CondLookup
+  , conditionField
   , plainRule
   , moveRule
   , executable
   ) where
 
 import Control.Monad (unless, when)
+import Data.Char (isAlphaNum)
 import Data.Aeson (Value (..))
 import qualified Data.Aeson.Key as K
 import qualified Data.Aeson.KeyMap as KM
@@ -46,8 +49,15 @@ data Hits
 
 -- | Who the move acts on in singles. Spread targets (@allAdjacentFoes@, @allAdjacent@) and @randomNormal@
 -- reach the one foe, so they reduce to 'TargetFoe' (pokemon.ts @getMoveTargets@, battle.ts @getRandomTarget@).
-data RuleTarget = TargetFoe | TargetSelf
+-- The side and field targets take @tryMoveHit@ rather than the hit steps of @trySpreadMoveHit@ (battle-actions.ts
+-- 573): @foeSide@, @allySide@ and @all@.
+data RuleTarget = TargetFoe | TargetSelf | TargetFoeSide | TargetAllySide | TargetAll
   deriving (Eq, Show)
+
+-- | Resolves the key of a field condition (@sideCondition@, @terrain@, @pseudoWeather@, @weather@ of a move) to its
+-- id in the @Dex@ field-condition table, or says why the condition is not supported (a handler without a body, or
+-- no such condition).
+type CondLookup = T.Text -> Either Reason Int
 
 -- | A stat that stages apply to (@BoostID@).
 data BoostStat = BAtk | BDef | BSpa | BSpd | BSpe | BAccuracy | BEvasion
@@ -104,6 +114,14 @@ data MoveRule = MoveRule
   -- ^ @move.ignoreImmunity === true@: the type-immunity step is skipped (pokemon.ts @runImmunity@).
   , mrContact :: !Bool
   -- ^ @flags.contact@: read by @checkMoveMakesContact@ (Rocky Helmet).
+  , mrSideCondition :: !(Maybe Int)
+  -- ^ @move.sideCondition@: @side.addSideCondition@ in @runMoveEffects@ (battle-actions.ts ~1300).
+  , mrWeather :: !(Maybe Int)
+  -- ^ @move.weather@: @field.setWeather@ (phase 3c; not executable yet).
+  , mrTerrain :: !(Maybe Int)
+  -- ^ @move.terrain@: @field.setTerrain@ (phase 3d; not executable yet).
+  , mrPseudoWeather :: !(Maybe Int)
+  -- ^ @move.pseudoWeather@: @field.addPseudoWeather@ (phase 3b; not executable yet).
   }
   deriving (Eq, Show)
 
@@ -122,6 +140,10 @@ plainRule = MoveRule
   , mrDefrost = False
   , mrIgnoreImmunity = False
   , mrContact = False
+  , mrSideCondition = Nothing
+  , mrWeather = Nothing
+  , mrTerrain = Nothing
+  , mrPseudoWeather = Nothing
   }
 
 -- | The part of the vocabulary the engine can run in the current phase (phases 1 to 3: HP effects, stat stages
@@ -129,20 +151,24 @@ plainRule = MoveRule
 --
 -- A damaging move: single or multi-hit, with drain or recoil, @self@ boosts, and boost, status and flinch
 -- secondaries, thawing the target (@thawsTarget@) and the user (@defrost@). A status move: exactly one hit
--- effect, a self-targeted heal, or a stat change or a status condition on its target. Nothing here inflicts
--- sleep (the translation rejects it), and a status or flinch effect on the user is not executable.
+-- effect, a self-targeted heal, or a stat change or a status condition on its target, or a side condition (a
+-- hazard, on the foe's side or the user's) and nothing else. Nothing here inflicts sleep (the translation rejects
+-- it), a status or flinch effect on the user is not executable, and nor are weather, terrain and pseudo-weather
+-- moves yet (phases 3b to 3d).
 executable :: MoveRule -> Bool
 executable r =
   (not (mrThawsTarget r) || mrDamaging r)
     && all boostOnly (mrSelf r) && all (\s -> all targetEffect (secTarget s) && all boostOnly (secSelf s)) (mrSecondaries r)
+    && mrWeather r == Nothing && mrTerrain r == Nothing && mrPseudoWeather r == Nothing
     && if mrDamaging r
-      then null (mrOnHit r) && not (mrIgnoreImmunity r) && mrTarget r == TargetFoe
+      then null (mrOnHit r) && not (mrIgnoreImmunity r) && mrTarget r == TargetFoe && mrSideCondition r == Nothing
       else mrHits r == OneHit && mrDrain r == Nothing && mrRecoil r == Nothing
         && null (mrSelf r) && null (mrSecondaries r)
-        && (case (mrOnHit r, mrTarget r) of
-              ([EHeal _ _], TargetSelf) -> True
-              ([EBoost _], _) -> True
-              ([EStatus _], TargetFoe) -> True
+        && (case (mrOnHit r, mrTarget r, mrSideCondition r) of
+              ([EHeal _ _], TargetSelf, Nothing) -> True
+              ([EBoost _], t, Nothing) -> t == TargetFoe || t == TargetSelf
+              ([EStatus _], TargetFoe, Nothing) -> True
+              ([], t, Just _) -> t == TargetFoeSide || t == TargetAllySide
               _ -> False)
   where
     boostOnly (EBoost _) = True
@@ -168,6 +194,7 @@ ruleKeys :: [T.Text]
 ruleKeys =
   [ "target", "flags", "multihit", "drain", "recoil", "heal", "boosts", "self", "secondary"
   , "secondaries", "status", "thawsTarget", "ignoreImmunity"
+  , "sideCondition", "weather", "terrain", "pseudoWeather"
   ]
 
 -- | Keys that are truthy on moves the engine accepts but cannot change the outcome, and why.
@@ -209,16 +236,38 @@ inertFlags =
   , ("bypasssub", "only matters with a Substitute, which is rejected")
   , ("minimize", "only matters against a Pokemon that used Minimize, which is rejected")
   , ("gravity", "only matters under Gravity, which is rejected")
+  , ("mustpressure", "read by getMoveTargets for Pressure only (DeductPP), and no Pressure exists")
   ]
+
+-- | The field of a move (@sideCondition@, @terrain@ or @pseudoWeather@) whose value is the move's own id: then the
+-- move's @condition@ block is that field condition (the way @dex.conditions.get@ finds a condition that
+-- data/conditions.ts does not define; dex-conditions.ts 692-699). @weather@ never qualifies: its condition is in
+-- @conditions.json@. A move's @condition@ block and @condition.*@ handlers belong to the field condition only
+-- then; shared with "Engine.Dex" so the table and the translation agree.
+conditionField :: T.Text -> KM.KeyMap Value -> Maybe T.Text
+conditionField moveId o = case [f | f <- ["sideCondition", "terrain", "pseudoWeather"], Just (String x) <- [KM.lookup (K.fromText f) o], x == moveId] of
+  (f : _) -> Just f
+  [] -> Nothing
 
 -- | Why a move with handlers, or an unknown key, is rejected is reported by the translation; this
 -- translates one move. The result is a rule only when every truthy key is accounted for.
-moveRule :: Value -> Either Reason MoveRule
-moveRule (Object o) = do
+--
+-- The handlers a move's @condition@ block lists (the export names them @condition.on...@) belong to the field
+-- condition that the move's @sideCondition@, @weather@, @terrain@ or @pseudoWeather@ names: the move translates
+-- when 'CondLookup' accepts that condition. Every other handler (@onTry@, @onHit@, ...) is a rejection.
+moveRule :: CondLookup -> Value -> Either Reason MoveRule
+moveRule condOf (Object o) = do
+  let handlerNames = case KM.lookup "handlers" o of
+        Just (Array xs) -> [t | String t <- V.toList xs]
+        _ -> []
+      (conditionNames, ownNames) = partitionBy ("condition." `T.isPrefixOf`) handlerNames
   case KM.lookup "handlers" o of
-    Just hs | truthy hs -> Left ("has handler code " <> showHandlers hs)
+    Just hs | truthy hs, not (null ownNames) -> Left ("has handler code " <> showHandlers (Array (V.fromList (map String ownNames))))
     _ -> Right ()
-  mapM_ checkKey [(K.toText k, v) | (k, v) <- KM.toList o, truthy v]
+  let hasCondField = conditionField (case KM.lookup "id" o of Just (String i) -> i; _ -> "") o /= Nothing
+  when (not (null conditionNames) && not hasCondField) $
+    Left ("has handler code " <> showHandlers (Array (V.fromList (map String conditionNames))))
+  mapM_ (checkKey hasCondField) [(K.toText k, v) | (k, v) <- KM.toList o, truthy v]
   flags <- case KM.lookup "flags" o of
     Just (Object fl) -> Right [K.toText k | (k, v) <- KM.toList fl, truthy v]
     _ -> Right []
@@ -237,6 +286,9 @@ moveRule (Object o) = do
     Just (String t)
       | t `elem` ["normal", "any", "randomNormal", "allAdjacentFoes", "allAdjacent"] -> Right TargetFoe
       | t == "self" -> Right TargetSelf
+      | t == "foeSide" -> Right TargetFoeSide
+      | t == "allySide" -> Right TargetAllySide
+      | t == "all" -> Right TargetAll
       | otherwise -> Left ("target " <> t)
     _ -> Left "no target"
   damaging <- case KM.lookup "basePower" o of
@@ -260,6 +312,10 @@ moveRule (Object o) = do
     Nothing -> Right False
     Just (Bool b) -> Right b
     Just v -> Left ("ignoreImmunity " <> showV v)
+  sideCond <- condition "sideCondition"
+  weather <- condition "weather"
+  terrain <- condition "terrain"
+  pseudo <- condition "pseudoWeather"
   pure MoveRule
     { mrDamaging = damaging
     , mrHits = hits
@@ -273,8 +329,18 @@ moveRule (Object o) = do
     , mrDefrost = "defrost" `elem` flags
     , mrIgnoreImmunity = ignoreImm
     , mrContact = "contact" `elem` flags
+    , mrSideCondition = sideCond
+    , mrWeather = weather
+    , mrTerrain = terrain
+    , mrPseudoWeather = pseudo
     }
   where
+    condition k = case look k of
+      Nothing -> Right Nothing
+      Just (String c) -> Just <$> condOf (toKey c)
+      Just v -> Left (k <> " " <> showV v)
+    toKey = T.toLower . T.filter isAlphaNum
+    partitionBy f xs = (filter f xs, filter (not . f) xs)
     look k = case KM.lookup (K.fromText k) o of
       Just v | truthy v -> Just v
       _ -> Nothing
@@ -283,11 +349,14 @@ moveRule (Object o) = do
       Just (Array xs) | [Number a, Number b] <- V.toList xs, Just x <- toBoundedInteger a, Just y <- toBoundedInteger b, y > 0, x > 0 ->
         Right (Just (x, y))
       Just v -> Left (k <> " " <> showV v)
-moveRule _ = Left "move is not an object"
+moveRule _ _ = Left "move is not an object"
 
-checkKey :: (T.Text, Value) -> Either Reason ()
-checkKey (k, _)
+-- | A key of the move is accounted for. @condition@ is the block of the field condition that the move's
+-- @sideCondition@, @weather@, @terrain@ or @pseudoWeather@ names; it is translated into the condition table.
+checkKey :: Bool -> (T.Text, Value) -> Either Reason ()
+checkKey hasCondField (k, _)
   | k `elem` dataKeys || k `elem` ruleKeys = Right ()
+  | k == "condition" && hasCondField = Right ()
   | Just _ <- lookup k inertKeys = Right ()
   | k == "handlers" = Right ()
   | otherwise = Left ("not modelled: " <> k)

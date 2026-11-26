@@ -28,9 +28,16 @@
 -- a super-effective condition (expertbelt), the base-power-at-most-60 check (technician), residual heal and
 -- damage (leftovers, blacksludge), the status orbs (flameorb, toxicorb), contact damage (rockyhelmet), Life
 -- Orb's recoil, and the Assault Vest's move disabling.
+--
+-- The field conditions of slice 3a are all native, none of them reaches the bar: layers (spikes, toxicspikes) have
+-- two whitelisted users, so there is no rule kind for them; each hazard's @onSwitchIn@ is a body of its own
+-- (stealthrock: damage by Rock effectiveness; spikes: damage by layer; toxicspikes: poison or absorb; stickyweb: a
+-- Speed drop), each used by one whitelisted condition; toxicdebris is the one ability that sets a side condition
+-- on its attacker. Heavy-Duty Boots has no handler of its own: the hazard bodies read the item.
 module Engine.Effects
   ( abilityBodies
   , itemBodies
+  , fieldCondBodies
   ) where
 
 import qualified Data.Text as T
@@ -51,6 +58,8 @@ abilityBodies ty name = case name of
   -- hugepower, purepower: onModifyAtk -> chainModify(2)
   "hugepower" -> Just [(POwn, EvModifyAtk, BRule (RChainModify 2 1 []))]
   "purepower" -> Just [(POwn, EvModifyAtk, BRule (RChainModify 2 1 []))]
+  -- toxicdebris: onDamagingHit, a Physical move sets Toxic Spikes on the attacker's side
+  "toxicdebris" -> Just [(POwn, EvDamagingHit, BNative NToxicDebris)]
   -- technician: onBasePower, basePower after the accumulated modifier <= 60 -> chainModify(1.5)
   "technician" -> Just [(POwn, EvBasePower, BNative NTechnician)]
   -- filter, solidrock, prismarmor: onSourceModifyDamage, `typeMod > 0` -> chainModify(0.75)
@@ -88,6 +97,9 @@ itemBodies ty name = case name of
          , (POwn, EvDisableMove, BNative NAssaultVestDisable) ]
   -- wiseglasses: onBasePower, `move.category === 'Special'` -> chainModify([4505, 4096])
   "wiseglasses" -> Just [(POwn, EvBasePower, BNative NWiseGlasses)]
+  -- heavydutyboots: no handlers ("Hazard Immunity implemented in moves.ts": the hazards' onSwitchIn bodies call
+  -- pokemon.hasItem('heavydutyboots'))
+  "heavydutyboots" -> Just []
   _ -> case lookup name typeItems of
     -- onBasePower, `move.type === T` -> chainModify([4915, 4096]) (data/items.ts; each body checked against the
     -- source: the plain type check and nothing else)
@@ -107,3 +119,24 @@ typeItems =
   , ("sharpbeak", "Flying"), ("silkscarf", "Normal"), ("silverpowder", "Bug"), ("softsand", "Ground")
   , ("spelltag", "Ghost"), ("twistedspoon", "Psychic")
   ]
+
+-- | The bodies of a field condition (data/moves.ts @condition@ of the move that sets it), by its key, or 'Nothing'
+-- when the engine does not implement it. 'PSide' is the condition's own @onSide<Event>@ callback, 'POwn' its
+-- @on<Event>@ (run for each Pokemon in play by @fieldEvent@).
+fieldCondBodies :: T.Text -> Maybe [(Prefix, EventId, Body)]
+fieldCondBodies name = case name of
+  -- stealthrock: onSideStart logs; onSwitchIn damages by the Rock effectiveness (Heavy-Duty Boots: none)
+  "stealthrock" -> Just [(PSide, EvStart, BNative NLogOnly), (POwn, EvSwitchIn, BNative NStealthRockSwitchIn)]
+  -- spikes: onSideStart layers = 1; onSideRestart fails at 3 layers, else layers++; onSwitchIn damages a grounded
+  -- Pokemon by damageAmounts[layers]
+  "spikes" ->
+    Just [ (PSide, EvStart, BNative NLayerStart), (PSide, EvRestart, BNative NSpikesRestart)
+         , (POwn, EvSwitchIn, BNative NSpikesSwitchIn) ]
+  -- toxicspikes: the same with 2 layers; onSwitchIn: a grounded Poison type absorbs it, Steel and Boots ignore
+  -- it, else poison (1 layer) or bad poison (2)
+  "toxicspikes" ->
+    Just [ (PSide, EvStart, BNative NLayerStart), (PSide, EvRestart, BNative NToxicSpikesRestart)
+         , (POwn, EvSwitchIn, BNative NToxicSpikesSwitchIn) ]
+  -- stickyweb: onSideStart logs; onSwitchIn drops a grounded Pokemon's Speed by 1 stage
+  "stickyweb" -> Just [(PSide, EvStart, BNative NLogOnly), (POwn, EvSwitchIn, BNative NStickyWebSwitchIn)]
+  _ -> Nothing

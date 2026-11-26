@@ -271,4 +271,145 @@ per effect, which would be more typed but would grow with every effect.
    `src/Engine/Effects.hs`.
 3. **Then the field-state slice** (weather, terrain, hazards, screens), which
    makes `effectOrder` live for hazards. Choice items wait for the choice-lock
-   volatile, and Heavy-Duty Boots waits for hazards.
+   volatile, and Heavy-Duty Boots waits for hazards. See "Field state (slice
+   3)" below.
+
+## Field state (slice 3)
+
+Decided 2026-11-25. In scope: weather, terrain, entry hazards, screens,
+Tailwind and Trick Room. Removing hazards needs moves' own handler code
+(`onAfterHit`, `onHit`), which comes in the next slice. That slice also takes
+Aurora Veil (its move has an `onTry`), the screen breakers, and the moves that
+depend on weather through `onModifyMove`.
+
+Line numbers are in the pinned `local/showdown/sim/`.
+
+### Holders and their sort keys
+
+`resolvePriority` (battle.ts 957-1018) gives each holder its keys as follows:
+
+| Holder | State | `effectOrder` (initEffectState, 3381-3392) | subOrder fallback | Speed |
+|---|---|---|---|---|
+| Side condition | `side.sideConditions[id]`, created with `target: side` (side.ts 428) | taken from the counter | 4 | 0, or the custom holder's speed |
+| Weather | `field.weatherState`, no target (field.ts 70) | 0 | 5 (effect type Weather) | 0, or the custom holder's |
+| Terrain | `field.terrainState`, no target (field.ts 141) | 0 | **0**: Terrain is not in the table | 0, or the custom holder's |
+| Pseudo-weather | `field.pseudoWeather[id]`, no target (field.ts 200) | 0 | **2** while the state has no target, **5** once it has one (see below) | 0, or the custom holder's |
+
+- **Custom holder.** `fieldEvent` collects side and field handlers a second
+  time for each active Pokémon with that Pokémon as `customHolder`, with
+  `on<Event>`, no duration key and no `end` (battle.ts 506-508). Those
+  handlers sort at the Pokémon's speed, including the `SwitchIn` adjustment.
+  That is how hazards run: gen 9 has no `EntryHazard` event (battle-actions.ts
+  195), so each hazard is a side condition with `onSwitchIn`.
+- **Owned callbacks.** `fieldEvent` also collects the holders' own
+  `onSide<Event>` and `onField<Event>` callbacks, with the duration key for
+  `Residual` and with `end` (battle.ts 495-498). That is where durations count
+  down.
+- **Through `runEvent`.** `findEventHandlers` collects side handlers as `on`,
+  `onFoe` and `onAny` for the target's own side and the others, then field
+  handlers as `on` (battle.ts 1083-1108), all at speed 0.
+
+### A field state gains a target
+
+`runEvent` sets `this.effectState.target = effectHolder` on every callback it
+runs (battle.ts 908-909). For a field state the holder is the Field. So after
+a weather's, terrain's or pseudo-weather's first callback through `runEvent`,
+its state has a Field target, and that changes two things:
+
+- **Sort key.** A pseudo-weather's subOrder fallback becomes 5 (resolvePriority
+  995-998). Weather (always 5) and terrain (always 0) are not affected.
+- **In-place check.** `fieldEvent` starts checking that the state is still in
+  place before running its handler (battle.ts 548-561). Until then, no check is
+  made.
+
+Side conditions are unaffected, because their `runEvent` holder is the side,
+which is already their target.
+
+The state therefore needs one more bit per field state: whether it has a
+target yet. Slice 3's only pseudo-weather, Trick Room, has no `runEvent`
+handler, so the sort-key half cannot happen in slice 3. Weather and terrain do
+have `runEvent` handlers (Sandstorm's `onModifySpD`, Snowscape's
+`onModifyDef`, `WeatherModifyDamage`, the terrains' `onBasePower`, `onSetStatus`
+and `onTryHit`). **Phases 3c and 3d must model the bit**, set it where
+`runEvent` would, and use it for the in-place check.
+
+### Effect order
+
+`bEffectOrder` joins the battle state. It increments exactly where
+`initEffectState` increments its counter: for a state with an id and a
+target, when the target is not a Pokémon or is an active one. That covers:
+
+- side conditions;
+- statuses (pokemon.ts 1754);
+- volatiles (2021);
+- ability and item states at switch-in (battle-actions.ts 185-186) and on
+  `setAbility` and `setItem`.
+
+Every site counts, even where only side conditions can observe the value
+today (hazards on one side), so later uses such as Lightning Rod's
+`RedirectTarget` inherit a correct counter.
+
+### State
+
+These follow section 7:
+
+- **Per side:** an ordered vector of `(condition id, EffectState)` in
+  insertion order. Layers go in `esA`.
+- **Per field:** the weather id and its state, the terrain id and its state,
+  and an ordered vector of pseudo-weathers.
+- **Ids** index one table of field conditions, loaded from two sources:
+  `conditions.json` (the weathers) and the `condition` blocks of moves that
+  carry `sideCondition`, `terrain` or `pseudoWeather`. The handler lists and
+  their metadata come from the export.
+
+The parity test compares everything the trace records:
+- `field.weather`, `weatherDuration`, `terrain`, `terrainDuration` and
+  `pseudoWeather` (duration);
+- each side's `sideConditions` (duration and layers).
+
+It stops requiring them to be empty. Slot conditions are not recorded by the
+trace format and are out of scope.
+
+### Moves
+
+- **Pipeline keys.** `sideCondition`, `weather`, `terrain` and
+  `pseudoWeather` become `MoveRule` fields. They are applied in `moveHit` at
+  battle-actions.ts ~1300-1320.
+- **Side and field targets.** Moves with target `foeSide`, `allySide` or
+  `all` take `tryMoveHit` (battle-actions.ts 573, 883-919): `Try`,
+  `PrepareHit`, `TryHitSide` or `TryHitField`, then `moveHit`, with no
+  accuracy or crit draw.
+- **Condition handlers.** A move's `condition.*` handlers belong to the
+  condition, not to the move. The move is supported when the condition is
+  supported, meaning every listed handler has a body. Its other handlers
+  (`onTry`, `onHit`, ...) still reject it.
+
+### Phases
+
+Each phase passes the full parity run before the next begins, and records
+the traces that make its mechanics happen.
+
+1. **3a: holders, effect order, hazards.**
+   - the state, the condition table, collection and keys as above;
+   - the move keys and the side-target path;
+   - Stealth Rock, Spikes, Toxic Spikes, Sticky Web, Heavy-Duty Boots and
+     Toxic Debris.
+2. **3b: durations.**
+   - Reflect, Light Screen, Light Clay, Tailwind and Trick Room: side and field
+     residual countdown, `SideEnd` and `FieldEnd`, `durationCallback`, `onAny`;
+   - Trick Room's speed in `getActionSpeed`.
+3. **3c: weather.**
+   - Sun, rain, sand and snow;
+   - the setter moves, and the setter abilities, by running an ability's or
+     item's `onStart` as its `SwitchIn` handler (getCallback 1025-1036);
+   - the rocks, the `Weather` event and its chip damage, `WeatherModifyDamage`,
+     the sand SpD and snow Def boosts, and the weather immunities;
+   - Swift Swim, Chlorophyll, Sand Rush and Hydration.
+4. **3d: terrain.**
+   - The four terrains, their setter moves, the surge abilities and Terrain
+     Extender;
+   - grounding, the status and volatile blocks, Psychic Terrain's `TryHit`,
+     Grassy Terrain's heal and base power.
+5. **3e: weather- and terrain-driven boosts.**
+   - Protosynthesis, Quark Drive, Booster Energy and the seeds;
+   - `WeatherChange` and `TerrainChange`, `End`, and item use.

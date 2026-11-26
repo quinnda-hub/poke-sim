@@ -69,6 +69,7 @@ back to `local/showdown`.
 | `record.js <scenario.json> [out.json]` | Play one battle on Showdown and write its trace. |
 | `gen-slice0.js <outDir> <count> [firstSeed] [format] [profile]` | Generate random slice-0 battles and record each. Deterministic per seed. |
 | `gen-slice1.js <outDir> <count> <poolFile> [firstSeed]` | Generate random slice-1 battles from the engine's own pool and record each, then print a coverage tally from Showdown's log. Deterministic per seed and pool. |
+| `gen-slice3.js <outDir> <count> <poolFile> [firstSeed]` | Slice 1's teams with hazard setters, Flying, Poison and Steel types, Shedinja, low levels, and abilities and items weighted toward Toxic Debris and Heavy-Duty Boots, recorded, then a tally of the hazard outcomes (each hazard's damage and layers, absorption, immunities, Boots blocks, hazard KOs, the order of several hazards on one switch-in). Deterministic per seed and pool. |
 | `gen-slice2.js <outDir> <count> <poolFile> [firstSeed] [profile]` | Slice 1's teams (or, with `struggle`, slice 0's Struggle teams) with abilities and items from the engine's pool, recorded, then a tally of the outcomes that distinguish each handler, observed by wrapping Showdown's event methods. Deterministic per seed and pool. |
 | `export-dex.js [outDir] [mod]` | Export species, moves, abilities, items, types and natures to `data/gen9/`. |
 
@@ -112,6 +113,15 @@ node tools/oracle/gen-slice2.js local/traces/slice2 600 local/traces/slice2-pool
 node tools/oracle/gen-slice2.js local/traces/slice2 300 local/traces/slice2-pool.json 1 struggle
 ```
 
+Slice 3 (field state) records from the same kind of pool:
+
+```sh
+cabal run -v0 engine-pool > local/traces/slice3-pool.json
+node tools/oracle/gen-slice3.js local/traces/slice3 600 local/traces/slice3-pool.json
+```
+
+Its teams are built so that hazards are set, stack and fire on switch-in, often two or three on one side. The order of several hazards on one side is visible only through effects on later draws and state, such as a knockout before the next hazard or a Poison type absorbing Toxic Spikes. The trace has no battle log, so a wrong order fails only the traces where it changes HP or a side condition.
+
 The set writes four lists: `slice2-moves.json`, `slice2-species.json`,
 `slice2-abilities.json` and `slice2-items.json`. A set without the last two
 draws only "No Ability" and no item. The pool check and the long tier's
@@ -128,7 +138,8 @@ The tally should show no counter at zero. The wrappers only observe: they
 pass every argument through and run nothing Showdown would not run.
 
 Traces live under `local/` and are not committed. Slice 0's 800 battles take
-about 280 MB, slice 1's 600 about 320 MB and slice 2's 900 about 340 MB. They
+about 280 MB, slice 1's 600 about 320 MB, slice 2's 900 about 340 MB and slice 3's 600
+about 260 MB. They
 are reproducible from the seeds.
 
 To isolate one behaviour, write a scenario by hand and give it explicit choices:

@@ -389,6 +389,7 @@ diffState dex b st =
     ++ cmp "request" (txt (st .: "request")) requestName
     ++ cmp "ended" (st .: "ended") (Bool ended)
     ++ cmp "winner" (st .: "winner") winnerValue
+    ++ diffField dex (bField b) (st .: "field")
     ++ concat
       [ diffSide dex p (sideOf p b) sd
       | (p, sd) <- zip [P1, P2] (arr (st .: "sides"))
@@ -400,9 +401,38 @@ diffState dex b st =
       Awaiting MoveRequest _ _ -> ("move", False, Null)
       Awaiting SwitchRequest _ _ -> ("switch", False, Null)
 
+-- | The field as the trace records it (record.js @snapshot@): the weather and terrain ids and their durations (null
+-- when the state has none), and the pseudo-weathers with their duration.
+diffField :: Dex -> Field -> Value -> [Diff]
+diffField dex f ev =
+  cmp "field.weather" (txt (ev .: "weather")) (condIdName dex (fWeather f))
+    ++ cmp "field.weatherDuration" (ev .: "weatherDuration") (durationValue (fWeatherState f))
+    ++ cmp "field.terrain" (txt (ev .: "terrain")) (condIdName dex (fTerrain f))
+    ++ cmp "field.terrainDuration" (ev .: "terrainDuration") (durationValue (fTerrainState f))
+    ++ cmp "field.pseudoWeather" (ev .: "pseudoWeather") (condMap dex (fPseudo f))
+  where
+    durationValue st = if esDuration st == 0 then Null else Number (fromIntegral (esDuration st))
+
+-- | A field condition's id as Showdown spells it (@''@ for none). An index with no table entry still shows up, so
+-- it cannot hide from the compare.
+condIdName :: Dex -> Int -> String
+condIdName dex i
+  | i == noCond = ""
+  | otherwise = maybe ("<condition " ++ show i ++ ">") (T.unpack . cnId) (dxFieldConds dex V.!? i)
+
+-- | @conditionMap@ of record.js: each condition with its @duration@ and @layers@ when its state has them.
+condMap :: Dex -> SV.Vector CondEntry -> Value
+condMap dex es = Object (KM.fromList
+  [ (K.fromText (T.pack (condIdName dex i)), Object (KM.fromList
+      ([("duration", Number (fromIntegral (esDuration st))) | esDuration st /= 0]
+        ++ [("layers", Number (fromIntegral (esA st))) | esA st /= -1])))
+  | CondEntry i st <- SV.toList es
+  ])
+
 diffSide :: Dex -> Player -> Side -> Value -> [Diff]
 diffSide dex p s sd =
   cmp (name ++ ".pokemonLeft") (int (sd .: "pokemonLeft")) (Just (sLeft s))
+    ++ cmp (name ++ ".sideConditions") (sd .: "sideConditions") (condMap dex (sConds s))
     ++ cmp (name ++ ".pokemon count") (length expected) (U.length (sSlots s))
     ++ concat
       [ diffMon dex (name ++ ".pokemon[" ++ show slot ++ "]") orig m ev
@@ -478,12 +508,8 @@ diffMon dex path orig m ev =
 -- out-of-slice mechanic fails loudly instead of going unchecked.
 unmodelled :: Value -> [Diff]
 unmodelled st =
-  isEmptyStr "field.weather" (st .: "field" .: "weather")
-    ++ isEmptyStr "field.terrain" (st .: "field" .: "terrain")
-    ++ isEmptyObj "field.pseudoWeather" (st .: "field" .: "pseudoWeather")
-    ++ concat
-      [ isEmptyObj (sp ++ ".sideConditions") (sd .: "sideConditions")
-          ++ concat
+  concat
+      [ concat
             [ let pp = sp ++ ".pokemon[" ++ show j ++ "]"
                in isEmptyObj (pp ++ ".statusState (keys other than stage)") (dropKey "stage" (pk .: "statusState"))
                     ++ isEmptyStr (pp ++ ".terastallized") (pk .: "terastallized")

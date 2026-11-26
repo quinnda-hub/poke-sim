@@ -25,7 +25,7 @@ import qualified Hedgehog.Range as Range
 
 import Engine
 import Engine.Chance (Sample)
-import Engine.Dex (Dex (..), supportedAbilities, supportedItems, supportedMoves, supportedSpecies)
+import Engine.Dex (Condition (..), Dex (..), supportedAbilities, supportedItems, supportedMoves, supportedSpecies)
 import Engine.Event (CondId (..))
 import Engine.State
 
@@ -84,7 +84,7 @@ playChecked dx t1 t2 = startBattle dx t1 t2 >>= go 0
     go :: Int -> Battle -> Sample (Either String Battle)
     go n b
       | n > stepCap = pure (Left ("no result within " ++ show stepCap ++ " decision steps"))
-      | Left e <- checkBattle b = pure (Left e)
+      | Left e <- checkBattle dx b = pure (Left e)
       | otherwise = case request b of
           Finished _ -> pure (Right b)
           Awaiting _ a1 a2 -> do
@@ -110,15 +110,52 @@ advanceWhile dx n p b = case request b of
 
 -- | State invariants and the decision-point contract: each side asked has legal choices and a side not asked
 -- has none; HP in 0..maxHp, PP in 0..maxPP, stages in -6..6, fainted means HP 0.
-checkBattle :: Battle -> Either String ()
-checkBattle b = do
+checkBattle :: Dex -> Battle -> Either String ()
+checkBattle dx b = do
   case request b of
     Awaiting _ a1 a2 -> do
       ask P1 a1
       ask P2 a2
     Finished _ -> mapM_ (\p -> if null (legalChoices b p) then Right () else Left ("choices after the end for " ++ show p)) [P1, P2]
   mapM_ side [(P1, bP1 b), (P2, bP2 b)]
+  conditions
   where
+    -- Side conditions and the field. Showdown's @sideConditions@ is an object keyed by id, so an id appears once, in
+    -- insertion order; each state took its @effectOrder@ from a counter that only grows, so the orders along the
+    -- insertion order are strictly increasing, and the battle's counter is ahead of every state's order. Layers
+    -- (Spikes 3, Toxic Spikes 2: the @onSideRestart@ guards, data/moves.ts) are in 1..max for exactly those
+    -- conditions; other conditions have none. A weather or terrain that is absent has the empty state.
+    conditions = do
+      mapM_ sideConds [(P1, bP1 b), (P2, bP2 b)]
+      let f = bField b
+      pseudo <- pure (SV.toList (fPseudo f))
+      if distinct [i | CondEntry i _ <- pseudo] then Right () else Left "a pseudo-weather appears twice"
+      if fWeather f == noCond && fWeatherState f /= noEffectState then Left "no weather but a weather state" else Right ()
+      if fTerrain f == noCond && fTerrainState f /= noEffectState then Left "no terrain but a terrain state" else Right ()
+      let orders = [esOrder st | (_, s) <- [(P1, bP1 b), (P2, bP2 b)], CondEntry _ st <- SV.toList (sConds s)]
+            ++ [esOrder st | CondEntry _ st <- pseudo]
+            ++ [esOrder st | (_, s) <- [(P1, bP1 b), (P2, bP2 b)], m <- SV.toList (sMons s)
+                           , st <- [monStatusState m, monAbilityState m, monItemState m] ++ [v | Volatile _ v <- SV.toList (monVolatiles m)]]
+      -- the first state takes order 0, so before any state exists the counter 0 is ahead of the default order 0
+      if all (< max 1 (bEffectOrder b)) orders then Right () else Left ("an effect order reaches the battle's counter " ++ show (bEffectOrder b))
+    sideConds (p, s) = do
+      let es = SV.toList (sConds s)
+          who = show p ++ " side condition "
+      if distinct [i | CondEntry i _ <- es] then Right () else Left (who ++ "appears twice")
+      let orders = [esOrder st | CondEntry _ st <- es]
+      if and (zipWith (<) orders (drop 1 orders))
+        then Right ()
+        else Left (who ++ "effect orders " ++ show orders ++ " are not strictly increasing")
+      mapM_ (\(CondEntry i st) -> do
+        let name = maybe "" cnId (dxFieldConds dx V.!? i)
+            layers = esA st
+            bound = lookup name [("spikes", 3), ("toxicspikes", 2)]
+        case bound of
+          Just hi | layers < 1 || layers > hi -> Left (who ++ show name ++ " has " ++ show layers ++ " layers, outside 1.." ++ show hi)
+          Nothing | layers /= -1 -> Left (who ++ show name ++ " has layers " ++ show layers)
+          _ -> Right ()
+        if esDuration st < 0 then Left (who ++ show name ++ " has a negative duration") else Right ()) es
+    distinct xs = length xs == length (nub xs)
     ask p asked = case (asked, null (legalChoices b p)) of
       (True, True) -> Left (show p ++ " is asked but has no legal choices")
       (False, False) -> Left (show p ++ " is not asked but has legal choices")

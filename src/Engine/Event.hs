@@ -15,6 +15,7 @@ module Engine.Event
   , CondId (..)
   , condName
   , EffectKind (..)
+  , ownPrefix
   , EffectKey (..)
     -- * Handlers
   , HandlerSpec (..)
@@ -59,6 +60,11 @@ data EventId
   | EvDisableMove
   | EvUpdate
   | EvBeforeTurn
+  | EvRestart
+  -- ^ @SideRestart@ / @FieldRestart@ (the handler is @onSideRestart@, prefix 'PSide').
+  | EvPrepareHit
+  | EvTryHitSide
+  | EvTryHitField
   deriving (Eq, Show, Enum, Bounded)
 
 -- | How @runEvent@ orders the handlers of an event (battle.ts 797-803).
@@ -107,10 +113,20 @@ eventName e = case e of
   EvDisableMove -> "DisableMove"
   EvUpdate -> "Update"
   EvBeforeTurn -> "BeforeTurn"
+  EvRestart -> "Restart"
+  EvPrepareHit -> "PrepareHit"
+  EvTryHitSide -> "TryHitSide"
+  EvTryHitField -> "TryHitField"
 
 -- | Which Pokemon a handler reacts to: the holder (@onX@), its allies (@onAllyX@), its foes (@onFoeX@), the
 -- source of the event (@onSourceX@) or anyone (@onAnyX@).
-data Prefix = POwn | PAlly | PFoe | PSource | PAny
+--
+-- 'PSide' and 'PField' are the callbacks a side condition or a field condition keeps for itself:
+-- @onSide<Event>@ and @onField<Event>@ (battle.ts @fieldEvent@ collects them with @findSideEventHandlers(side,
+-- 'onSide' + eventid)@ and @findFieldEventHandlers(field, 'onField' + eventid)@, and @singleEvent('SideStart', ...)@
+-- reads @onSideStart@). The plain @on<Event>@ of a side or field condition ('POwn') is what @runEvent@ and the
+-- per-Pokemon collection of @fieldEvent@ (hazards' @onSwitchIn@) run.
+data Prefix = POwn | PAlly | PFoe | PSource | PAny | PSide | PField
   deriving (Eq, Show, Enum, Bounded)
 
 prefixName :: Prefix -> T.Text
@@ -120,6 +136,8 @@ prefixName p = case p of
   PFoe -> "Foe"
   PSource -> "Source"
   PAny -> "Any"
+  PSide -> "Side"
+  PField -> "Field"
 
 -- | Split a handler name of the export (@onBeforeMove@, @onFoeBeforeMove@) into its prefix and event, when the
 -- engine knows the event.
@@ -148,13 +166,33 @@ condName c = case c of
   CFrz -> "frz"
   CFlinch -> "flinch"
 
--- | What kind of effect holds a handler. Showdown's other kinds (side and slot conditions, weather, terrain,
--- pseudo-weather, the move itself) join when their holders exist in the state.
-data EffectKind = EffStatus | EffVolatile | EffAbility | EffItem
+-- | What kind of effect holds a handler. Showdown's other kinds (slot conditions, the move itself) join when their
+-- holders exist in the state.
+data EffectKind
+  = EffStatus
+  | EffVolatile
+  | EffAbility
+  | EffItem
+  | -- | A side condition (@side.sideConditions@): hazards, screens, Tailwind.
+    EffSideCond
+  | EffWeather
+  | EffTerrain
+  | -- | @field.pseudoWeather@: Trick Room, Gravity, ...
+    EffPseudoWeather
   deriving (Eq, Show)
 
+-- | The prefix of the callbacks an effect of this kind keeps for itself, as @singleEvent@ reads them: a side
+-- condition's @SideStart@ is its @onSideStart@, a field condition's @FieldStart@ its @onFieldStart@.
+ownPrefix :: EffectKind -> Prefix
+ownPrefix k = case k of
+  EffSideCond -> PSide
+  EffWeather -> PField
+  EffTerrain -> PField
+  EffPseudoWeather -> PField
+  _ -> POwn
+
 -- | An effect: its kind and its id (a 'CondId' index for statuses and volatiles; an index into the @Dex@
--- ability or item table for the others).
+-- ability, item or field-condition table for the others).
 data EffectKey = EffectKey !EffectKind !Int
   deriving (Eq, Show)
 
@@ -237,6 +275,15 @@ data NativeId
   | NFlameOrb
   | NToxicOrb
   | NAssaultVestDisable
+  | NStealthRockSwitchIn
+  | NLayerStart
+  -- ^ @this.effectState.layers = 1@ (spikes, toxicspikes @onSideStart@).
+  | NSpikesRestart
+  | NToxicSpikesRestart
+  | NSpikesSwitchIn
+  | NToxicSpikesSwitchIn
+  | NStickyWebSwitchIn
+  | NToxicDebris
   deriving (Eq, Show)
 
 -- | The body of each handler the engine implements (written by hand: Showdown's handlers are code). A condition
