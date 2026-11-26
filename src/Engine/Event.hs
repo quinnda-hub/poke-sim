@@ -92,8 +92,9 @@ data EventId
   | EvAfterUseItem
   -- ^ @runEvent('AfterUseItem', pokemon, null, null, item)@ in @useItem@ (1867): Unburden.
   | EvTakeItem
-  -- ^ @runEvent('TakeItem', ...)@ in @takeItem@: no supported move takes items, so it is never run; it is an event only
-  -- so that the handlers Booster Energy and Unburden list for it parse.
+  -- ^ @runEvent('TakeItem', pokemon, source, null, item)@ in @takeItem@ (pokemon.ts 1878): Booster Energy (Paradox holders keep
+  -- it) and Unburden (adds its volatile). Also @singleEvent('TakeItem', item, ...)@ on the item alone (Knock Off's @BasePower@,
+  -- Trick, Switcheroo, Thief).
   | EvModifyType
   -- ^ @singleEvent('ModifyType', move, ...)@ then @runEvent('ModifyType', pokemon, target, move, move)@ in @useMoveInner@
   -- (battle-actions.ts 494, 497). Only a move's own handler is supported.
@@ -125,6 +126,9 @@ data EventId
   -- ^ The move's @onAfterSubDamage@: Showdown runs it where a hit lands on a Substitute (@singleEvent('AfterSubDamage', ...)@ in
   -- substitute's @onTryPrimaryHit@, data/moves.ts 18375). Substitute is not supported, so it is never run; it is an event only so
   -- that the handlers of Rapid Spin and its kin parse.
+  | EvTryImmunity
+  -- ^ @singleEvent('TryImmunity', move, {}, target, pokemon, move)@ in @hitStepTryImmunity@ (battle-actions.ts 739): the move's
+  -- own @onTryImmunity@ (Trick, Switcheroo), whose falsy result makes the target immune. Only a move's own handler is supported.
   | EvHitField
   -- ^ @singleEvent('HitField', moveData, {}, target, source, move)@ in @runMoveEffects@ (battle-actions.ts 1328-1331), for a
   -- move with target @all@. Only a move's own handler is supported.
@@ -207,6 +211,7 @@ eventName e = case e of
   EvUseItem -> "UseItem"
   EvAfterUseItem -> "AfterUseItem"
   EvTakeItem -> "TakeItem"
+  EvTryImmunity -> "TryImmunity"
   EvModifyType -> "ModifyType"
   EvEffectiveness -> "Effectiveness"
   EvModifyPriority -> "ModifyPriority"
@@ -467,8 +472,22 @@ data NativeId
   | NQuarkDriveEnd
   | NUnburdenAfterUseItem
   | NUnburdenEnd
-  | NInertTakeItem
-  -- ^ A @TakeItem@ handler (Booster Energy, Unburden): no supported move takes an item, so it cannot run.
+  | NBoosterTakeItem
+  -- ^ boosterenergy @onTakeItem@: a Paradox species cannot lose it.
+  | NUnburdenTakeItem
+  -- ^ unburden @onTakeItem@: adds the volatile.
+  | NKnockOffPower
+  -- ^ knockoff @onBasePower@: 1.5 when the target holds an item that can be taken.
+  | NKnockOffAfterHit
+  -- ^ knockoff @onAfterHit@: the target loses its item.
+  | NTrickTryImmunity
+  -- ^ trick, switcheroo @onTryImmunity@: not against Sticky Hold.
+  | NTrickHit
+  -- ^ trick, switcheroo @onHit@: the two Pokemon swap items.
+  | NThiefAfterHit
+  -- ^ thief @onAfterHit@: the user takes the target's item when it has none.
+  | NPoltergeistTry
+  -- ^ poltergeist @onTry@: fails against a target with no item.
   | NBoosterEnergyStart
   | NBoosterEnergyUpdate
   -- Moves' own handlers (slice 4a). Each is named for the move and the callback; a body shared by several moves is

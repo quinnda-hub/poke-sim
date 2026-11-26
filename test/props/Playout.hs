@@ -25,7 +25,7 @@ import qualified Hedgehog.Range as Range
 
 import Engine
 import Engine.Chance (Sample)
-import Engine.Dex (Condition (..), Dex (..), SpeciesData (..), abilityId, noType, speciesData, supportedAbilities, supportedItems, supportedMoves, supportedSpecies)
+import Engine.Dex (Condition (..), Dex (..), SpeciesData (..), abilityId, itemId, noType, speciesData, supportedAbilities, supportedItems, supportedMoves, supportedSpecies)
 import Engine.Damage (monTypes)
 import Engine.Event (CondId (..))
 import Engine.State
@@ -198,7 +198,10 @@ checkBattle dx b = do
       let stage = esA (monStatusState m)
       -- the volatiles: flinch (duration 1) and the volatiles of Protosynthesis, Quark Drive and Unburden (no duration).
       -- A volatile of an ability lives only on a holder of that ability; the Paradox ones have a best stat in 0..4 and
-      -- a fromBooster flag that is 1 only on a holder whose item is gone (Booster Energy was used)
+      -- a fromBooster flag that is 1 only after Booster Energy was used. Trick or Thief can then give the holder another item,
+      -- but never a Booster Energy if it has the Paradox tag (boosterenergy.onTakeItem refuses that receiver). The four
+      -- untagged holders (Gouging Fire, Raging Bolt, Iron Boulder, Iron Crown) can receive one and keep it in sun or
+      -- Electric Terrain, where it is not used.
       let flinched = any (\(Volatile i _) -> i == fromEnum CFlinch) (SV.toList (monVolatiles m))
           volatileOk (Volatile i st)
             | i == fromEnum CFlinch = esDuration st == 1
@@ -210,7 +213,7 @@ checkBattle dx b = do
             | otherwise = False
           sp = speciesData dx (monSpecies m)
           ability name = abilityId dx (monAbility m) == name
-          boosterOk st = esB st == 0 || (esB st == 1 && monItem m == noItem)
+          boosterOk st = esB st == 0 || (esB st == 1 && (not (spParadox sp) || itemId dx (monItem m) /= "boosterenergy"))
           ids = [i | Volatile i _ <- SV.toList (monVolatiles m)]
       if all volatileOk (SV.toList (monVolatiles m)) then Right () else bad "a volatile that is not flinch, or an ability's volatile that breaks its invariant"
       if length ids == length (nub ids) then Right () else bad "a volatile twice"

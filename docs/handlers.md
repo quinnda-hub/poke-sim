@@ -570,5 +570,16 @@ engine does not hold, and wait for a phase that adds it.
      would need revisiting.
 4. **4d: Knock Off and item removal** (`takeItem`, the `TakeItem` event, which
    makes Booster Energy's and Unburden's `onTakeItem` reachable).
+   Found while building it:
+   - `singleEvent('TakeItem', item, ...)` in Trick, Switcheroo and Thief
+     passes the Pokémon that would receive the item as the handler's
+     `source`, so Booster Energy also refuses a Paradox receiver.
+   - A failed Trick or Thief restores only the item id
+     (`target.item = yourItem.id`): the restored item's state stays cleared.
+   - The `Paradox` tag comes from Showdown's species `tags`. In the pinned
+     version Gouging Fire, Raging Bolt, Iron Boulder and Iron Crown have no
+     tag, so Booster Energy can be taken from them and given to them.
+   - The order of Trick's two takes and two sets changes only effect-order
+     values that no trace observes; the property `itemMoves` checks it.
 
 Each phase is its own PR, stacked on the one before.

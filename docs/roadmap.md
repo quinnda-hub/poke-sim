@@ -177,8 +177,20 @@ Last updated 2026-11-25.
     move's own `onHit`. 14 more moves (394 in all). The slice-4 set is
     re-recorded at 1,200 battles. Parity checks 5,000 traces, 361,128
     decision points and 737,441 draws.
+- **Slice 4d: Knock Off and item removal.**
+  - `takeItem` and `setItem` as Showdown runs them, with the `TakeItem`
+    event (pokemon.ts 1873-1913). Booster Energy refuses to leave or reach a
+    species with the `Paradox` tag, now exported from Showdown's `tags`.
+    Unburden activates on every `TakeItem`, even a refused one.
+  - Knock Off (its boost asks only the item's own `TakeItem`, and nothing is
+    taken if Rocky Helmet has just fainted the user), Trick, Switcheroo,
+    Thief and Poltergeist (its `onTry`, at battle-actions.ts 656).
+  - New event points: `TakeItem`, `TryImmunity`, and the move's `Try` on
+    Pokémon-targeted moves. 5 more moves (399 in all). The slice-4 set is
+    re-recorded at 1,500 battles. Parity checks 5,300 traces, 391,683
+    decision points and 785,342 draws.
 - **Test tiers.** The fast tier (`POKESIM_TIER=fast`) replays every 10th trace
-  and runs the hedgehog properties at 100 tests each, in about 21 s. The long
+  and runs the hedgehog properties at 100 tests each, in about 20 s. The long
   tier, which gates merges into main, replays everything and runs the
   properties at 2000 tests each.
 
@@ -300,50 +312,107 @@ will be wrong once later mechanics arrive. Each is marked in the code with a
 Each step is gated by the parity test. See
 [oracle-testing.md](oracle-testing.md).
 
-1. **Cheaper event points.** Slice 2b costs about 38% on the plain path and
-   3a about another 13% (see the benchmark log). Optimise with draws and state unchanged, measured on
-   the workstation.
+The mechanics come in this order (decided 2026-11-26). Each one gets real
+Gen 9 OU battles simulated sooner, and each makes the later ones cheaper.
 
-   Throughput is counted in decision steps per second per core (one `step`
-   resolving a turn or a forced switch), since that is what search and
-   training consume. Battles per second follow at about 80 steps per battle
-   with slice-3 teams. Slice 4a runs at about 11,500 steps/s (146 battles/s)
-   on one laptop core.
+1. **Finish slice 4: 4d, Knock Off and item removal.** Done 2026-11-26.
+2. **Terastallization.** At 0% today, and no real OU battle can be simulated
+   without it. It changes `getTypes`, STAB and the request, and adds the Tera
+   choice to `legalChoices`.
+3. **Moves that switch mid-turn.** U-turn (0.73 of usage), Flip Turn,
+   Volt Switch, Chilly Reception, and the forced switches of Roar, Whirlwind
+   and Dragon Tail. They need a switch request inside the turn, which is a
+   change to the turn loop (lead-owned).
+4. **Volatile conditions.** Protect (its stall counter is a draw), Substitute,
+   Encore and Taunt, and Sucker Punch, which reads the target's queued action.
+   Substitute is the first escape hatch: a mechanic that resists the rule
+   vocabulary. The Choice items come with the `choicelock` volatile (Choice
+   Band, Specs and Scarf are not in the pool yet), and with them Knock Off,
+   Trick and Thief against a Choice item, which 4d could not record.
+5. **Full support for the catalog.** Every move, ability, item and species
+   legal in Gen 9 OU: abilities first (30% of their usage is supported),
+   then the remaining items and moves. Transform, Illusion and the forme
+   changes are escape hatches. Today 210 of the whitelist's 300 moves are
+   accepted (74.7% by usage), 22 of 85 abilities (30.0%), 31 of 71 items
+   (68.2%) and 88 of 102 species (85.3%), at slice 4c.
 
-   | | Steps/s per core | Battles/s per core | Purpose |
-   |---|---|---|---|
-   | Floor | 12,000 | 150 | Do not fall below as coverage grows |
-   | Target | 50,000 | 600 | Comfortable search on one machine |
-   | Stretch | 100,000 | 1,200 | Deeper search and more sampled worlds |
+   Beyond the catalog, Gen 9 OU also needs the format's own rules, wherever
+   no trace has exercised them yet (its clauses, such as Sleep Clause Mod and
+   the Endless Battle Clause). Other singles tiers (Ubers, UU and below) then
+   differ mostly in bans. Doubles is a separate body of work (spread moves,
+   ally targeting, redirection, Commander) and out of scope.
+   **Timeline** (estimated 2026-11-26, from the velocity so far). The new
+   engine's first commit was 2026-11-25 12:42. Slices 0 to 4c, about 16
+   phases, landed within 25 hours, about one phase per 1.5 hours with an
+   implementer running overnight. The work left in steps 1-5 is about 55-75
+   phases:
 
-   - **Why these numbers.** Self-play training needs little: about a billion
-     steps a week is under 2,000 steps/s in all, and a batched network on the
-     GPU is the tighter limit, at about 5,000 steps/s per core across the
-     workstation's 20 cores. Test-time search sets the bar. A search of
-     10⁶ simulated steps in 5 s on 20 cores needs 10,000 steps/s per core,
-     and deeper search, more sampled worlds or a shorter budget multiply that.
-   - **How to measure.** On the workstation, concurrently on pinned cores
-     against a baseline (the benchmark log's method), with teams that use the
-     engine's full coverage. Per-step cost rises as mechanics are added, so
-     simplified teams flatter it.
-   - **Reference.** Showdown's own throughput on the same recorded scenarios,
-     so that the engine's speed is also stated as a multiple of the
-     reference's.
-2. **Moves' own handler code** (`onHit`, `onAfterHit`, `onTry`,
-   `onModifyMove`, `basePowerCallback`, ...), which the rule translation
-   rejects today. It brings hazard removal (Rapid Spin, Defog, Mortal Spin,
-   Court Change, Ice Spinner), Aurora Veil, the screen breakers, and the
-   terrain moves (Grassy Glide, Expanding Force, Misty Explosion, Rising
-   Voltage, Terrain Pulse).
-3. **More abilities and items** on the handler system, in usage order, Air
-   Balloon first. Choice items wait for the choice-lock volatile. Each one is
-   a small task with an objective pass or fail, which suits delegation.
-4. **Terastallization.**
-5. **Escape hatches** for the mechanics that resist the rule vocabulary, such
-   as Substitute and Transform.
+   | Work | Phases |
+   |---|---|
+   | 4d | 1 |
+   | Terastallization | 2-3 |
+   | Moves that switch mid-turn | 2-3 |
+   | Volatile conditions | 3-4 |
+   | Abilities (about 280 left) | 20-25 |
+   | Moves (about 290 left that need code) | 15-20 |
+   | Items (about 200 left, many with no battle effect) | 5-8 |
+   | Transform, Illusion, forme changes, format clauses | 4-6 |
+   | Test infrastructure (delta snapshots, a faster long tier) | 2-3 |
+
+   That is 5-6 days at the current pace. The milestones assume the pace
+   drops: the long tier and the traces grow with every phase, each commit
+   waits for approval, and steps 3-5 change the turn loop and the hit path.
+
+   | Milestone | After | Estimate |
+   |---|---|---|
+   | Real Gen 9 OU battles end to end | Steps 1-4 | 2026-11-29 to 2026-12-01 |
+   | The whole whitelist accepted | Part of step 5 | about 2026-12-03 |
+   | Full Gen 9 singles | Step 5 | 2026-12-10 to 2026-12-17 (late December at worst) |
+
+   Compare progress against this table at the end of each slice, and record
+   the slip or gain beside it.
+
+   | Date | Done | Against the estimate |
+   |---|---|---|
+   | 2026-11-26 | Slice 4c | Baseline |
+   | 2026-11-26 | Slice 4d | On pace: step 1 done the day it was estimated |
 6. **Per-player view.** What each side can observe, as a first-class value.
 7. **Showdown seed compatibility.** Implement Showdown's own generators so a
    battle can be reproduced from its seed alone.
+
+**Cheaper event points, alongside the mechanics, when the workstation is
+free.** Slice 2b costs about 38% on the plain path and 3a about another
+13% (see the benchmark log). Optimise with draws and state unchanged,
+measured on the workstation.
+
+Throughput is counted in decision steps per second per core (one `step`
+resolving a turn or a forced switch), since that is what search and
+training consume. Battles per second follow at about 80 steps per battle
+with slice-3 teams. Slice 4a runs at about 11,500 steps/s (146 battles/s)
+on one laptop core.
+
+| | Steps/s per core | Battles/s per core | Purpose |
+|---|---|---|---|
+| Floor | 12,000 | 150 | Do not fall below as coverage grows |
+| Target | 50,000 | 600 | Comfortable search on one machine |
+| Stretch | 100,000 | 1,200 | Deeper search and more sampled worlds |
+
+- **Why these numbers.** Self-play training needs little: about a billion
+  steps a week is under 2,000 steps/s in all, and a batched network on the
+  GPU is the tighter limit, at about 5,000 steps/s per core across the
+  workstation's 20 cores. Test-time search sets the bar. A search of
+  10⁶ simulated steps in 5 s on 20 cores needs 10,000 steps/s per core,
+  and deeper search, more sampled worlds or a shorter budget multiply that.
+- **How to measure.** On the workstation, concurrently on pinned cores
+  against a baseline (the benchmark log's method), with teams that use the
+  engine's full coverage. Per-step cost rises as mechanics are added, so
+  simplified teams flatter it.
+- **Reference.** Showdown's own throughput on the same recorded scenarios,
+  so that the engine's speed is also stated as a multiple of the
+  reference's.
+
+At 9,200-11,600 steps/s on slice-3 and slice-4 teams, the engine is already
+at or below the floor, so this is due.
 
 Alongside:
 
@@ -354,7 +423,7 @@ Alongside:
 - **Scenario generation from rules.** For each rule, generate battles that
   exercise it with each random outcome forced both ways, and report coverage
   per rule.
-- **Trace size.** 5,000 battles take about 2.7 GB. Snapshots should become
+- **Trace size.** 5,300 battles take about 2.9 GB. Snapshots should become
   deltas.
 - **Benchmark tracking.** Record throughput at each slice so slowdowns are
   measured when they appear.

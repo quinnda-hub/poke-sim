@@ -14,7 +14,7 @@ import Control.Monad (foldM)
 import Control.Monad.Trans.State.Strict (evalStateT, runStateT)
 import Data.Functor.Identity (runIdentity)
 import Data.Either (isLeft)
-import Data.List (sortOn)
+import Data.List (sortOn, (\\))
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe)
 import qualified Data.Vector as V
@@ -31,8 +31,8 @@ import System.Random.SplitMix (mkSMGen)
 
 import Engine
 import Engine.Chance (runSample)
-import Engine.Dex (Condition (..), Dex (..), MoveData (..), SpeciesData (..), dexCondLookup, supportedMoves)
-import Engine.Dispatch (HitResult (..), addSideCondition, basePowerCallback, moveFieldHit)
+import Engine.Dex (Condition (..), Dex (..), MoveData (..), SpeciesData (..), abilityId, dexCondLookup, itemId, supportedAbilities, supportedItems, supportedMoves, supportedSpecies)
+import Engine.Dispatch (HitResult (..), addSideCondition, basePowerCallback, moveAfterHit, moveFieldHit, moveOwnHit)
 import Engine.Effects (abilityBodies, fieldCondBodies, itemBodies, moveBodies)
 import Engine.Event (CondId (..), EventId (..), HandlerSpec (..), Prefix (..), condName, parseHandlerName)
 import Engine.Format (trunc, truncBits)
@@ -81,6 +81,8 @@ main = do
             withTests 1 (moveBasePowerSortsLast dex))
         , ("Court Change and Haze: the sides exchange the listed conditions with their states and nothing else changes; Haze clears the stages in play",
             withTests (fromIntegral n) (fieldMoves dex))
+        , ("Knock Off, Thief and Trick: an item removal never creates an item, a refusal keeps it, and a swap hands each item over whole",
+            withTests (fromIntegral n) (itemMoves dex))
         , ("a weight-based base power never decreases as the target gets heavier or the user lighter",
             withTests (fromIntegral n) (weightBands dex))
         , ("a base-power callback never lowers the move's own base power below what its condition adds",
@@ -410,7 +412,7 @@ movesSupported dex movesV = withTests 1 $ property $ do
 -- only when every handler the export lists for it has a body, so none may have a body for these.
 moveEventsOnlyOfMoves :: Dex -> Property
 moveEventsOnlyOfMoves dex = withTests 1 $ property $ do
-  let moveOnly = [EvEffectiveness, EvModifyPriority, EvModifyType, EvBasePowerCallback, EvDamageCallback, EvTry, EvAfterHit, EvAfterSubDamage, EvHitField]
+  let moveOnly = [EvEffectiveness, EvModifyPriority, EvModifyType, EvBasePowerCallback, EvDamageCallback, EvTry, EvAfterHit, EvAfterSubDamage, EvHitField, EvTryImmunity]
       tables = [("ability", dxAbilities dex), ("item", dxItems dex), ("condition", dxConditions dex), ("field condition", dxFieldConds dex)]
   mapM_ (\(what, table) -> mapM_ (\c -> do
     footnote (what ++ " " ++ T.unpack (cnId c) ++ " listens to an event only moves run")
@@ -594,3 +596,110 @@ fieldMoves dex = property $ do
       mapM_ (\p -> mapM_ (\i -> let a = Actor p i in
                 if a `elem` map fst inPlay then success else monBoosts (monOf b' a) === monBoosts (monOf b a))
               [0 .. SV.length (sMons (sideOf p b)) - 1]) [P1, P2]
+
+-- | Knock Off's @onAfterHit@ (data/moves.ts 9966), Thief's (19309) and Trick's @onHit@ (19872) on states reached by random
+-- playouts, with the two Pokemon in play given random species (Paradox ones among them), abilities (Unburden among them) and
+-- items (Booster Energy among them). Each is applied alone, from the same state.
+--
+-- Invariants, from the source and not from any run: none draws; no item is created (the items in play afterwards are among
+-- those before); Booster Energy never stays out of, or arrives in, a Paradox Pokemon's hand (@onTakeItem@: it refuses both
+-- being taken from one, and, in Trick and Thief's second @TakeItem@, being given to one); a refused removal keeps the item
+-- and an allowed one takes it; Knock Off touches nothing of the user, and the target only in its item, the item state and
+-- the Unburden volatile (an Unburden holder gets it whenever it had an item: the ability's @onTakeItem@ runs before the
+-- refusal is known); Thief does nothing with a full hand; Trick fails exactly when both hands are empty, a take is refused
+-- or the receiver refuses, and otherwise each Pokemon holds the other's old item (or nothing, if it used it on arrival).
+itemMoves :: Dex -> Property
+itemMoves dex = property $ do
+  (t1, t2) <- forAll (genTeams dex)
+  seed <- forAll (Gen.word64 Range.linearBounded)
+  steps <- forAll (Gen.int (Range.linear 4 120))
+  who <- forAll Gen.enumBounded
+  let pickSpecies = Gen.frequency [(1, Gen.element [spId s | s <- V.toList (dxSpecies dex), spParadox s, spSupported s]), (3, Gen.element (supportedSpecies dex))]
+      pickItem = Gen.frequency [(1, pure "boosterenergy"), (3, Gen.element (supportedItems dex))]
+  (spU, spT) <- forAll ((,) <$> pickSpecies <*> pickSpecies)
+  (abU, abT) <- forAll ((,) <$> Gen.frequency [(1, pure "unburden"), (3, Gen.element (supportedAbilities dex))] <*> Gen.frequency [(1, pure "unburden"), (3, Gen.element (supportedAbilities dex))])
+  (itU, itT) <- forAll ((,) <$> pickItem <*> pickItem)
+  b0 <- evalEither (fst (runSample (mkSMGen seed) (startBattle dex t1 t2 >>= advanceWhile dex steps (const True))))
+  let user = activeActor who b0
+      target = activeActor (other who) b0
+      ix m name = fromMaybe (-1) (M.lookup name (m dex))
+      setup a sp ab it = modifyMon a (\m -> m {monSpecies = ix dxSpeciesIx sp, monAbility = ix dxAbilityIx ab, monItem = if T.null it then noItem else ix dxItemIx it, monItemState = noEffectState})
+      b = setup target spT abT itT (setup user spU abU itU b0)
+      moveNamed name = V.find ((== name) . mvId) (dxMoves dex)
+      itemOf bb a = monItem (monOf bb a)
+      isParadox bb a = spParadox (dxSpecies dex V.! monSpecies (monOf bb a))
+      booster bb a = itemOf bb a /= noItem && itemId dex (itemOf bb a) == "boosterenergy"
+      holdsBoosterParadox bb a = isParadox bb a && booster bb a
+      present bb = [itemOf bb a | a <- [user, target], itemOf bb a /= noItem]
+      sameButItem a bb = (monOf bb a) {monItem = 0, monItemState = noEffectState, monVolatiles = SV.empty}
+      hasUnburden bb a = abilityId dex (monAbility (monOf bb a)) == "unburden"
+      unburdenOrder bb a = head ([esOrder st | Volatile i st <- SV.toList (monVolatiles (monOf bb a)), i == fromEnum CUnburden] ++ [-1])
+      unburdenVolatile bb a = any (\(Volatile i _) -> i == fromEnum CUnburden) (SV.toList (monVolatiles (monOf bb a)))
+      active = monActive (monOf b user) && monActive (monOf b target) && monHp (monOf b user) > 0 && monHp (monOf b target) > 0
+  case request b0 of
+    Finished _ -> success
+    Awaiting {} | not active -> success
+    Awaiting {} -> do
+      -- Knock Off
+      case moveNamed "knockoff" of
+        Nothing -> footnote "knockoff is not in the dex" >> failure
+        Just mv -> do
+          let (((), b'), draws) = runCounter (runStateT (moveAfterHit dex user target mv) b)
+          draws === 0
+          monOf b' user === monOf b user
+          assert ((present b' \\ present b) == [])
+          if itemOf b target == noItem
+            then monOf b' target === monOf b target
+            else do
+              sameButItem target b' === sameButItem target b
+              if hasUnburden b target then assert (unburdenVolatile b' target) else pure ()
+              if holdsBoosterParadox b target
+                then itemOf b' target === itemOf b target
+                else itemOf b' target === noItem
+              if itemOf b' target == noItem then monItemState (monOf b' target) === noEffectState else pure ()
+      -- Thief
+      case moveNamed "thief" of
+        Nothing -> footnote "thief is not in the dex" >> failure
+        Just mv -> do
+          let (((), b'), draws) = runCounter (runStateT (moveAfterHit dex user target mv) b)
+          draws === 0
+          assert ((present b' \\ present b) == [])
+          if itemOf b user /= noItem
+            then b' === b
+            else do
+              assert (itemOf b' target `elem` [itemOf b target, noItem])
+              assert (itemOf b' user `elem` [itemOf b target, noItem])
+              -- taken whole: an item is never in both hands
+              assert (itemOf b' user == noItem || itemOf b' target == noItem)
+              -- refused by the holder or by the receiver: nothing moves
+              if holdsBoosterParadox b target || (booster b target && isParadox b user)
+                then (itemOf b' user, itemOf b' target) === (noItem, itemOf b target)
+                else pure ()
+      -- Trick and Switcheroo
+      mapM_ (\name -> case moveNamed name of
+        Nothing -> footnote (T.unpack name ++ " is not in the dex") >> failure
+        Just mv -> do
+          let ((res, b'), draws) = runCounter (runStateT (moveOwnHit dex user target mv) b)
+              noneToSwap = itemOf b user == noItem && itemOf b target == noItem
+              refused = holdsBoosterParadox b user || holdsBoosterParadox b target
+                || (booster b user && isParadox b target) || (booster b target && isParadox b user)
+          draws === 0
+          assert ((present b' \\ present b) == [])
+          assert ((res == HitFail) == (noneToSwap || refused))
+          if res == HitFail
+            then (itemOf b' user, itemOf b' target) === (itemOf b user, itemOf b target)
+            else do
+              assert (itemOf b' user `elem` [itemOf b target, noItem])
+              assert (itemOf b' target `elem` [itemOf b user, noItem])
+          mapM_ (\a -> if isParadox b' a && booster b' a then assert (booster b a) else pure ()) [user, target]
+          -- the order of the events (pokemon.ts takeItem and setItem, each of which takes the next effectOrder for the state or
+          -- volatile it creates): Trick takes the target's item, then the user's, then sets the user's old item on the target, then
+          -- the target's old item on the user. So two Unburden holders that both had items get their volatiles in that order, and two
+          -- items that both stay in hand have states in that order. The orders are the battle's counter, which only grows.
+          if itemOf b user /= noItem && itemOf b target /= noItem && hasUnburden b user && hasUnburden b target
+              && not (unburdenVolatile b user) && not (unburdenVolatile b target)
+            then assert (unburdenOrder b' target < unburdenOrder b' user)
+            else pure ()
+          if res == HitOk && itemOf b' user /= noItem && itemOf b' target /= noItem
+            then assert (esOrder (monItemState (monOf b' target)) < esOrder (monItemState (monOf b' user)))
+            else pure ()) ["trick", "switcheroo"]
