@@ -34,6 +34,14 @@
 -- @CWeather@, used by three whitelisted abilities (swiftswim, chlorophyll, sandrush; slushrush shares it). Reflect and Light Screen's damage halving, the duration callbacks and Trick Room's restart
 -- are native: one or two users each.
 --
+-- The weather and terrain setters (drought, drizzle, sandstream, snowwarning, grassysurge, psychicsurge, mistysurge,
+-- electricsurge) are natives. Eight whitelisted-or-free users would meet the bar for one rule kind ("set this field
+-- condition"), but the ids of the field conditions are only known after the field table is built from the moves, so
+-- the rule would need the table before the abilities; the natives are four lines each. Not adopted: a candidate for
+-- folding when the abilities are next touched. The terrain base-power bodies are natives too: electric and psychic
+-- share "move type and a grounded attacker" (two users), grassy has two branches in one handler, and misty tests
+-- the defender.
+--
 -- The field conditions of slice 3a are all native, none of them reaches the bar: layers (spikes, toxicspikes) have
 -- two whitelisted users, so there is no rule kind for them; each hazard's @onSwitchIn@ is a body of its own
 -- (stealthrock: damage by Rock effectiveness; spikes: damage by layer; toxicspikes: poison or absorb; stickyweb: a
@@ -77,6 +85,16 @@ abilityBodies ty wx name = case name of
   "drizzle" -> Just [(POwn, EvStart, BNative NDrizzle)]
   "sandstream" -> Just [(POwn, EvStart, BNative NSandStream)]
   "snowwarning" -> Just [(POwn, EvStart, BNative NSnowWarning)]
+  -- grassysurge, psychicsurge, mistysurge, electricsurge: onStart sets the terrain
+  "grassysurge" -> Just [(POwn, EvStart, BNative NGrassySurge)]
+  "psychicsurge" -> Just [(POwn, EvStart, BNative NPsychicSurge)]
+  "mistysurge" -> Just [(POwn, EvStart, BNative NMistySurge)]
+  "electricsurge" -> Just [(POwn, EvStart, BNative NElectricSurge)]
+  -- overcoat: onImmunity (sandstorm, hail, powder -> false), onTryHit (a powder move the target is not naturally immune
+  -- to is blocked)
+  "overcoat" -> Just [(POwn, EvImmunity, BNative NOvercoatImmunity), (POwn, EvTryHit, BNative NOvercoatTryHit)]
+  -- leafguard: onSetStatus (any status, in sun), onTryAddVolatile (yawn, in sun)
+  "leafguard" -> Just [(POwn, EvSetStatus, BNative NLeafGuardSetStatus), (POwn, EvTryAddVolatile, BNative NLeafGuardTryAddVolatile)]
   -- toxicdebris: onDamagingHit, a Physical move sets Toxic Spikes on the attacker's side
   "toxicdebris" -> Just [(POwn, EvDamagingHit, BNative NToxicDebris)]
   -- technician: onBasePower, basePower after the accumulated modifier <= 60 -> chainModify(1.5)
@@ -129,6 +147,8 @@ itemBodies ty name = case name of
   "damprock" -> Just []
   "smoothrock" -> Just []
   "icyrock" -> Just []
+  -- terrainextender: no handlers (the terrains' durationCallback reads the item)
+  "terrainextender" -> Just []
   _ -> case lookup name typeItems of
     -- onBasePower, `move.type === T` -> chainModify([4915, 4096]) (data/items.ts; each body checked against the
     -- source: the plain type check and nothing else)
@@ -192,8 +212,25 @@ fieldCondBodies name = case name of
     Just ([ (POwn, EvModifySpD, BNative NSandstormSpD), (POwn, EvWeather, BNative NSandstormWeather) ]
            ++ common NWeatherResidualIfActive)
   "snowscape" -> Just ((POwn, EvModifyDef, BNative NSnowscapeDef) : common NWeatherResidualIfActive)
+  -- electricterrain, grassyterrain, mistyterrain, psychicterrain (data/moves.ts condition): durationCallback (8 with
+  -- Terrain Extender, else 5), onFieldStart and onFieldEnd (log lines), and each terrain's own handlers
+  "electricterrain" ->
+    Just (terrain [ (POwn, EvSetStatus, BNative NElectricTerrainSetStatus)
+                  , (POwn, EvTryAddVolatile, BNative NElectricTerrainTryAddVolatile)
+                  , (POwn, EvBasePower, BNative NElectricTerrainPower) ])
+  "grassyterrain" ->
+    Just (terrain [(POwn, EvBasePower, BNative NGrassyTerrainPower), (POwn, EvResidual, BNative NGrassyTerrainHeal)])
+  "mistyterrain" ->
+    Just (terrain [ (POwn, EvSetStatus, BNative NMistyTerrainSetStatus)
+                  , (POwn, EvTryAddVolatile, BNative NMistyTerrainTryAddVolatile)
+                  , (POwn, EvBasePower, BNative NMistyTerrainPower) ])
+  "psychicterrain" ->
+    Just (terrain [(POwn, EvTryHit, BNative NPsychicTerrainTryHit), (POwn, EvBasePower, BNative NPsychicTerrainPower)])
   _ -> Nothing
   where
+    terrain own =
+      own ++ [ (POwn, EvDurationCallback, BNative NTerrainDuration), (PField, EvStart, BNative NLogOnly)
+             , (PField, EvEnd, BNative NLogOnly) ]
     common residual =
       [ (POwn, EvDurationCallback, BNative NWeatherDuration), (PField, EvStart, BNative NLogOnly)
       , (PField, EvResidual, BNative residual), (PField, EvEnd, BNative NLogOnly) ]

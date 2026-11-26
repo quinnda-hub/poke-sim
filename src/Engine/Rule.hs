@@ -114,12 +114,15 @@ data MoveRule = MoveRule
   -- ^ @move.ignoreImmunity === true@: the type-immunity step is skipped (pokemon.ts @runImmunity@).
   , mrContact :: !Bool
   -- ^ @flags.contact@: read by @checkMoveMakesContact@ (Rocky Helmet).
+  , mrPowder :: !Bool
+  -- ^ @flags.powder@: @hitStepTryImmunity@ gives Grass types a natural immunity (battle-actions.ts 735) and Overcoat's
+  -- @onTryHit@ blocks it.
   , mrSideCondition :: !(Maybe Int)
   -- ^ @move.sideCondition@: @side.addSideCondition@ in @runMoveEffects@ (battle-actions.ts ~1300).
   , mrWeather :: !(Maybe Int)
   -- ^ @move.weather@: @field.setWeather@ in @runMoveEffects@.
   , mrTerrain :: !(Maybe Int)
-  -- ^ @move.terrain@: @field.setTerrain@ (phase 3d; not executable yet).
+  -- ^ @move.terrain@: @field.setTerrain@ in @runMoveEffects@.
   , mrPseudoWeather :: !(Maybe Int)
   -- ^ @move.pseudoWeather@: @field.addPseudoWeather@ in @runMoveEffects@.
   }
@@ -140,6 +143,7 @@ plainRule = MoveRule
   , mrDefrost = False
   , mrIgnoreImmunity = False
   , mrContact = False
+  , mrPowder = False
   , mrSideCondition = Nothing
   , mrWeather = Nothing
   , mrTerrain = Nothing
@@ -153,25 +157,25 @@ plainRule = MoveRule
 -- secondaries, thawing the target (@thawsTarget@) and the user (@defrost@). A status move: exactly one hit
 -- effect, a self-targeted heal, or a stat change or a status condition on its target, or a side condition (a
 -- hazard, on the foe's side or the user's) and nothing else. Nothing here inflicts sleep (the translation rejects
--- it), a status or flinch effect on the user is not executable, and nor are weather and terrain moves yet (phases
--- 3c and 3d). A pseudo-weather move (Trick Room) is a status move on @all@ with that and nothing else.
+-- it), and a status or flinch effect on the user is not executable. A pseudo-weather, weather or terrain move is a
+-- status move on @all@ with that and nothing else.
 executable :: MoveRule -> Bool
 executable r =
   (not (mrThawsTarget r) || mrDamaging r)
     && all boostOnly (mrSelf r) && all (\s -> all targetEffect (secTarget s) && all boostOnly (secSelf s)) (mrSecondaries r)
-    && mrTerrain r == Nothing
     && if mrDamaging r
       then null (mrOnHit r) && not (mrIgnoreImmunity r) && mrTarget r == TargetFoe && mrSideCondition r == Nothing
-        && mrPseudoWeather r == Nothing && mrWeather r == Nothing
+        && mrPseudoWeather r == Nothing && mrWeather r == Nothing && mrTerrain r == Nothing
       else mrHits r == OneHit && mrDrain r == Nothing && mrRecoil r == Nothing
         && null (mrSelf r) && null (mrSecondaries r)
-        && (case (mrOnHit r, mrTarget r, mrSideCondition r, mrPseudoWeather r, mrWeather r) of
-              ([EHeal _ _], TargetSelf, Nothing, Nothing, Nothing) -> True
-              ([EBoost _], t, Nothing, Nothing, Nothing) -> t == TargetFoe || t == TargetSelf
-              ([EStatus _], TargetFoe, Nothing, Nothing, Nothing) -> True
-              ([], t, Just _, Nothing, Nothing) -> t == TargetFoeSide || t == TargetAllySide
-              ([], TargetAll, Nothing, Just _, Nothing) -> True
-              ([], TargetAll, Nothing, Nothing, Just _) -> True
+        && (case (mrOnHit r, mrTarget r, mrSideCondition r, mrPseudoWeather r, mrWeather r, mrTerrain r) of
+              ([EHeal _ _], TargetSelf, Nothing, Nothing, Nothing, Nothing) -> True
+              ([EBoost _], t, Nothing, Nothing, Nothing, Nothing) -> t == TargetFoe || t == TargetSelf
+              ([EStatus _], TargetFoe, Nothing, Nothing, Nothing, Nothing) -> True
+              ([], t, Just _, Nothing, Nothing, Nothing) -> t == TargetFoeSide || t == TargetAllySide
+              ([], TargetAll, Nothing, Just _, Nothing, Nothing) -> True
+              ([], TargetAll, Nothing, Nothing, Just _, Nothing) -> True
+              ([], TargetAll, Nothing, Nothing, Nothing, Just _) -> True
               _ -> False)
   where
     boostOnly (EBoost _) = True
@@ -332,6 +336,7 @@ moveRule condOf (Object o) = do
     , mrDefrost = "defrost" `elem` flags
     , mrIgnoreImmunity = ignoreImm
     , mrContact = "contact" `elem` flags
+    , mrPowder = "powder" `elem` flags
     , mrSideCondition = sideCond
     , mrWeather = weather
     , mrTerrain = terrain
@@ -368,6 +373,7 @@ checkFlag :: T.Text -> Either Reason ()
 checkFlag f
   | f == "defrost" = Right () -- translated: 'mrDefrost'
   | f == "contact" = Right () -- translated: 'mrContact'
+  | f == "powder" = Right () -- translated: 'mrPowder'
   | Just _ <- lookup f inertFlags = Right ()
   | otherwise = Left ("not modelled: flag " <> f)
 

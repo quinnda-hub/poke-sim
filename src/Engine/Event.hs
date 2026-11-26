@@ -80,6 +80,13 @@ data EventId
   | EvImmunity
   -- ^ @runEvent('Immunity', pokemon, null, null, type)@ in @runStatusImmunity@; the relay value is the type or status key.
   | EvSetWeather
+  | EvTryHit
+  -- ^ @runEvent('TryHit', targets, pokemon, move)@ (battle-actions.ts @hitStepTryHitEvent@): step 1 of @trySpreadMoveHit@.
+  | EvSetStatus
+  -- ^ @runEvent('SetStatus', pokemon, source, effect, status)@ in @setStatus@; the relay value is the status id.
+  | EvTryAddVolatile
+  -- ^ @runEvent('TryAddVolatile', pokemon, source, effect, status)@ in @addVolatile@; the relay value is the volatile id.
+  | EvTerrainChange
   deriving (Eq, Show, Enum, Bounded)
 
 -- | How @runEvent@ orders the handlers of an event (battle.ts 797-803).
@@ -98,6 +105,7 @@ data SortKind
 eventSort :: EventId -> SortKind
 eventSort e = case e of
   EvDamagingHit -> LeftToRight
+  EvTryHit -> LeftToRight
   EvWeatherModifyDamage -> RedirectSort
   _ -> SpeedSort
 
@@ -116,6 +124,7 @@ eventPrefixed e = case e of
   EvUpdate -> False
   EvWeather -> False
   EvWeatherChange -> False
+  EvTerrainChange -> False
   _ -> True
 
 -- | The event's name in Showdown (@on<Name>@ is a handler).
@@ -150,6 +159,10 @@ eventName e = case e of
   EvWeatherModifyDamage -> "WeatherModifyDamage"
   EvImmunity -> "Immunity"
   EvSetWeather -> "SetWeather"
+  EvTryHit -> "TryHit"
+  EvSetStatus -> "SetStatus"
+  EvTryAddVolatile -> "TryAddVolatile"
+  EvTerrainChange -> "TerrainChange"
 
 -- | Which Pokemon a handler reacts to: the holder (@onX@), its allies (@onAllyX@), its foes (@onFoeX@), the
 -- source of the event (@onSourceX@) or anyone (@onAnyX@).
@@ -349,6 +362,26 @@ data NativeId
   | NDrizzle
   | NSandStream
   | NSnowWarning
+  | NTerrainDuration
+  -- ^ A terrain's @durationCallback@: 8 turns when the setter holds Terrain Extender, else 5.
+  | NElectricTerrainSetStatus
+  | NElectricTerrainTryAddVolatile
+  | NElectricTerrainPower
+  | NGrassyTerrainPower
+  | NGrassyTerrainHeal
+  | NMistyTerrainSetStatus
+  | NMistyTerrainTryAddVolatile
+  | NMistyTerrainPower
+  | NPsychicTerrainTryHit
+  | NPsychicTerrainPower
+  | NOvercoatImmunity
+  | NOvercoatTryHit
+  | NLeafGuardSetStatus
+  | NLeafGuardTryAddVolatile
+  | NElectricSurge
+  | NGrassySurge
+  | NPsychicSurge
+  | NMistySurge
   deriving (Eq, Show)
 
 -- | The body of each handler the engine implements (written by hand: Showdown's handlers are code). A condition

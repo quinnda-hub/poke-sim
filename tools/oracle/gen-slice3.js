@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 // Generates random battles for "slice 3" (field state: 3a entry hazards, 3b screens, Tailwind and Trick Room, 3c
-// weather) and records each on Showdown.
+// weather, 3d terrain) and records each on Showdown.
 //
 // Slice 3a adds side conditions (Stealth Rock, Spikes, Toxic Spikes, Sticky Web), Heavy-Duty Boots and Toxic Debris,
 // and with them the effect order (`battle.effectOrder`) that sorts two hazards on one side. Slice 3b adds durations:
@@ -15,6 +15,11 @@
 //     Drizzle, Sand Stream, Snow Warning, or Swift Swim, Chlorophyll, Sand Rush, Slush Rush, Hydration) and a rock;
 //     Rock, Ground and Steel types meet the sand; in a mirror match the lead is often a weather setter, so the two
 //     leads tie on speed and both set weather at the turn-0 switch-in;
+//   - a share get a terrain move (Electric, Grassy, Misty, Psychic Terrain), a terrain ability (the surges), Terrain
+//     Extender, Overcoat or Leaf Guard, and a priority move, a powder move, Earthquake or Bulldoze; Flying types (not
+//     grounded), Grass types (powder immune, Grassy Terrain) and Dragon types (Misty Terrain) meet them; in a mirror
+//     match the lead is a terrain or weather setter, so the two leads tie on speed and both set a field condition at
+//     the turn-0 switch-in;
 //   - a share get a paralysing move (Tailwind and Trick Room against paralysed Pokemon), and in a mirror match the
 //     two sides tie on speed, under Trick Room too;
 //   - a share are Flying types (not grounded: the hazards skip them), Poison types (a grounded one absorbs Toxic
@@ -64,6 +69,11 @@ const SCREENS = ['reflect', 'lightscreen'];
 const WEATHER_MOVES = ['sunnyday', 'raindance', 'sandstorm', 'snowscape'];
 const WEATHER_SETTERS = ['drought', 'drizzle', 'sandstream', 'snowwarning'];
 const WEATHER_SPEED = ['swiftswim', 'chlorophyll', 'sandrush', 'slushrush'];
+const TERRAIN_MOVES = ['electricterrain', 'grassyterrain', 'mistyterrain', 'psychicterrain'];
+const TERRAIN_SETTERS = ['electricsurge', 'grassysurge', 'mistysurge', 'psychicsurge'];
+const TERRAINS = ['electricterrain', 'grassyterrain', 'mistyterrain', 'psychicterrain'];
+const POWDER_MOVES = ['stunspore', 'poisonpowder', 'cottonspore'];
+const GROUND_MOVES = ['earthquake', 'bulldoze'];
 const ROCKS = ['heatrock', 'damprock', 'smoothrock', 'icyrock'];
 const WEATHERS = ['sunnyday', 'raindance', 'sandstorm', 'snowscape'];
 const PARALYSERS = ['thunderwave', 'glare', 'stunspore', 'nuzzle'];
@@ -80,15 +90,22 @@ function assign(scenario, pool, seed) {
 	const bySpeciesType = (t) => pool.species.filter(id => dex.species.get(id).types.includes(t));
 	const flying = bySpeciesType('Flying'), poison = bySpeciesType('Poison'), steel = bySpeciesType('Steel');
 	const rock = bySpeciesType('Rock'), ground = bySpeciesType('Ground'), ice = bySpeciesType('Ice');
+	const grass = bySpeciesType('Grass'), dragon = bySpeciesType('Dragon'), electric = bySpeciesType('Electric');
+	const terrainMoves = TERRAIN_MOVES.filter(id => pool.moves.includes(id));
+	if (terrainMoves.length === 0) throw new Error('the pool has no terrain move');
+	const powderMoves = POWDER_MOVES.filter(id => pool.moves.includes(id));
+	const groundMoves = GROUND_MOVES.filter(id => pool.moves.includes(id));
+	const priorityMoves = pool.moves.filter(id => dex.moves.get(id).priority > 0);
 	const weatherMoves = WEATHER_MOVES.filter(id => pool.moves.includes(id));
 	if (weatherMoves.length === 0) throw new Error('the pool has no weather move');
 	const abilities = pool.abilities.filter(id => id !== 'noability');
 	const items = pool.items.filter(id => id !== '');
 	const weightedAbilities = abilities.concat(abilities.filter(id => id === 'toxicdebris').flatMap(id => [id, id, id, id, id]))
-		.concat(abilities.filter(id => WEATHER_SETTERS.includes(id) || WEATHER_SPEED.includes(id) || id === 'hydration').flatMap(id => [id, id, id]));
+		.concat(abilities.filter(id => WEATHER_SETTERS.includes(id) || WEATHER_SPEED.includes(id) || id === 'hydration' ||
+			TERRAIN_SETTERS.includes(id) || id === 'overcoat' || id === 'leafguard').flatMap(id => [id, id, id]));
 	const weightedItems = items.concat(items.filter(id => id === 'heavydutyboots' || id === 'lightclay').flatMap(id => [id, id, id, id]))
-		.concat(items.filter(id => ROCKS.includes(id)).flatMap(id => [id, id, id]));
-	const setterAbilities = abilities.filter(id => WEATHER_SETTERS.includes(id));
+		.concat(items.filter(id => ROCKS.includes(id) || id === 'terrainextender').flatMap(id => [id, id, id]));
+	const setterAbilities = abilities.filter(id => WEATHER_SETTERS.includes(id) || TERRAIN_SETTERS.includes(id));
 	const mirror = JSON.stringify(scenario.teams[0]) === JSON.stringify(scenario.teams[1]);
 	const set = (s) => {
 		// species
@@ -100,6 +117,9 @@ function assign(scenario, pool, seed) {
 		else if (k < 58 && rock.length) s.species = dex.species.get(pick(rock)).name;
 		else if (k < 66 && ground.length) s.species = dex.species.get(pick(ground)).name;
 		else if (k < 70 && ice.length) s.species = dex.species.get(pick(ice)).name;
+		else if (k < 79 && grass.length) s.species = dex.species.get(pick(grass)).name;
+		else if (k < 85 && dragon.length) s.species = dex.species.get(pick(dragon)).name;
+		else if (k < 89 && electric.length) s.species = dex.species.get(pick(electric)).name;
 		// level: small Pokemon have little HP
 		if (int(100) < 14) s.level = 1 + int(20);
 		// hazard setters: one in two Pokemon has one, a quarter have two
@@ -112,12 +132,17 @@ function assign(scenario, pool, seed) {
 		// weather moves: a third of the Pokemon have one, a quarter of those two
 		const nWeather = int(100) < 34 ? (int(4) === 0 ? 2 : 1) : 0;
 		for (let i = 0; i < nWeather && slots.length; i++) s.moves[slots.splice(int(slots.length), 1)[0]] = pick(weatherMoves);
+		// terrain moves: a third of the Pokemon have one
+		const nTerrain = int(100) < 34 ? (int(4) === 0 ? 2 : 1) : 0;
+		for (let i = 0; i < nTerrain && slots.length; i++) s.moves[slots.splice(int(slots.length), 1)[0]] = pick(terrainMoves);
+		// a priority move, a powder move, a Ground move that Grassy Terrain halves
+		if (priorityMoves.length && slots.length && int(100) < 28) s.moves[slots.splice(int(slots.length), 1)[0]] = pick(priorityMoves);
+		if (powderMoves.length && slots.length && int(100) < 18) s.moves[slots.splice(int(slots.length), 1)[0]] = pick(powderMoves);
+		if (groundMoves.length && slots.length && int(100) < 16) s.moves[slots.splice(int(slots.length), 1)[0]] = pick(groundMoves);
 		// a paralysing move
 		if (paralysers.length && slots.length && int(100) < 22) s.moves[slots.splice(int(slots.length), 1)[0]] = pick(paralysers);
 		s.moves = [...new Set(s.moves)];
-		while (s.moves.length < 4) s.moves.push(pick(pool.moves));
-		s.moves = [...new Set(s.moves)];
-		while (s.moves.length < 4) s.moves.push(pick(pool.moves));
+		while (s.moves.length < 4) { const m = pick(pool.moves); if (!s.moves.includes(m)) s.moves.push(m); }
 		const ab = int(100) < 25 ? 'noability' : pick(weightedAbilities);
 		const it = int(100) < 20 ? '' : pick(weightedItems);
 		s.ability = ab === 'noability' ? 'No Ability' : dex.abilities.get(ab).name;
@@ -178,6 +203,21 @@ function newTally() {
 		weatherSpeedWithTailwind: 0, weatherSpeedUnderTrickRoom: 0,
 		hydrationCure: 0, hydrationRainNoStatus: 0, hydrationStatusNoRain: 0,
 		weatherEventSpeedTie: 0, weatherChangeSpeedTie: 0,
+		terrainSetByMove: { electricterrain: 0, grassyterrain: 0, mistyterrain: 0, psychicterrain: 0 },
+		terrainSetByAbility: { electricterrain: 0, grassyterrain: 0, mistyterrain: 0, psychicterrain: 0 },
+		terrainReplaced: 0, terrainRefused: 0,
+		terrainExpired: { electricterrain: 0, grassyterrain: 0, mistyterrain: 0, psychicterrain: 0 }, terrainSetAfterExpiry: 0,
+		terrainExtender8: { electricterrain: 0, grassyterrain: 0, mistyterrain: 0, psychicterrain: 0 },
+		terrainNoExtender5: { electricterrain: 0, grassyterrain: 0, mistyterrain: 0, psychicterrain: 0 },
+		leadSurgesBothSet: 0, leadSurgesTieOnSpeed: 0, leadWeatherAndTerrainSetters: 0,
+		terrainChangeSpeedTie: 0, terrainAndWeatherResidual: 0,
+		electricBoost: 0, electricUngroundedUnboosted: 0,
+		grassyBoost: 0, grassyEarthquakeHalved: 0, grassyBulldozeHalved: 0, grassyHeal: 0, grassyHealFullHp: 0,
+		grassyHealSkippedUngrounded: 0, grassyHealOnStatusedMon: 0,
+		mistyStatusBlocked: 0, mistyStatusAllowedUngrounded: 0, mistyDragonHalved: 0,
+		psychicBlocksPriority: 0, psychicPriorityAllowedUngrounded: 0, psychicNonPriorityAllowed: 0, psychicBoost: 0,
+		overcoatPowderBlocked: 0, overcoatSandImmune: 0, grassTypePowderImmune: 0, powderMoveHit: 0,
+		leafGuardBlocksStatus: 0, leafGuardStatusAllowedNoSun: 0, statusUnderSunWithoutLeafGuard: 0,
 	};
 }
 
@@ -362,6 +402,7 @@ function install() {
 	};
 
 	installWeather(t);
+	installTerrain(t);
 
 	// speed ties among the Pokemon in play when they switch in (runSwitch's speedSort of getAllActive)
 	const speedSort = Battle.prototype.speedSort;
@@ -445,6 +486,7 @@ function installWeather(t) {
 			if (hp > 0) {
 				if (holder.hp < hp) { c.sandChip++; if (holder.hp === 0) c.sandKO++; }
 				else if (holder.ability === 'sandrush') c.sandRushImmune++;
+				else if (holder.ability === 'overcoat') c.overcoatSandImmune++;
 				else if (types.includes('Rock')) c.sandImmuneRock++;
 				else if (types.includes('Ground')) c.sandImmuneGround++;
 				else if (types.includes('Steel')) c.sandImmuneSteel++;
@@ -518,6 +560,121 @@ function installWeather(t) {
 	};
 }
 
+// The terrain observations (3d): all observation only.
+function installTerrain(t) {
+	const tmap = new WeakMap(); // per battle: has a terrain expired
+	const Field = new Battle({ formatid: 'gen9ou' }).field.constructor;
+	const setTerrain = Field.prototype.setTerrain;
+	Field.prototype.setTerrain = function (status, source, sourceEffect) {
+		const c = t();
+		if (!c) return setTerrain.call(this, status, source, sourceEffect);
+		const id = typeof status === 'string' ? status.toLowerCase().replace(/[^a-z0-9]/g, '') : status.id;
+		const prev = this.terrain;
+		const eff = sourceEffect || this.battle.effect;
+		const byAbility = !!eff && eff.effectType === 'Ability';
+		const r = setTerrain.call(this, status, source, sourceEffect);
+		if (prev === id && r === false) c.terrainRefused++;
+		else if (r === true && TERRAINS.includes(id)) {
+			(byAbility ? c.terrainSetByAbility : c.terrainSetByMove)[id]++;
+			if (prev && prev !== id) c.terrainReplaced++;
+			if (!prev && tmap.get(this.battle)) c.terrainSetAfterExpiry++;
+			if (this.terrainState.duration === 8) c.terrainExtender8[id]++; else if (this.terrainState.duration === 5) c.terrainNoExtender5[id]++;
+		}
+		return r;
+	};
+
+	const singleEvent = Battle.prototype.singleEvent;
+	Battle.prototype.singleEvent = function (eventid, effect, state, target, ...rest) {
+		const c = t();
+		if (c && effect && eventid === 'FieldEnd' && TERRAINS.includes(effect.id)) { c.terrainExpired[effect.id]++; tmap.set(this, true); }
+		if (c && effect && eventid === 'Residual' && effect.id === 'grassyterrain' && target && target.hp !== undefined) {
+			const hp = target.hp, status = target.status, flies = target.types.includes('Flying');
+			const r = singleEvent.call(this, eventid, effect, state, target, ...rest);
+			if (hp > 0) {
+				if (target.hp > hp) { c.grassyHeal++; if (status === 'psn' || status === 'tox' || status === 'brn') c.grassyHealOnStatusedMon++; }
+				else if (flies) c.grassyHealSkippedUngrounded++;
+				else c.grassyHealFullHp++;
+			}
+			return r;
+		}
+		return singleEvent.call(this, eventid, effect, state, target, ...rest);
+	};
+
+	const runEvent = Battle.prototype.runEvent;
+	Battle.prototype.runEvent = function (eventid, target, source, ...rest) {
+		const c = t();
+		const holder = Array.isArray(target) ? target[0] : target;
+		if (!c || !holder || holder.hp === undefined) return runEvent.call(this, eventid, target, source, ...rest);
+		const terrain = this.field.terrain, w = this.field.weather;
+		if (eventid === 'BasePower' && typeof rest[1] === 'number' && source && rest[0]) {
+			// the attacker is the target and the defender the source
+			const r = runEvent.call(this, eventid, target, source, ...rest);
+			const move = rest[0], type = move.type;
+			const attackerFlies = holder.types.includes('Flying'), defenderFlies = source.types.includes('Flying');
+			if (terrain === 'electricterrain' && type === 'Electric') { if (attackerFlies) c.electricUngroundedUnboosted++; else if (r > rest[1]) c.electricBoost++; }
+			if (terrain === 'psychicterrain' && type === 'Psychic' && !attackerFlies && r > rest[1]) c.psychicBoost++;
+			if (terrain === 'grassyterrain') {
+				if (move.id === 'earthquake' && !defenderFlies && r < rest[1]) c.grassyEarthquakeHalved++;
+				else if (move.id === 'bulldoze' && !defenderFlies && r < rest[1]) c.grassyBulldozeHalved++;
+				else if (type === 'Grass' && !attackerFlies && r > rest[1]) c.grassyBoost++;
+			}
+			if (terrain === 'mistyterrain' && type === 'Dragon' && !defenderFlies && r < rest[1]) c.mistyDragonHalved++;
+			return r;
+		}
+		if (eventid === 'TryHit' && Array.isArray(target) && source && rest[0]) {
+			const move = rest[0];
+			const r = runEvent.call(this, eventid, target, source, ...rest);
+			const blocked = !r[0] || r[0] === null;
+			if (terrain === 'psychicterrain' && move.priority > 0 && holder !== source) {
+				if (blocked) c.psychicBlocksPriority++; else if (holder.types.includes('Flying')) c.psychicPriorityAllowedUngrounded++;
+			} else if (terrain === 'psychicterrain' && move.priority <= 0 && !blocked) c.psychicNonPriorityAllowed++;
+			if (move.flags.powder && holder !== source) {
+				if (holder.ability === 'overcoat' && blocked) c.overcoatPowderBlocked++;
+				else if (holder.types.includes('Grass')) c.grassTypePowderImmune++;
+				else if (!blocked) c.powderMoveHit++;
+			}
+			return r;
+		}
+		if (eventid === 'SetStatus') {
+			const r = runEvent.call(this, eventid, target, source, ...rest);
+			const flies = holder.types.includes('Flying');
+			if (terrain === 'mistyterrain') { if (!r && !flies) c.mistyStatusBlocked++; else if (r && flies) c.mistyStatusAllowedUngrounded++; }
+			if (w === 'sunnyday') {
+				if (holder.ability === 'leafguard') { if (!r) c.leafGuardBlocksStatus++; }
+				else if (r) c.statusUnderSunWithoutLeafGuard++;
+			} else if (holder.ability === 'leafguard' && r) c.leafGuardStatusAllowedNoSun++;
+			return r;
+		}
+		return runEvent.call(this, eventid, target, source, ...rest);
+	};
+
+	const eachEvent = Battle.prototype.eachEvent;
+	Battle.prototype.eachEvent = function (eventid, ...rest) {
+		const c = t();
+		if (c && eventid === 'TerrainChange') {
+			const a = this.getAllActive();
+			if (a.length === 2 && a[0].speed === a[1].speed) c.terrainChangeSpeedTie++;
+		}
+		return eachEvent.call(this, eventid, ...rest);
+	};
+
+	// weather and terrain in place together at the Residual event
+	const fieldEvent = Battle.prototype.fieldEvent;
+	Battle.prototype.fieldEvent = function (eventid, targets, ...rest) {
+		const c = t();
+		if (c && eventid === 'Residual' && this.field.weather && this.field.terrain) c.terrainAndWeatherResidual++;
+		if (c && eventid === 'SwitchIn' && targets && targets.length === 2) {
+			const surge = p => TERRAIN_SETTERS.includes(p.ability), weather = p => WEATHER_SETTERS.includes(p.ability);
+			if (targets.every(surge)) {
+				c.leadSurgesBothSet++;
+				if (targets[0].speed === targets[1].speed) c.leadSurgesTieOnSpeed++;
+			}
+			if (targets.some(surge) && targets.some(weather)) c.leadWeatherAndTerrainSetters++;
+		}
+		return fieldEvent.call(this, eventid, targets, ...rest);
+	};
+}
+
 if (require.main === module) {
 	const [outDir, countArg, poolFile, firstArg] = process.argv.slice(2);
 	if (!outDir || !countArg || !poolFile) {
@@ -540,17 +697,19 @@ if (require.main === module) {
 	const tally = newTally();
 	activeTally = tally;
 	install();
-	let turns = 0, draws = 0, truncated = 0;
+	let turns = 0, draws = 0, truncated = 0, written = 0;
 	for (let seed = first; seed < first + count; seed++) {
 		const scenario = assign(makeScenario(seed, 'gen9ou', pool), pool, seed);
 		const trace = record(scenario);
 		turns += trace.final.turn;
 		draws += trace.steps.reduce((n, s) => n + s.draws.length, 0) + trace.finalDraws.length;
+		// a battle cut off at the turn limit is still a trace: the parity test checks it up to the cut
 		if (trace.truncated) truncated++;
 		fs.writeFileSync(path.join(outDir, `slice3-${seed}.json`), JSON.stringify(trace));
+		written++;
 	}
-	console.error(`${count} slice3 battles, ${pool.moves.length} moves, ${pool.species.length} species, ` +
-		`${pool.abilities.length} abilities, ${pool.items.length} items, ${turns} turns, ${draws} draws, ${truncated} truncated`);
+	console.error(`${count} slice3 seeds, ${written} traces written, ${truncated} truncated at the turn limit, ${pool.moves.length} moves, ${pool.species.length} species, ` +
+		`${pool.abilities.length} abilities, ${pool.items.length} items, ${turns} turns, ${draws} draws`);
 	console.error('tally (from Showdown\'s own events):');
 	for (const [k, v] of Object.entries(tally)) console.error(`  ${k}: ${JSON.stringify(v)}`);
 }

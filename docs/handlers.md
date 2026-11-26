@@ -429,7 +429,13 @@ the traces that make its mechanics happen.
    - The four terrains, their setter moves, the surge abilities and Terrain
      Extender;
    - grounding, the status and volatile blocks, Psychic Terrain's `TryHit`,
-     Grassy Terrain's heal and base power.
+     Grassy Terrain's heal and base power;
+   - Overcoat and Leaf Guard, which need the `TryHit`, `SetStatus` and
+     `TryAddVolatile` event points that the terrains add.
+   - Unverified until a source exists: Electric Terrain's sleep block and the
+     yawn and confusion blocks are implemented, but no accepted move sets sleep,
+     yawn or confusion, so no trace reaches them. A slice that accepts one
+     must record it against these terrains.
 5. **3e: weather- and terrain-driven boosts.**
    - Protosynthesis, Quark Drive, Booster Energy and the seeds;
    - `WeatherChange` and `TerrainChange`, `End`, and item use.

@@ -452,10 +452,21 @@ useMove fmt dx user target mv = case mrTarget rule of
     -- getMoveTargets (battle-actions.ts ~842-859, pokemon.ts getMoveTargets): a fainted target leaves no
     -- targets, so the move fails before any draw. getRandomTarget in singles returns foe.active[0] even when
     -- it has fainted; the spread targets (allAdjacentFoes, allAdjacent) use side.foes(), which skips it.
-    unless (monFainted tm) $
+    unless (monFainted tm) $ do
+     -- hitStepTryHitEvent (battle-actions.ts 709, step 1 of trySpreadMoveHit): runEvent('TryHit', targets, pokemon, move);
+     -- a falsy result removes the target and the move fails before any draw (Psychic Terrain, Overcoat). It is sorted
+     -- left to right (never a draw). Self-targeted moves skip it here: no handler acts on one (Psychic Terrain returns
+     -- for `effect.target === 'self'`, Overcoat for `target === source`).
+     -- LATENT: the Invulnerability event (step 0), the Try and PrepareHit events of the move and runEvent('PrepareHit')
+     -- of the hit steps have no handler.
+     tryHit <- relayTruthy <$> runEvent dx EvTryHit target (Just user) (Just mv) RNone
+     when tryHit $
       -- hitStepTypeImmunity (before accuracy: an immune target consumes no draws); a move with
       -- ignoreImmunity (every status move but a few) skips it
-      unless (not (mrIgnoreImmunity rule) && isImmune dx (mvType mv) tm) $ do
+      unless (not (mrIgnoreImmunity rule) && isImmune dx (mvType mv) tm) $
+       -- hitStepTryImmunity (battle-actions.ts 735): `gen >= 6 && move.flags['powder'] && target !== pokemon &&
+       -- !this.dex.getImmunity('powder', target)`: Grass types are immune to a powder move (no draw)
+       unless (mrPowder rule && typeImmuneTo dx "powder" tm) $ do
         -- hitStepAccuracy
         hits <- if mvAccuracy mv == neverMisses || (isToxic && hasTypeNamed dx "Poison" um) then pure True
           else randomChance (stagedAccuracy fmt (mvAccuracy mv) (monBoosts um) (monBoosts tm)) 100
@@ -497,7 +508,6 @@ sideMove dx user target mv = do
 -- the damage is @undefined@ (basePower 0), so only the effect on the target's side runs.
 -- The @TryHitSide@ and @TryHitField@ callbacks of the move itself (@onTryHitSide@, ...) are not supported.
 -- A failed effect (the condition is already there and cannot restart) fails the move; nothing else follows.
--- LATENT: @terrain@ (@field.setTerrain@) is not run: no terrain move is executable yet (phase 3d).
 {-# INLINABLE moveHitSide #-}
 moveHitSide :: MonadChance m => Dex -> Actor -> Actor -> MoveData -> Eng m ()
 moveHitSide dx user (Actor tp _) mv = do
@@ -507,6 +517,8 @@ moveHitSide dx user (Actor tp _) mv = do
   forM_ (mrPseudoWeather rule) $ \ci -> void (addPseudoWeather dx ci user)
   -- `this.battle.field.setWeather(moveData.weather, source, move)`
   forM_ (mrWeather rule) $ \ci -> void (setWeather dx ci user False)
+  -- `this.battle.field.setTerrain(moveData.terrain, source, move)`
+  forM_ (mrTerrain rule) $ \ci -> void (setTerrain dx ci user)
   where
     rule = mvRule mv
 

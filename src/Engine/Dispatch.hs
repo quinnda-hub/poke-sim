@@ -23,6 +23,7 @@ module Engine.Dispatch
   , removeSideCondition
   , addPseudoWeather
   , setWeather
+  , setTerrain
   , runStatusImmunity
   , effectiveWeather
   , boostMon
@@ -46,7 +47,7 @@ import qualified Data.Vector.Strict as SV
 import qualified Data.Vector.Unboxed as U
 
 import Engine.Chance
-import Engine.Damage (hasItemNamed, hasTypeNamed, isGrounded, statusKey, typeIdNamed, typeImmuneTo, typeIsNamed, typeMod)
+import Engine.Damage (hasItemNamed, hasTypeNamed, isGrounded, isSemiInvulnerable, statusKey, typeIdNamed, typeImmuneTo, typeIsNamed, typeMod)
 import Engine.Dex
 import Engine.Event
 import Engine.Modifier (baseMod, chainModify, modify)
@@ -139,22 +140,30 @@ clearStatus m = m {monStatus = StatusNone, monStatusState = noEffectState}
 cureStatus :: Actor -> Battle -> Battle
 cureStatus a = modifyMon a (\x -> if monHp x > 0 && monStatus x /= StatusNone then clearStatus x else x)
 
--- | @pokemon.addVolatile(id)@ (pokemon.ts) of a condition with no @onRestart@, @TryAddVolatile@ handler or
--- immunity: needs HP (no @affectsFainted@) and fails when the volatile is already there; the state gets the
--- condition's duration; the @Start@ event runs (and, returning false, cancels it).
+-- | @pokemon.addVolatile(id)@ (pokemon.ts 1995-2040) of a condition with no @onRestart@: needs HP (no @affectsFainted@)
+-- and fails when the volatile is already there. Then @runStatusImmunity(id)@ (no type is immune to a volatile, but
+-- the @Immunity@ event runs, and Showdown asks it first) and @runEvent('TryAddVolatile', pokemon, source, effect,
+-- status)@ (Misty Terrain's confusion block, Electric Terrain's and Leaf Guard's yawn block; a secondary's volatile
+-- reaches it too), either falsy failing it. The state gets the condition's duration; the @Start@ event runs (and,
+-- returning false, cancels it).
 addVolatile :: MonadChance m => Dex -> Actor -> CondId -> Eng m Bool
 addVolatile dx a c = do
   m <- gets (`monOf` a)
   if monHp m <= 0 || isJust (effectState m key)
     then pure False
     else do
-      -- this.volatiles[status.id] = this.battle.initEffectState({ id, name, target: this }) (pokemon.ts 2021)
-      order <- stateOrderFor a
-      modify' (modifyMon a (\x -> x {monVolatiles = SV.snoc (monVolatiles x) (Volatile (fromEnum c) noEffectState {esOrder = order, esDuration = cnDuration (conditionOf dx c)})}))
-      r <- singleEvent dx EvStart key (OwnMon a) Nothing Nothing RNone
-      if relayTruthy r
-        then pure True
-        else modify' (modifyMon a (removeVolatile (fromEnum c))) >> pure False
+      immune <- runStatusImmunity dx a (condName c)
+      allowed <- if immune then relayTruthy <$> runEvent dx EvTryAddVolatile a Nothing Nothing (RText (condName c)) else pure False
+      if not allowed
+        then pure False
+        else do
+          -- this.volatiles[status.id] = this.battle.initEffectState({ id, name, target: this }) (pokemon.ts 2021)
+          order <- stateOrderFor a
+          modify' (modifyMon a (\x -> x {monVolatiles = SV.snoc (monVolatiles x) (Volatile (fromEnum c) noEffectState {esOrder = order, esDuration = cnDuration (conditionOf dx c)})}))
+          r <- singleEvent dx EvStart key (OwnMon a) Nothing Nothing RNone
+          if relayTruthy r
+            then pure True
+            else modify' (modifyMon a (removeVolatile (fromEnum c))) >> pure False
   where
     key = EffectKey EffVolatile (fromEnum c)
 
@@ -169,9 +178,12 @@ trySetStatus dx a st = do
       has = monStatus m `elem` [StatusBrn, StatusPar, StatusPsn, StatusTox, StatusFrz]
   -- setStatus: `this.runStatusImmunity(status.id === 'tox' ? 'psn' : status.id)`: the type table, then the Immunity event
   -- (Sunny Day's frz, Sand Rush's sandstorm), which only runs when the type does not already block it
-  ok <- if monHp m <= 0 || not (monActive m) || has || typeImmuneTo dx (statusKey st) m
+  ok0 <- if monHp m <= 0 || not (monActive m) || has || typeImmuneTo dx (statusKey st) m
     then pure False
     else runStatusImmunity dx a (statusKey st)
+  -- `runEvent('SetStatus', this, source, sourceEffect, status)`: a falsy result fails (Misty Terrain, Leaf Guard, Electric
+  -- Terrain's sleep). It runs before the state is created, and `AfterSetStatus` (no handler) after it.
+  ok <- if ok0 then relayTruthy <$> runEvent dx EvSetStatus a Nothing Nothing (RText (statusId st)) else pure False
   if not ok
     then pure False
     else do
@@ -182,6 +194,12 @@ trySetStatus dx a st = do
       -- singleEvent('Start', status, statusState, this, source, sourceEffect): toxic's onStart sets the stage to 0
       relayTruthy <$> singleEvent dx EvStart (EffectKey EffStatus (fromEnum (condOf st))) (OwnMon a) Nothing Nothing RNone
   where
+    statusId s = case s of
+      Brn -> "brn"
+      Par -> "par"
+      Psn -> "psn"
+      Tox -> "tox"
+      Frz -> "frz"
     monStatusOf s = case s of
       Brn -> StatusBrn
       Par -> StatusPar
@@ -318,6 +336,38 @@ removePseudoWeather dx key@(EffectKey _ i) = do
     Just _ -> do
       void (singleEvent dx EvEnd key OwnField Nothing Nothing RNone)
       modify' (\bb -> bb {bField = (bField bb) {fPseudo = SV.filter (\(CondEntry j _) -> j /= i) (fPseudo (bField bb))}})
+
+-- | @field.setTerrain(status, source, sourceEffect)@ (field.ts 130-165) by a source Pokemon: the same terrain already in
+-- place fails (any source); the state is created with no target (no @effectOrder@) and the condition's duration, then
+-- the @durationCallback@ (Terrain Extender); @FieldStart@ runs and a falsy result restores the previous terrain.
+-- @eachEvent('TerrainChange')@ follows (no handler until phase 3e, but it sorts). There is no @SetTerrain@ event.
+setTerrain :: MonadChance m => Dex -> Int -> Actor -> Eng m Bool
+setTerrain dx ci source = do
+  b <- get
+  let f = bField b
+      key = EffectKey EffTerrain ci
+  if fTerrain f == ci
+    then pure False
+    else do
+      modify' (\bb -> bb {bField = (bField bb) {fTerrain = ci, fTerrainState = noEffectState {esDuration = maybe 0 cnDuration (effectOf dx key)}}})
+      setDurationFromCallback dx key OwnField source
+      started <- singleEvent dx EvStart key OwnField (Just source) Nothing RNone
+      if relayTruthy started
+        then eachEvent dx EvTerrainChange >> pure True
+        else do
+          modify' (\bb -> bb {bField = (bField bb) {fTerrain = fTerrain f, fTerrainState = fTerrainState f}})
+          pure False
+
+-- | @field.clearTerrain@ (field.ts 167): like 'clearWeather', whatever terrain is in place ends, its state is reset
+-- keeping its target, and @eachEvent('TerrainChange')@ runs.
+clearTerrain :: MonadChance m => Dex -> Eng m ()
+clearTerrain dx = do
+  b <- get
+  let f = bField b
+  when (fTerrain f /= noCond) $ do
+    void (singleEvent dx EvEnd (EffectKey EffTerrain (fTerrain f)) OwnField Nothing Nothing RNone)
+    modify' (\bb -> bb {bField = (bField bb) {fTerrain = noCond, fTerrainState = noEffectState {esHasTarget = esHasTarget (fTerrainState (bField bb))}}})
+    eachEvent dx EvTerrainChange
 
 -- | @field.clearWeather@ (field.ts 90): it ignores which weather asked for it (the residual @end@ is called with the
 -- holder and the effect id, but @clearWeather@ takes no argument): whatever weather is in place ends
@@ -814,6 +864,7 @@ fieldEvent dx ev targets = do
       (OwnMon holder, EffectKey EffVolatile i) -> modify' (modifyMon holder (\x -> if monHp x > 0 then removeVolatile i x else x))
       (OwnSide p, EffectKey EffSideCond i) -> removeSideCondition dx p i
       (OwnField, EffectKey EffWeather _) -> clearWeather dx
+      (OwnField, EffectKey EffTerrain _) -> clearTerrain dx
       (OwnField, _) -> removePseudoWeather dx key
       _ -> pure () -- abilities and items have no duration, so never end here
 
@@ -846,6 +897,9 @@ runNative dx n c relay = do
   m <- gets (`monOf` holder)
   fmt <- gets bFormat
   let boots = hasItemNamed dx "heavydutyboots" m
+      -- `isGrounded() && !isSemiInvulnerable()` of the holder (the event's target: the Pokemon being hit or statused, or
+      -- the attacker of a BasePower event)
+      groundedHolder = isGrounded dx m && not (isSemiInvulnerable m)
   case n of
     -- brn, par, psn, frz onStart: `this.add('-status', ...)` only
     NLogOnly -> keep
@@ -1071,6 +1125,75 @@ runNative dx n c relay = do
       let rainy = [i | k <- ["raindance", "primordialsea" :: T.Text], Just i <- [M.lookup k (dxFieldIx dx)]]
       when (monStatus m /= StatusNone && maybe False (`elem` rainy) (effectiveWeatherOf b holder)) (modify' (cureStatus holder))
       keep
+    -- electricterrain, grassyterrain, mistyterrain, psychicterrain durationCallback(source, effect): `source?.hasItem(
+    -- 'terrainextender')` -> 8, else 5
+    NTerrainDuration -> do
+      b <- get
+      duration (if maybe False (hasItemNamed dx "terrainextender" . monOf b) (cSource c) then 8 else 5)
+    -- electricterrain.onSetStatus(status, target, source, effect): `status.id === 'slp' && target.isGrounded() &&
+    -- !target.isSemiInvulnerable()` -> false (no supported move or ability inflicts sleep)
+    NElectricTerrainSetStatus -> if relay == RText "slp" && groundedHolder then returning stop else keep
+    -- electricterrain.onTryAddVolatile(status, target): a grounded target is protected from yawn (return null)
+    NElectricTerrainTryAddVolatile -> if relay == RText "yawn" && groundedHolder then returning stop else keep
+    -- electricterrain.onBasePower(basePower, attacker, defender, move): an Electric move by a grounded attacker,
+    -- chainModify([5325, 4096]); the event's target is the attacker
+    NElectricTerrainPower -> moveTypePower "Electric" groundedHolder (5325, 4096)
+    -- grassyterrain.onBasePower: earthquake, bulldoze and magnitude against a grounded defender (the event's source),
+    -- chainModify(0.5) and return; else a Grass move by a grounded attacker, chainModify([5325, 4096])
+    NGrassyTerrainPower -> do
+      b <- get
+      case (cMove c, cSource c) of
+        (Just mv, Just def)
+          | mvId mv `elem` ["earthquake", "bulldoze", "magnitude"], isGrounded dx (monOf b def), not (isSemiInvulnerable (monOf b def)) -> chained (1, 2)
+        _ -> moveTypePower "Grass" (isGrounded dx m) (5325, 4096)
+    -- grassyterrain.onResidual(pokemon): a grounded, not semi-invulnerable Pokemon heals baseMaxhp / 16 (this.heal: at
+    -- least 1)
+    NGrassyTerrainHeal -> do
+      when groundedHolder (modify' (healMon holder (max 1 (monMaxHp m `quot` 16))))
+      keep
+    -- mistyterrain.onSetStatus(status, target, source, effect): a grounded target takes no status (return false)
+    NMistyTerrainSetStatus -> if groundedHolder then returning stop else keep
+    -- mistyterrain.onTryAddVolatile(status, target, source, effect): a grounded target takes no confusion (return null)
+    NMistyTerrainTryAddVolatile -> if relay == RText "confusion" && groundedHolder then returning stop else keep
+    -- mistyterrain.onBasePower: a Dragon move against a grounded defender, chainModify(0.5)
+    NMistyTerrainPower -> do
+      b <- get
+      case (cMove c, cSource c) of
+        (Just mv, Just def)
+          | typeIsNamed dx (mvType mv) "Dragon", isGrounded dx (monOf b def), not (isSemiInvulnerable (monOf b def)) -> chained (1, 2)
+        _ -> keep
+    -- psychicterrain.onTryHit(target, source, effect): `effect.priority <= 0.1 || effect.target === 'self'` returns; so
+    -- does a semi-invulnerable or allied target and an ungrounded one; else the move is blocked (return null). The
+    -- holder is the target and the source the user
+    NPsychicTerrainTryHit -> case (cMove c, cSource c) of
+      (Just mv, Just src)
+        | mvPriority mv <= 0 -> keep
+        | isSemiInvulnerable m || src == holder -> keep
+        | not (isGrounded dx m) -> keep
+        | otherwise -> returning stop
+      _ -> keep
+    -- psychicterrain.onBasePower: a Psychic move by a grounded attacker, chainModify([5325, 4096])
+    NPsychicTerrainPower -> moveTypePower "Psychic" groundedHolder (5325, 4096)
+    -- overcoat.onImmunity(type, pokemon): sandstorm, hail and powder are false
+    NOvercoatImmunity -> if relay `elem` [RText "sandstorm", RText "hail", RText "powder"] then returning stop else keep
+    -- overcoat.onTryHit(target, source, move): `move.flags['powder'] && target !== source &&
+    -- this.dex.getImmunity('powder', target)` (the target is not naturally immune) -> return null
+    NOvercoatTryHit -> case (cMove c, cSource c) of
+      (Just mv, Just src) | mrPowder (mvRule mv), src /= holder, not (typeImmuneTo dx "powder" m) -> returning stop
+      _ -> keep
+    -- leafguard.onSetStatus(status, target, source, effect): in sun (or Desolate Land) any status fails
+    NLeafGuardSetStatus -> do
+      b <- get
+      if inSun b holder then returning stop else keep
+    -- leafguard.onTryAddVolatile(status, target): yawn fails in sun
+    NLeafGuardTryAddVolatile -> do
+      b <- get
+      if relay == RText "yawn" && inSun b holder then returning stop else keep
+    -- grassysurge, psychicsurge, mistysurge, electricsurge.onStart(source): this.field.setTerrain(...)
+    NGrassySurge -> setTerrainNamed "grassyterrain"
+    NPsychicSurge -> setTerrainNamed "psychicterrain"
+    NMistySurge -> setTerrainNamed "mistyterrain"
+    NElectricSurge -> setTerrainNamed "electricterrain"
     -- drought.onStart(source): `if (source.species.id === 'groudon' && source.item === 'redorb') return;`, then
     -- this.field.setWeather('sunnyday'); drizzle the same for Kyogre and a Blue Orb; neither orb is a supported item
     NDrought -> setWeatherNamed "sunnyday"
@@ -1092,6 +1215,15 @@ runNative dx n c relay = do
     duration d = pure (Res (Replace (RInt d)) (cMod c))
     -- the weather this handler belongs to is the effective weather as the Pokemon sees it
     ownWeather b a = let EffectKey _ ci = cKey c in effectiveWeatherOf b a == Just ci
+    moveTypePower ty cond nd = case cMove c of
+      Just mv | typeIsNamed dx (mvType mv) ty, cond -> chained nd
+      _ -> pure (Res Keep (cMod c))
+    setTerrainNamed name = case M.lookup name (dxFieldIx dx) of
+      Just ci -> setTerrain dx ci (cHolder c) >> pure (Res Keep (cMod c))
+      Nothing -> pure (Res Keep (cMod c))
+    inSun b a =
+      let sun = [i | k <- ["sunnyday", "desolateland" :: T.Text], Just i <- [M.lookup k (dxFieldIx dx)]]
+       in maybe False (`elem` sun) (effectiveWeatherOf b a)
     setWeatherNamed name = case M.lookup name (dxFieldIx dx) of
       Just ci -> setWeather dx ci (cHolder c) True >> pure (Res Keep (cMod c))
       Nothing -> pure (Res Keep (cMod c))

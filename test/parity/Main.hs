@@ -334,11 +334,22 @@ checkTrace dex tr = case prepare of
                   [] -> pure ()
                 when (rsConsumed rsEnd /= total) $
                   endFail ("draws consumed at the end: expected " ++ show total ++ ", engine made " ++ show (rsConsumed rsEnd))
-                case runReplay rsEnd (step dex bEnd (Nothing, Nothing)) of
-                  Right (Left BattleFinished, _) -> Right ()
-                  res -> endFail ("step on a finished battle: expected BattleFinished, got " ++ showStepResult res)
+                -- A trace the recorder cut off at its turn limit ends at a decision point (record.js stops at the top of
+                -- the loop, before the choices): the battle is not over (`ended` is compared above), so an empty step
+                -- must be refused for the missing choice, without a draw. Otherwise the battle is over and the step is
+                -- refused as BattleFinished.
+                case (tr .: "truncated", runReplay rsEnd (step dex bEnd (Nothing, Nothing))) of
+                  (Bool True, Right (Left e, rs'))
+                    | isMissing e, rsConsumed rs' == rsConsumed rsEnd -> Right ()
+                  (Bool True, res) -> endFail ("empty step on a truncated battle: expected MissingChoice without a draw, got " ++ showStepResult res)
+                  (_, Right (Left BattleFinished, _)) -> Right ()
+                  (_, res) -> endFail ("step on a finished battle: expected BattleFinished, got " ++ showStepResult res)
                 Right (length (arr (tr .: "steps")), total)
           evaluate (forceE check)
+
+    isMissing e = case e of
+      MissingChoice _ -> True
+      _ -> False
 
     forceE e = case e of
       Left (Failure a t d m) -> length a + length m + d + maybe 0 id t `seq` e

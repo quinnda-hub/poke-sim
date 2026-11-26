@@ -10,6 +10,7 @@ module Engine.Damage
   , hasItemNamed
   , typeIdNamed
   , isGrounded
+  , isSemiInvulnerable
   , typeIsNamed
   , typeMod
   , baseDamage
@@ -64,8 +65,15 @@ typeIdNamed dx name = V.findIndex (== name) (dxTypeNames dx)
 -- Gravity (field pseudo-weather), Ingrain and Smack Down (volatiles), Iron Ball (item). Not grounded: Levitate (and
 -- Eelevate), Magnet Rise and Telekinesis (volatiles), Air Balloon (item), and Roost's loss of the Flying type (a
 -- volatile). None of these is supported, so a Pokemon is grounded exactly when it is not a Flying type.
+-- The terrains' bodies also read @isSemiInvulnerable()@ ('isSemiInvulnerable').
 isGrounded :: Dex -> Mon -> Bool
 isGrounded dx m = not (hasTypeNamed dx "Flying" m)
+
+-- | @pokemon.isSemiInvulnerable()@ (pokemon.ts 2184): the @fly@, @bounce@, @dive@, @dig@, @phantomforce@, @shadowforce@
+-- and @skydrop@ volatiles.
+-- LATENT: none of these volatiles exists in the state (their moves are unsupported), so this is always false.
+isSemiInvulnerable :: Mon -> Bool
+isSemiInvulnerable _ = False
 
 -- | Whether a type id ('noType' included) is the type with this name.
 typeIsNamed :: Dex -> Int -> T.Text -> Bool

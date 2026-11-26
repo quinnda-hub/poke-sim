@@ -135,7 +135,9 @@ checkBattle dx b = do
       if fWeather f == noCond && (fWeatherState f) {esHasTarget = False} /= noEffectState then Left "no weather but a weather state" else Right ()
       -- a weather in place has 1..8 turns left (5, or 8 with the setter's rock) and the countdown has not reached 0
       if fWeather f /= noCond then durationOk "weather " (maybe "" cnId (dxFieldConds dx V.!? fWeather f)) (fWeather f) (fWeatherState f) else Right ()
-      if fTerrain f == noCond && fTerrainState f /= noEffectState then Left "no terrain but a terrain state" else Right ()
+      if fTerrain f == noCond && (fTerrainState f) {esHasTarget = False} /= noEffectState then Left "no terrain but a terrain state" else Right ()
+      -- a terrain in place has 1..8 turns left (5, or 8 with Terrain Extender)
+      if fTerrain f /= noCond then durationOk "terrain " (maybe "" cnId (dxFieldConds dx V.!? fTerrain f)) (fTerrain f) (fTerrainState f) else Right ()
       let orders = [esOrder st | (_, s) <- [(P1, bP1 b), (P2, bP2 b)], CondEntry _ st <- SV.toList (sConds s)]
             ++ [esOrder st | CondEntry _ st <- pseudo]
             ++ [esOrder st | (_, s) <- [(P1, bP1 b), (P2, bP2 b)], m <- SV.toList (sMons s)
@@ -162,10 +164,10 @@ checkBattle dx b = do
     distinct xs = length xs == length (nub xs)
     -- A condition with a duration (condition.duration, data/moves.ts) is in place only with 1 or more turns left: the
     -- residual countdown ends it at 0. Its duration is at most the static one, except the screens, whose
-    -- durationCallback gives 8 with a Light Clay user (the weathers: 8 with their rock). A condition with no duration has none.
+    -- durationCallback gives 8 with a Light Clay user (the weathers: 8 with their rock, the terrains with Terrain Extender). A condition with no duration has none.
     durationOk who name i st = do
       let base = maybe 0 cnDuration (dxFieldConds dx V.!? i)
-          hi = if name `elem` ["reflect", "lightscreen", "sunnyday", "raindance", "sandstorm", "snowscape"] then 8 else base
+          hi = if name `elem` ["reflect", "lightscreen", "sunnyday", "raindance", "sandstorm", "snowscape", "electricterrain", "grassyterrain", "mistyterrain", "psychicterrain"] then 8 else base
           d = esDuration st
       if (base == 0 && d /= 0) || (base /= 0 && (d < 1 || d > hi))
         then Left (who ++ show name ++ " has duration " ++ show d ++ ", outside its bounds (static " ++ show base ++ ")")
