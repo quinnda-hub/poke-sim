@@ -83,6 +83,9 @@ data Effect
   | EOwnHit
   -- ^ The move's own @onHit@ handler: @singleEvent('Hit', moveData, {}, target, source, move)@ in @runMoveEffects@, after the
   -- @boosts@, @heal@ and @status@ of the move (battle-actions.ts 1338). Slice 4b.
+  | EOwnHitField
+  -- ^ The move's own @onHitField@ handler (a move on @all@): @singleEvent('HitField', ...)@ in @runMoveEffects@ (battle-actions.ts
+  -- 1328-1331). Slice 4c.
   deriving (Eq, Show)
 
 -- | @move.damage@ (battle-actions.ts 1666-1670): the damage is fixed, and @getDamage@ returns it before the crit roll, the
@@ -194,13 +197,15 @@ plainRule = MoveRule
 -- effect, a self-targeted heal, or a stat change or a status condition on its target, or a side condition (a
 -- hazard, on the foe's side or the user's) and nothing else. Nothing here inflicts sleep (the translation rejects
 -- it), and a status or flinch effect on the user is not executable. A pseudo-weather, weather or terrain move is a
--- status move on @all@ with that and nothing else.
+-- status move on @all@ with that and nothing else. Slice 4c adds a damaging move with its own @onHit@ alone (Clear Smog) and a
+-- status move on @all@ with its own @onHitField@ alone (Court Change, Haze).
 executable :: MoveRule -> Bool
 executable r =
   (not (mrThawsTarget r) || mrDamaging r)
     && all (\s -> all targetEffect (secTarget s) && all boostOnly (secSelf s)) (mrSecondaries r)
     && if mrDamaging r
-      then all boostOnly (mrSelf r) && null (mrOnHit r) && not (mrIgnoreImmunity r) && mrTarget r == TargetFoe && mrSideCondition r == Nothing
+      -- (Clear Smog: its onHit runs after the damage, in the same hit)
+      then all boostOnly (mrSelf r) && (null (mrOnHit r) || mrOnHit r == [EOwnHit]) && not (mrIgnoreImmunity r) && mrTarget r == TargetFoe && mrSideCondition r == Nothing
         && mrPseudoWeather r == Nothing && mrWeather r == Nothing && mrTerrain r == Nothing
       else mrHits r == OneHit && mrDrain r == Nothing && mrRecoil r == Nothing
         && null (mrSecondaries r) && mrDamage r == Nothing && not (damageStats r) && null (mrSelfBoost r)
@@ -212,6 +217,8 @@ executable r =
               ([], [EStatus _], TargetFoe, Nothing, Nothing, Nothing, Nothing) -> True
               -- the move's own onHit alone, on the user or the foe
               ([], [EOwnHit], t, Nothing, Nothing, Nothing, Nothing) -> t == TargetFoe || t == TargetSelf
+              -- the move's own onHitField alone (Court Change, Haze)
+              ([], [EOwnHitField], TargetAll, Nothing, Nothing, Nothing, Nothing) -> True
               ([], [], t, Just _, Nothing, Nothing, Nothing) -> t == TargetFoeSide || t == TargetAllySide
               ([], [], TargetAll, Nothing, Just _, Nothing, Nothing) -> True
               ([], [], TargetAll, Nothing, Nothing, Just _, Nothing) -> True
@@ -227,6 +234,7 @@ executable r =
       EHeal _ _ -> False
       ERoost -> False
       EOwnHit -> False
+      EOwnHitField -> False
     -- the damage-formula fields only a damaging move can use
     damageStats m = mrOverrideOffensiveStat m /= Nothing || mrOverrideDefensiveStat m /= Nothing
       || mrOverrideOffensivePokemon m || mrIgnoreDefensive m || mrIgnoreEvasion m
@@ -412,7 +420,7 @@ moveRule condOf ownRejected (Object o) = do
     { mrDamaging = damaging
     , mrHits = hits
     , mrTarget = target
-    , mrOnHit = [EHeal a b | Just (a, b) <- [heal]] ++ boosts ++ status ++ [EOwnHit | "onHit" `elem` ownNames]
+    , mrOnHit = [EHeal a b | Just (a, b) <- [heal]] ++ boosts ++ status ++ [EOwnHit | "onHit" `elem` ownNames] ++ [EOwnHitField | "onHitField" `elem` ownNames]
     , mrSelf = self
     , mrSecondaries = secondaries
     , mrDrain = drain
@@ -553,6 +561,9 @@ secondariesOf single many = do
     Just s -> unless (list == [s]) (Left "secondary differs from secondaries")
   traverse one list
   where
+    -- `secondary: {}` (Ceaseless Edge, Stone Axe: "Sheer Force-boosted"): no chance, so it always applies, and it does nothing; the
+    -- move still draws random(100) for it (battle-actions.ts @secondaries@ 1403). Sheer Force is not supported.
+    one (Object s) | KM.null s = pure (Secondary 100 [] [])
     one (Object s) = do
       mapM_ (\(k, _) -> if k `elem` ["chance", "boosts", "status", "volatileStatus", "self"] then Right () else Left ("not modelled: secondary." <> k))
         [(K.toText k, v) | (k, v) <- KM.toList s, truthy v]

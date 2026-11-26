@@ -164,8 +164,21 @@ Last updated 2026-11-25.
   - 22 more moves (380 in all), Howl and Life Dew among them through the
     `allies` target. The slice-4 set is re-recorded at 900 battles. Parity
     checks 4,700 traces, 351,543 decision points and 768,002 draws.
+- **Slice 4c: removing and moving field state.**
+  - Hazard removal: Rapid Spin, Mortal Spin and Ice Spinner (`onAfterHit`,
+    gated on the user's HP after `DamagingHit`), Defog and Tidy Up.
+  - Court Change (side conditions swap sides as the same states: layers,
+    durations and effect order kept), Haze and Clear Smog.
+  - Ceaseless Edge and Stone Axe (hazards from an attack), Aurora Veil (needs
+    snow; steps aside for Reflect or Light Screen of the move's category),
+    Brick Break, Psychic Fangs and Raging Bull (screens break before the
+    damage).
+  - New event points: `Try`, `AfterHit` and `HitField`, plus a damaging
+    move's own `onHit`. 14 more moves (394 in all). The slice-4 set is
+    re-recorded at 1,200 battles. Parity checks 5,000 traces, 361,128
+    decision points and 737,441 draws.
 - **Test tiers.** The fast tier (`POKESIM_TIER=fast`) replays every 10th trace
-  and runs the hedgehog properties at 100 tests each, in about 18 s. The long
+  and runs the hedgehog properties at 100 tests each, in about 21 s. The long
   tier, which gates merges into main, replays everything and runs the
   properties at 2000 tests each.
 
@@ -341,7 +354,7 @@ Alongside:
 - **Scenario generation from rules.** For each rule, generate battles that
   exercise it with each random outcome forced both ways, and report coverage
   per rule.
-- **Trace size.** 4,700 battles take about 2.6 GB. Snapshots should become
+- **Trace size.** 5,000 battles take about 2.7 GB. Snapshots should become
   deltas.
 - **Benchmark tracking.** Record throughput at each slice so slowdowns are
   measured when they appear.

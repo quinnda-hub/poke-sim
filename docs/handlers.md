@@ -555,6 +555,19 @@ engine does not hold, and wait for a phase that adds it.
 3. **4c: removing and moving field state.** Rapid Spin, Mortal Spin, Ice
    Spinner, Defog, Court Change, Haze, Ceaseless Edge and Stone Axe; Aurora
    Veil; the screen breakers.
+   Found while building it:
+   - `AfterHit` (battle-actions.ts 1184-1186) runs per hit, after
+     `DamagingHit`, only while the user has HP: a Rocky Helmet or Rough Skin
+     that has just brought it to 0 stops Rapid Spin's hazard removal.
+   - `secondary: {}` (Ceaseless Edge, Stone Axe) is a secondary with no
+     effect: it still draws `random(100)` (battle-actions.ts 1403).
+   - `side.addSideCondition` with no source takes `battle.event.target`
+     (side.ts 418), so a hazard set by an attack has the defender as source.
+   - Court Change moves the state objects (data/moves.ts 3070-3093). A side's
+     effect orders stay increasing only while every side condition the engine
+     has is in its list; a side condition outside the list (none today) would
+     stay behind, ahead of arrivals of lower order, and the playout invariant
+     would need revisiting.
 4. **4d: Knock Off and item removal** (`takeItem`, the `TakeItem` event, which
    makes Booster Energy's and Unburden's `onTakeItem` reachable).
 

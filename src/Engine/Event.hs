@@ -115,6 +115,19 @@ data EventId
   | EvType
   -- ^ @runEvent('Type', pokemon, null, null, pokemon.types)@ in @getTypes@ (pokemon.ts 2165): every read of a Pokemon's
   -- types. Only the Roost volatile listens to it; 'Engine.Damage.monTypes' is the pure form of the event.
+  | EvTry
+  -- ^ @singleEvent('Try', move, null, pokemon, target, move)@ in @tryMoveHit@ (battle-actions.ts 889) and @trySpreadMoveHit@
+  -- (656): the move's own @onTry@, whose falsy result fails the move (Aurora Veil). Only a move's own handler is supported.
+  | EvAfterHit
+  -- ^ @singleEvent('AfterHit', moveData, {}, target, pokemon, move)@ in @spreadMoveHit@ (battle-actions.ts 1186), once per
+  -- damaged target after @DamagingHit@, while the user has HP. Only a move's own handler is supported.
+  | EvAfterSubDamage
+  -- ^ The move's @onAfterSubDamage@: Showdown runs it where a hit lands on a Substitute (@singleEvent('AfterSubDamage', ...)@ in
+  -- substitute's @onTryPrimaryHit@, data/moves.ts 18375). Substitute is not supported, so it is never run; it is an event only so
+  -- that the handlers of Rapid Spin and its kin parse.
+  | EvHitField
+  -- ^ @singleEvent('HitField', moveData, {}, target, source, move)@ in @runMoveEffects@ (battle-actions.ts 1328-1331), for a
+  -- move with target @all@. Only a move's own handler is supported.
   deriving (Eq, Show, Enum, Bounded)
 
 -- | How @runEvent@ orders the handlers of an event (battle.ts 797-803).
@@ -201,6 +214,10 @@ eventName e = case e of
   EvDamageCallback -> "DamageCallback"
   EvHit -> "Hit"
   EvType -> "Type"
+  EvTry -> "Try"
+  EvAfterHit -> "AfterHit"
+  EvAfterSubDamage -> "AfterSubDamage"
+  EvHitField -> "HitField"
 
 -- | Which Pokemon a handler reacts to: the holder (@onX@), its allies (@onAllyX@), its foes (@onFoeX@), the
 -- source of the event (@onSourceX@) or anyone (@onAnyX@).
@@ -500,6 +517,30 @@ data NativeId
   | NPainSplitHit
   | NRoostType
   -- ^ roost @condition.onType@: the Pokemon's types without Flying, applied by 'Engine.Damage.monTypes'.
+  -- Moves' own handlers (slice 4c).
+  | NHazardSweepAfterHit
+  -- ^ rapidspin, mortalspin @onAfterHit@: the user's side loses its entry hazards.
+  | NIceSpinnerAfterHit
+  -- ^ icespinner @onAfterHit@: @this.field.clearTerrain()@.
+  | NCeaselessEdgeAfterHit
+  -- ^ ceaselessedge @onAfterHit@: Spikes on the foe's side.
+  | NStoneAxeAfterHit
+  -- ^ stoneaxe @onAfterHit@: Stealth Rock on the foe's side.
+  | NInertAfterSubDamage
+  -- ^ The @onAfterSubDamage@ of the moves above: it runs only where a hit lands on a Substitute, which is not modelled.
+  | NDefogHit
+  | NTidyUpHit
+  | NClearSmogHit
+  | NCourtChangeHitField
+  | NHazeHitField
+  | NScreenBreakTryHit
+  -- ^ brickbreak, psychicfangs, ragingbull @onTryHit@: the target's side loses Reflect, Light Screen and Aurora Veil.
+  | NRagingBullType
+  -- ^ @onModifyType@ by the Pokemon's species name (Tauros's Paldean forms, which are not species here).
+  | NAuroraVeilTry
+  -- ^ auroraveil @onTry@: fails unless the weather is snow.
+  | NAuroraVeilDamage
+  -- ^ auroraveil @condition.onAnyModifyDamage@.
   deriving (Eq, Show)
 
 -- | The body of each handler the engine implements (written by hand: Showdown's handlers are code). A condition

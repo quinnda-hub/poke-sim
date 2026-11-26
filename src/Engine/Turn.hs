@@ -516,10 +516,10 @@ useMoveWith fmt dx user target mv = case mrTarget rule of
     isToxic = mrOnHit rule == [EStatus Tox] && mvId mv == "toxic"
 
 -- | @tryMoveHit@ (battle-actions.ts 883-919) of a move on a side or the field (@foeSide@, @allySide@, @all@): no
--- type immunity, accuracy or crit draw. The event points are @singleEvent('Try')@, @singleEvent('PrepareHit')@,
--- @runEvent('PrepareHit')@, then @runEvent('TryHitField')@ for @all@ or @runEvent('TryHitSide')@, then @moveHit@.
--- The @Try@ and @PrepareHit@ callbacks are the move's own (@onTry@, @onPrepareHit@), which a supported move has none
--- of; the @runEvent@s sort the handlers of the Pokemon in play (none attached today: Magic Bounce's
+-- type immunity, accuracy or crit draw. The event points are @singleEvent('Try')@ (Aurora Veil's @onTry@: it needs snow),
+-- @singleEvent('PrepareHit')@, @runEvent('PrepareHit')@, then @runEvent('TryHitField')@ for @all@ or @runEvent('TryHitSide')@, then
+-- @moveHit@. The @PrepareHit@ callback is the move's own (@onPrepareHit@), which no supported side or field move has; the
+-- @runEvent@s sort the handlers of the Pokemon in play (none attached today: Magic Bounce's
 -- @onAllyTryHitSide@ is unsupported), and a sort over fewer than two handlers draws nothing, but they stay so that
 -- a handler that appears later is sorted where Showdown sorts it. A falsy result fails the move.
 -- @useMoveInner@ then runs @AfterMoveSecondarySelf@ (battle-actions.ts ~607), which this path skips like the
@@ -528,7 +528,10 @@ useMoveWith fmt dx user target mv = case mrTarget rule of
 {-# INLINABLE sideMove #-}
 sideMove :: MonadChance m => Dex -> Actor -> Actor -> MoveData -> Eng m ()
 sideMove dx user target mv = do
-  prepared <- relayTruthy <$> runEvent dx EvPrepareHit user (Just target) (Just mv) RNone
+  -- tryMoveHit (battle-actions.ts 889-891): `singleEvent('Try') && singleEvent('PrepareHit') && runEvent('PrepareHit')`; the move's
+  -- own onTry (Aurora Veil needs snow) comes first and a falsy result fails the move before anything else
+  tried <- moveTry dx mv
+  prepared <- if tried then relayTruthy <$> runEvent dx EvPrepareHit user (Just target) (Just mv) RNone else pure False
   when prepared $ do
     let tryHit = if mrTarget (mvRule mv) == TargetAll then EvTryHitField else EvTryHitSide
     ok <- relayTruthy <$> runEvent dx tryHit target (Just user) (Just mv) RNone
@@ -536,7 +539,8 @@ sideMove dx user target mv = do
 
 -- | @moveHit@ -> @spreadMoveHit@ -> @runMoveEffects@ (battle-actions.ts 1430, 1175, 1330) of a side-targeted move:
 -- the damage is @undefined@ (basePower 0), so only the effect on the target's side runs.
--- The @TryHitSide@ and @TryHitField@ callbacks of the move itself (@onTryHitSide@, ...) are not supported.
+-- The @TryHitSide@ and @TryHitField@ callbacks of the move itself (@onTryHitSide@, ...) are not supported; its @onHitField@
+-- (Court Change, Haze) runs after its field effects, and its @onHitSide@ (none supported) would run beside it.
 -- A failed effect (the condition is already there and cannot restart) fails the move; nothing else follows.
 {-# INLINABLE moveHitSide #-}
 moveHitSide :: MonadChance m => Dex -> Actor -> Actor -> MoveData -> Eng m ()
@@ -549,6 +553,10 @@ moveHitSide dx user (Actor tp _) mv = do
   forM_ (mrWeather rule) $ \ci -> void (setWeather dx ci user False)
   -- `this.battle.field.setTerrain(moveData.terrain, source, move)`
   forM_ (mrTerrain rule) $ \ci -> void (setTerrain dx ci user)
+  -- `if (move.target === 'all' && !isSelf) { if (moveData.onHitField) singleEvent('HitField', ...) }` (battle-actions.ts 1328-1331).
+  -- Its result only decides whether the move reports a failure: nothing follows a side or field move either way.
+  -- (HitSide, 1332-1335, is for the moves with an onHitSide: none is supported.)
+  when (mrOnHit rule == [EOwnHitField]) (void (moveFieldHit dx user mv))
   where
     rule = mvRule mv
 
@@ -666,6 +674,11 @@ hitEffects dx user target mv = do
   -- runEvent('DamagingHit') (after the secondaries, per hit): frz.onDamagingHit cures a frozen target hit by
   -- a damaging Fire move. The target and the damage are one-element arrays in Showdown.
   void (runEvent dx EvDamagingHit target (Just user) (Just mv) RNone)
+  -- spreadMoveHit (battle-actions.ts 1184-1186): `if (moveData.onAfterHit && pokemon.hp) singleEvent('AfterHit', moveData, {}, t,
+  -- pokemon, move)` for each damaged target, after DamagingHit (gen >= 5) and once per hit. The user's HP is read now: a Rocky
+  -- Helmet or Rough Skin that has just brought it to 0 stops the move's AfterHit (its faint is only queued).
+  userAlive <- gets (\b -> monHp (monOf b user) > 0)
+  when userAlive (moveAfterHit dx user target mv)
 
 -- | One effect of a secondary on a Pokemon (@moveHit@ with @isSecondary@ -> @runMoveEffects@).
 applyEffect :: MonadChance m => Dex -> Actor -> Effect -> Eng m ()
@@ -679,6 +692,7 @@ applyEffect dx a e = case e of
   -- addVolatile('roost', source, move): `self.volatileStatus` of Roost; needs HP, and Terastallization (not modelled) fails it
   ERoost -> void (addVolatile dx a CRoost)
   EOwnHit -> pure () -- run by 'moveOwnHit', never as a secondary
+  EOwnHitField -> pure () -- run by 'moveFieldHit', never as a secondary
 
 -- | One @spreadMoveHit@ of a damaging move: crit roll, random factor, damage, drain. Returns the damage
 -- actually dealt (@move.totalDamage@ accumulates it).
@@ -689,7 +703,8 @@ hitMove fmt dx user target mv = do
   let tm = monOf b target
   -- spreadMoveHit (battle-actions.ts 1101-1105): singleEvent('TryHit', moveData, {}, target, pokemon, move) opens every hit
   -- (lowkick, grassknot and heavyslam fail against a Dynamaxed target: never here). The hit steps' runEvent('TryHit') already ran.
-  void (singleMoveEvent dx EvTryHit target (Just user) mv)
+  -- (Brick Break, Psychic Fangs and Raging Bull shatter the target's screens here, before getDamage: 'moveTryHit')
+  moveTryHit dx user target mv
   -- getDamage (battle-actions.ts 1665): `if (move.damageCallback) return move.damageCallback.call(...)`: the damage, with no
   -- crit roll, BasePower, random factor or modifier (and so no draw)
   callback <- damageCallback mv target
@@ -711,6 +726,11 @@ hitMove fmt dx user target mv = do
   case mrDrain (mvRule mv) of
     Just (n, d) | dealt > 0 -> modify' (healMon user (roundDiv (dealt * n) d))
     _ -> pure ()
+  -- runMoveEffects (battle-actions.ts 1338, step 3 of spreadMoveHit): the move's own onHit, after the damage and the drain and
+  -- before self drops, secondaries and DamagingHit (Clear Smog clears the target's stages, a fainted target's too).
+  -- LATENT: a damaging move's onHit that returns false (the target would be dropped from the steps after it) is not modelled;
+  -- Clear Smog's never does.
+  when (mrOnHit (mvRule mv) == [EOwnHit]) (void (moveOwnHit dx user target mv))
   pure dealt
 
 -- | @getDamage@ (battle-actions.ts 1650-1779) of a move with no @damageCallback@ and no fixed @damage@: base power (its callback,

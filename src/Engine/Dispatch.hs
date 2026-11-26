@@ -15,6 +15,10 @@ module Engine.Dispatch
   , singleMoveEvent
   , HitResult (..)
   , moveOwnHit
+  , moveTry
+  , moveTryHit
+  , moveAfterHit
+  , moveFieldHit
   , basePowerCallback
   , damageCallback
   , movePriorityEvent
@@ -48,7 +52,7 @@ module Engine.Dispatch
   , battleHeal
   ) where
 
-import Control.Monad (forM_, unless, void, when)
+import Control.Monad (forM, forM_, unless, void, when)
 import Control.Monad.Trans.State.Strict (StateT, get, gets, modify')
 import Data.List (sortBy)
 import qualified Data.Map.Strict as M
@@ -386,17 +390,23 @@ addSideCondition dx p ci source = do
           modify' (modifySide p (\s -> s {sConds = SV.filter (\(CondEntry j _) -> j /= ci) (sConds s)}))
           pure False
 
--- | @side.removeSideCondition@ (side.ts 460): a condition the side has ends (@singleEvent('SideEnd')@, with the side's
--- state) and goes.
-removeSideCondition :: MonadChance m => Dex -> Player -> Int -> Eng m ()
+-- | @side.removeSideCondition@ (side.ts 458-464): a condition the side has ends (@singleEvent('SideEnd')@, with the side's
+-- state) and goes. Returns whether the side had it.
+removeSideCondition :: MonadChance m => Dex -> Player -> Int -> Eng m Bool
 removeSideCondition dx p ci = do
   b <- get
   let key = EffectKey EffSideCond ci
   case ownerState b (OwnSide p) key of
-    Nothing -> pure () -- `if (!this.sideConditions[status.id]) return false`
+    Nothing -> pure False -- `if (!this.sideConditions[status.id]) return false`
     Just _ -> do
       void (singleEvent dx EvEnd key (OwnSide p) Nothing Nothing RNone)
       modify' (modifySide p (\s -> s {sConds = SV.filter (\(CondEntry j _) -> j /= ci) (sConds s)}))
+      pure True
+
+-- | 'removeSideCondition' of the condition with this key (@removeSideCondition('spikes')@); a key the engine has no
+-- condition for is never in place.
+removeNamedSide :: MonadChance m => Dex -> Player -> T.Text -> Eng m Bool
+removeNamedSide dx p name = or <$> mapM (removeSideCondition dx p) (fieldIds dx [name])
 
 -- | @field.removePseudoWeather@ (field.ts 223): a pseudo-weather the field has ends (@singleEvent('FieldEnd')@) and goes.
 -- It removes by id, and does nothing when it is absent.
@@ -967,7 +977,7 @@ fieldEvent dx ev targets = do
       (OwnMon holder, EffectKey EffStatus _) -> modify' (modifyMon holder (\x -> if monHp x > 0 then clearStatus x else x))
       -- pokemon.removeVolatile: `if (!this.hp) return false`, then by id (false when it is not there)
       (OwnMon holder, EffectKey EffVolatile i) -> modify' (modifyMon holder (\x -> if monHp x > 0 then removeVolatile i x else x))
-      (OwnSide p, EffectKey EffSideCond i) -> removeSideCondition dx p i
+      (OwnSide p, EffectKey EffSideCond i) -> void (removeSideCondition dx p i)
       (OwnField, EffectKey EffWeather _) -> clearWeather dx
       (OwnField, EffectKey EffTerrain _) -> clearTerrain dx
       (OwnField, _) -> removePseudoWeather dx key
@@ -1147,6 +1157,22 @@ runNative dx n c relay = do
     NPainSplitHit -> keep
     -- roost.condition.onType is applied by 'Engine.Damage.monTypes' at every read of the types, not run here
     NRoostType -> keep
+    -- slice 4c: the moves' own bodies are run by 'moveAfterHit', 'moveOwnHit', 'moveFieldHit', 'moveTryHit', 'moveTry' and
+    -- 'singleMoveEvent', each at its own call site
+    NHazardSweepAfterHit -> keep
+    NIceSpinnerAfterHit -> keep
+    NCeaselessEdgeAfterHit -> keep
+    NStoneAxeAfterHit -> keep
+    -- LATENT: Showdown runs onAfterSubDamage where a hit lands on a Substitute; Substitute is not supported, so this never runs
+    NInertAfterSubDamage -> keep
+    NDefogHit -> keep
+    NTidyUpHit -> keep
+    NClearSmogHit -> keep
+    NCourtChangeHitField -> keep
+    NHazeHitField -> keep
+    NScreenBreakTryHit -> keep
+    NRagingBullType -> keep
+    NAuroraVeilTry -> keep
     -- leftovers.onResidual: this.heal(pokemon.baseMaxhp / 16); battle.heal turns an amount in (0, 1] into 1 and
     -- truncates, so the amount is floor(maxhp / 16), at least 1
     NLeftovers -> modify' (healMon holder (max 1 (monMaxHp m `quot` 16))) >> keep
@@ -1212,7 +1238,7 @@ runNative dx n c relay = do
       | hasTypeNamed dx "Poison" m -> do
           let Actor p _ = holder
               EffectKey _ ci = cKey c
-          removeSideCondition dx p ci
+          void (removeSideCondition dx p ci)
           keep
       | hasTypeNamed dx "Steel" m || boots -> keep
       | otherwise -> do
@@ -1239,6 +1265,18 @@ runNative dx n c relay = do
     NReflectDamage -> screenDamage True
     -- lightscreen.onAnyModifyDamage: the same for a Special move
     NLightScreenDamage -> screenDamage False
+    -- auroraveil.onAnyModifyDamage(damage, source, target, move): `target !== source && this.effectState.target.hasAlly(target)`,
+    -- then nothing when the defender's side has Reflect (Physical move) or Light Screen (Special move: Reflect's turn first), else
+    -- `!target.getMoveHitData(move).crit && !move.infiltrates` -> chainModify(0.5). Reflect and Light Screen do the halving
+    -- themselves, so the veil adds nothing on top of them.
+    NAuroraVeilDamage -> case (cMove c, cSource c, cOwner c) of
+      (Just mv, Just defender@(Actor dp _), OwnSide sp)
+        | defender /= cHolder c, dp == sp -> do
+            b <- get
+            let has name = any (\(CondEntry i _) -> i `elem` fieldIds dx [name]) (SV.toList (sConds (sideOf sp b)))
+                covered = (has "reflect" && mvPhysical mv) || (has "lightscreen" && not (mvPhysical mv) && not (mvStatus mv))
+            if covered || cCrit c then pure (Res Keep (cMod c)) else chained (1, 2)
+      _ -> pure (Res Keep (cMod c))
     -- trickroom.onFieldRestart: this.field.removePseudoWeather('trickroom'); it returns undefined, so the move succeeds
     NTrickRoomRestart -> removePseudoWeather dx (cKey c) >> keep
     -- sunnyday, raindance, sandstorm, snowscape durationCallback(source, effect): 8 when the source holds the weather's rock
@@ -1693,11 +1731,132 @@ moveOwnHit dx user target mv = case moveSpec mv POwn EvHit >>= hsBody of
             setHp x = x {monHp = if monHp x <= 0 then monHp x else min (monMaxHp x) avg}
         modify' (modifyMon target setHp . modifyMon user setHp)
         pure HitOk
+      -- defog.onHit(target, source, move): `success = !!this.boost({evasion: -1})` (the target is the event's: the foe; with no
+      -- Substitute), then the target's side loses its screens, Safeguard, Mist and hazards (only a hazard counts as a success),
+      -- then the user's side its hazards, then `this.field.clearTerrain()`; the result is `success`, so the move fails only when
+      -- nothing happened (Clear Terrain never counts)
+      -- LATENT: Substitute (`!target.volatiles['substitute'] || move.infiltrates` gates the drop), Safeguard, Mist and G-Max Steelsurge
+      -- are not modelled: the removals act only on the conditions the state can hold.
+      NDefogHit -> do
+        boosted <- boostMon target [(BEvasion, -1)]
+        let tp = playerOf target
+            up = playerOf user
+        onTarget <- forM (defogTargetOnly ++ hazards) $ \name -> do
+          removed <- removeNamedSide dx tp name
+          pure (removed && name `elem` hazards)
+        onUser <- mapM (removeNamedSide dx up) hazards
+        clearTerrain dx
+        pure (if boosted || or onTarget || or onUser then HitOk else HitFail)
+      -- tidyup.onHit(pokemon): every active Substitute goes (LATENT: not modelled), then the hazards of the user's side and of the
+      -- foe's (`[pokemon.side, ...foeSidesWithConditions()]`), then `!!this.boost({atk: 1, spe: 1}, pokemon, pokemon, null, false,
+      -- true) || success`
+      NTidyUpHit -> do
+        let up = playerOf target
+        removed <- forM [up, other up] $ \p -> or <$> mapM (removeNamedSide dx p) hazards
+        boosted <- boostMon target [(BAtk, 1), (BSpe, 1)]
+        pure (if boosted || or removed then HitOk else HitFail)
+      -- clearsmog.onHit(target): target.clearBoosts() (every stage, accuracy and evasion too, 0), whatever the target's HP
+      NClearSmogHit -> modify' (modifyMon target (\x -> x {monBoosts = noBoosts})) >> pure HitOk
       _ -> pure HitOk
   _ -> pure HitOk
   where
     -- `const success = !!this.heal(...); if (!success) { this.add('-fail', pokemon, 'heal'); return this.NOT_FAIL; } return success`
     healResult act = (\ok -> if ok then HitOk else HitNotFail) <$> act
+
+playerOf :: Actor -> Player
+playerOf (Actor p _) = p
+
+-- | The entry hazards that Defog, Tidy Up and Rapid Spin remove (`removeAll`, in Showdown's order). G-Max Steelsurge, their
+-- last, is not a condition here.
+hazards :: [T.Text]
+hazards = ["spikes", "toxicspikes", "stealthrock", "stickyweb"]
+
+-- | Defog's @removeTarget@ before @removeAll@: removed from the target's side, never counted as a success.
+defogTargetOnly :: [T.Text]
+defogTargetOnly = ["reflect", "lightscreen", "auroraveil", "safeguard", "mist"]
+
+-- | @singleEvent('Try', move, null, pokemon, target, move)@ (battle-actions.ts 889, @tryMoveHit@: a move on a side or the field):
+-- the move's own @onTry@, whose falsy result fails the move. Aurora Veil needs snow (`this.field.isWeather(['hail',
+-- 'snowscape'])`, which reads the effective weather).
+-- The same event opens @trySpreadMoveHit@ (656); no supported move on a Pokemon has an @onTry@.
+moveTry :: Monad m => Dex -> MoveData -> Eng m Bool
+moveTry dx mv = case moveSpec mv POwn EvTry >>= hsBody of
+  Just (BNative NAuroraVeilTry) -> gets (maybe False (`elem` fieldIds dx ["hail", "snowscape"]) . effectiveWeather)
+  _ -> pure True
+
+-- | @singleEvent('TryHit', moveData, {}, target, pokemon, move)@ (battle-actions.ts 1102), the move's own @onTryHit@, at the start of
+-- each @spreadMoveHit@. Brick Break, Psychic Fangs and Raging Bull shatter the target's screens here, before the damage is
+-- worked out, and so before the hit steps that follow (`will shatter screens through sub, before you hit`). The others (Low Kick's
+-- Dynamax check) change nothing here.
+-- LATENT: the comment says "through sub": Substitute is not modelled, so the removal never has to act past one.
+moveTryHit :: MonadChance m => Dex -> Actor -> Actor -> MoveData -> Eng m ()
+moveTryHit dx user target mv = do
+  void (singleMoveEvent dx EvTryHit target (Just user) mv)
+  case moveSpec mv POwn EvTryHit >>= hsBody of
+    Just (BNative NScreenBreakTryHit) ->
+      forM_ ["reflect", "lightscreen", "auroraveil"] (void . removeNamedSide dx (playerOf target))
+    _ -> pure ()
+
+-- | @singleEvent('AfterHit', moveData, {}, target, pokemon, move)@ (battle-actions.ts 1186) for one damaged target: the move's own
+-- @onAfterHit@, run after @DamagingHit@ and only while the user has HP (1184; the caller checks). Its event has the hit target as
+-- its target and the user as its source, so a side condition added without a source takes the target as its source (side.ts 418).
+-- @hasSheerForce@ is never set (Sheer Force is not supported).
+-- LATENT: the bodies below also remove Leech Seed and partial trapping from the user (Rapid Spin, Mortal Spin), and G-Max Steelsurge
+-- (a fifth hazard); none of those is modelled (the volatiles and the condition do not exist), so each removal acts only on what
+-- the state can hold.
+moveAfterHit :: MonadChance m => Dex -> Actor -> Actor -> MoveData -> Eng m ()
+moveAfterHit dx user target mv = case moveSpec mv POwn EvAfterHit >>= hsBody of
+  Just (BNative n) -> case n of
+    -- rapidspin, mortalspin: Leech Seed (LATENT), then `pokemon.side.removeSideCondition(c)` for each hazard in order, then
+    -- partial trapping (LATENT)
+    NHazardSweepAfterHit -> forM_ hazards (void . removeNamedSide dx (playerOf user))
+    -- icespinner: `this.field.clearTerrain()`
+    NIceSpinnerAfterHit -> clearTerrain dx
+    -- ceaselessedge, stoneaxe: `for (const side of source.side.foeSidesWithConditions()) side.addSideCondition(...)`
+    NCeaselessEdgeAfterHit -> foeHazard "spikes"
+    NStoneAxeAfterHit -> foeHazard "stealthrock"
+    _ -> pure ()
+  _ -> pure ()
+  where
+    foeHazard name = forM_ (fieldIds dx [name]) (\ci -> void (addSideCondition dx (other (playerOf user)) ci target))
+
+-- | @singleEvent('HitField', moveData, {}, target, source, move)@ (battle-actions.ts 1328-1331) of a move on @all@, in
+-- @runMoveEffects@ after the move's own side, weather, terrain and pseudo-weather effects. Its result is the move's: Court
+-- Change fails when no side has a condition to swap.
+moveFieldHit :: MonadChance m => Dex -> Actor -> MoveData -> Eng m HitResult
+moveFieldHit dx user mv = case moveSpec mv POwn EvHitField >>= hsBody of
+  -- haze.onHitField: `pokemon.clearBoosts()` for each Pokemon in play (getAllActive leaves out the fainted)
+  Just (BNative NHazeHitField) -> do
+    modify' (\b -> foldr (\a -> modifyMon a (\x -> x {monBoosts = noBoosts})) b (getAllActive False b))
+    pure HitOk
+  -- courtchange.onHitField (non-freeforall): each side's conditions in the list are taken out in insertion order (`delete`), then
+  -- the user's are added to the foe's side and the foe's to the user's, each appended in that order, as the same state object
+  -- (so its duration, layers and effectOrder are unchanged; its `target` becomes the new side). A condition that is not in the
+  -- list stays where it was, ahead of those that arrive. `if (!success) return false` when neither side had one.
+  -- LATENT: Mist, Safeguard, Lucky Chant, the Pledge conditions and the G-Max ones in the list are not modelled.
+  Just (BNative NCourtChangeHitField) -> do
+    b <- get
+    let up = playerOf user
+        ids = fieldIds dx courtChangeConditions
+        swapped (CondEntry i _) = i `elem` ids
+        mine = sConds (sideOf up b)
+        theirs = sConds (sideOf (other up) b)
+        out = SV.filter swapped mine
+        inn = SV.filter swapped theirs
+    if SV.null out && SV.null inn
+      then pure HitFail
+      else do
+        modify' (modifySide up (\s -> s {sConds = SV.filter (not . swapped) mine SV.++ inn})
+                   . modifySide (other up) (\s -> s {sConds = SV.filter (not . swapped) theirs SV.++ out}))
+        pure HitOk
+  _ -> pure HitOk
+
+-- | The conditions Court Change swaps (data/moves.ts 3045-3047).
+courtChangeConditions :: [T.Text]
+courtChangeConditions =
+  [ "mist", "lightscreen", "reflect", "spikes", "safeguard", "tailwind", "toxicspikes", "stealthrock", "waterpledge", "firepledge"
+  , "grasspledge", "stickyweb", "auroraveil", "luckychant", "gmaxsteelsurge", "gmaxcannonade", "gmaxvinelash", "gmaxwildfire"
+  , "gmaxvolcalith" ]
 
 -- | A move action's priority (battle.ts 2690-2705, @getActionSpeed@): the base move's priority, then
 -- @singleEvent('ModifyPriority', move, null, pokemon, target, null, priority)@ and @runEvent('ModifyPriority', pokemon,

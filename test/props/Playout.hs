@@ -123,7 +123,9 @@ checkBattle dx b = do
   where
     -- Side conditions and the field. Showdown's @sideConditions@ is an object keyed by id, so an id appears once, in
     -- insertion order; each state took its @effectOrder@ from a counter that only grows, so the orders along the
-    -- insertion order are strictly increasing, and the battle's counter is ahead of every state's order. Layers
+    -- insertion order are strictly increasing, and the battle's counter is ahead of every state's order. Court Change keeps this: it
+    -- moves the states themselves (data/moves.ts 3070-3093), and every side condition the engine has is in its list, so each side
+    -- ends with the other's whole sequence (a state left behind would be followed by arrivals of lower order). Layers
     -- (Spikes 3, Toxic Spikes 2: the @onSideRestart@ guards, data/moves.ts) are in 1..max for exactly those
     -- conditions; other conditions have none. A weather or terrain that is absent has the empty state.
     conditions = do
@@ -168,7 +170,7 @@ checkBattle dx b = do
     -- durationCallback gives 8 with a Light Clay user (the weathers: 8 with their rock, the terrains with Terrain Extender). A condition with no duration has none.
     durationOk who name i st = do
       let base = maybe 0 cnDuration (dxFieldConds dx V.!? i)
-          hi = if name `elem` ["reflect", "lightscreen", "sunnyday", "raindance", "sandstorm", "snowscape", "electricterrain", "grassyterrain", "mistyterrain", "psychicterrain"] then 8 else base
+          hi = if name `elem` ["reflect", "lightscreen", "auroraveil", "sunnyday", "raindance", "sandstorm", "snowscape", "electricterrain", "grassyterrain", "mistyterrain", "psychicterrain"] then 8 else base
           d = esDuration st
       if (base == 0 && d /= 0) || (base /= 0 && (d < 1 || d > hi))
         then Left (who ++ show name ++ " has duration " ++ show d ++ ", outside its bounds (static " ++ show base ++ ")")
