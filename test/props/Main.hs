@@ -10,7 +10,10 @@ import Control.Exception (SomeException, evaluate, try)
 import Data.Aeson (Value (..), eitherDecodeFileStrict')
 import qualified Data.Aeson.Key as K
 import qualified Data.Aeson.KeyMap as KM
+import Control.Monad.Trans.State.Strict (evalStateT)
+import Data.Functor.Identity (runIdentity)
 import Data.Either (isLeft)
+import Data.List (sortOn)
 import Data.Maybe (fromMaybe)
 import qualified Data.Vector as V
 import qualified Data.Text as T
@@ -25,9 +28,10 @@ import System.Random.SplitMix (mkSMGen)
 
 import Engine
 import Engine.Chance (runSample)
-import Engine.Dex (Condition (..), Dex (..), dexCondLookup, supportedMoves)
-import Engine.Effects (abilityBodies, fieldCondBodies, itemBodies)
-import Engine.Event (CondId (..), EventId (..), HandlerSpec (..), Prefix (..), condName)
+import Engine.Dex (Condition (..), Dex (..), MoveData (..), SpeciesData (..), dexCondLookup, supportedMoves)
+import Engine.Dispatch (basePowerCallback)
+import Engine.Effects (abilityBodies, fieldCondBodies, itemBodies, moveBodies)
+import Engine.Event (CondId (..), EventId (..), HandlerSpec (..), Prefix (..), condName, parseHandlerName)
 import Engine.Format (trunc, truncBits)
 import Engine.Rule (executable, moveRule)
 import Engine.State
@@ -62,6 +66,16 @@ main = do
             withTests 1 (fieldConditionsSupported dex))
         , ("an ability or item is supported exactly when it has bodies, one for each handler the export lists and no others",
             withTests 1 (effectsSupported dex))
+        , ("a move is supported only with bodies, one for each handler of its own that the export lists and no others",
+            withTests 1 (movesSupported dex movesJson))
+        , ("no ability, item, condition or field condition listens to an event only moves' own handlers run",
+            withTests 1 (moveEventsOnlyOfMoves dex))
+        , ("a move's own BasePower handler sorts after every other BasePower handler, so it never ties with one",
+            withTests 1 (moveBasePowerSortsLast dex))
+        , ("a weight-based base power never decreases as the target gets heavier or the user lighter",
+            withTests (fromIntegral n) (weightBands dex))
+        , ("a base-power callback never lowers the move's own base power below what its condition adds",
+            withTests (fromIntegral n) (callbacksRaise dex))
         ]
     , checkSequential $ Group "arithmetic (against JavaScript semantics)"
         [ ("roundDiv is Math.round(n / d)", withTests (fromIntegral n) propRoundDiv)
@@ -135,13 +149,17 @@ translation dex movesJson = withTests 1 $ property $ do
   entries <- case movesJson of
     Object o -> pure (KM.toList o)
     _ -> footnote "moves.json is not an object" >> failure
+  -- the move's own handlers rejection, as "Engine.Dex" builds it
+  let ownReject name = case V.find ((== name) . mvId) (dxMoves dex) of
+        Just m -> cnReject (mvEffect m)
+        Nothing -> Nothing
   mapM_ (\(k, v) -> do
-    r <- evalIO (try (evaluate (forceResult (moveRule (dexCondLookup dex) v)))) :: PropertyT IO (Either SomeException Int)
+    r <- evalIO (try (evaluate (forceResult (moveRule (dexCondLookup dex) (ownReject (K.toText k)) v)))) :: PropertyT IO (Either SomeException Int)
     case r of
       Left ex -> footnote (show (K.toText k) ++ ": " ++ show ex) >> failure
       Right _ -> success) entries
   mapM_ (\name -> case [v | (k, v) <- entries, K.toText k == name] of
-    [v] -> case moveRule (dexCondLookup dex) v of
+    [v] -> case moveRule (dexCondLookup dex) (ownReject name) v of
       Right rule -> assert (executable rule) >> pure ()
       Left why -> footnote (T.unpack name ++ " is supported but does not translate: " ++ T.unpack why) >> failure
     _ -> footnote (T.unpack name ++ ": not exactly one entry in moves.json") >> failure) (supportedMoves dex)
@@ -343,3 +361,125 @@ fieldConditionsSupported dex = withTests 1 $ property $ do
       footnote ("field condition " ++ T.unpack (cnId c) ++ ": bodies " ++ show written ++ ", run " ++ show run)
       assert (all (`elem` run) written && all (`elem` written) run && length run == length written))
     (V.toList (dxFieldConds dex))
+
+-- | A move's own handlers (the export's @handlers@ except the @condition.*@ ones, which belong to the field condition
+-- the move defines): the move is supported only with a body for each, and then the handlers the engine runs are exactly
+-- the bodies written: one for each handler the export lists (and none the export does not list). A move with none has no
+-- bodies, and a move with some but no entry in "Engine.Effects" has none run.
+movesSupported :: Dex -> Value -> Property
+movesSupported dex movesV = withTests 1 $ property $ do
+  entries <- case movesV of
+    Object o -> pure (KM.toList o)
+    _ -> footnote "moves.json is not an object" >> failure
+  let ownNames v = case v of
+        Object o | Just (Array hs) <- KM.lookup "handlers" o -> [h | String h <- V.toList hs, not ("condition." `T.isPrefixOf` h)]
+        _ -> []
+      byKey = sortOn (\(p, e) -> (fromEnum p, fromEnum e))
+  mapM_ (\(k, v) -> do
+    let name = K.toText k
+        names = ownNames v
+        listed = byKey [pe | n <- names, Just pe <- [parseHandlerName n]]
+    case V.find ((== name) . mvId) (dxMoves dex) of
+      Nothing -> footnote (T.unpack name ++ " is not in the dex") >> failure
+      Just m -> do
+        let run = byKey [(p, e) | (p, e, spec) <- cnHandlers (mvEffect m), Just _ <- [hsBody spec]]
+        footnote (T.unpack name ++ ": listed " ++ show names ++ ", run " ++ show run)
+        case (names, moveBodies name) of
+          ([], _) -> assert (null run)
+          (_, Nothing) -> assert (not (cnSupported (mvEffect m)) && null run && not (mvSupported m))
+          (_, Just bs) -> do
+            let written = byKey [(p, e) | (p, e, _) <- bs]
+            -- every handler the export lists has exactly one body, and no body is written for another
+            assert (length listed == length names && written == listed)
+            assert (run == written)
+            assert (cnSupported (mvEffect m))) entries
+
+-- | The fast path of "Engine.Damage".moveTypeMod (no @Effectiveness@ handler: the pure type chart) and the priority and
+-- base-power calls are sound only while nothing but a move's own handler listens to these events: an effect is supported
+-- only when every handler the export lists for it has a body, so none may have a body for these.
+moveEventsOnlyOfMoves :: Dex -> Property
+moveEventsOnlyOfMoves dex = withTests 1 $ property $ do
+  let moveOnly = [EvEffectiveness, EvModifyPriority, EvModifyType, EvBasePowerCallback, EvDamageCallback]
+      tables = [("ability", dxAbilities dex), ("item", dxItems dex), ("condition", dxConditions dex), ("field condition", dxFieldConds dex)]
+  mapM_ (\(what, table) -> mapM_ (\c -> do
+    footnote (what ++ " " ++ T.unpack (cnId c) ++ " listens to an event only moves run")
+    assert (null [() | (_, e, spec) <- cnHandlers c, e `elem` moveOnly, Just _ <- [hsBody spec]])) (V.toList table)) tables
+
+-- | @runEvent('BasePower', ..., onEffect)@ puts the move's own @onBasePower@ in the list with order absent, priority 0 and subOrder
+-- 0 (docs/handlers.md, "A move's own handlers"). Every other supported BasePower handler has an explicit order or a positive
+-- priority, so it sorts strictly before the move's: there is no tie to shuffle (no draw for it) and neither the move's subOrder
+-- nor the position at which its @randomChance@ (Fickle Beam) is drawn can change. If a handler with priority 0 and no order is
+-- ever supported, this fails and the tie-break (speed of the attacker, subOrder, a shuffle) becomes live and must be recorded.
+moveBasePowerSortsLast :: Dex -> Property
+moveBasePowerSortsLast dex = withTests 1 $ property $ do
+  let tables = [("ability", dxAbilities dex), ("item", dxItems dex), ("condition", dxConditions dex), ("field condition", dxFieldConds dex)]
+  mapM_ (\(what, table) -> mapM_ (\c ->
+    mapM_ (\(_, e, spec) -> case hsBody spec of
+      Just _ | e == EvBasePower -> do
+        footnote (what ++ " " ++ T.unpack (cnId c) ++ " has a BasePower handler with no order and no priority")
+        assert (hsOrder spec /= 0 || hsPriority spec > 0)
+      _ -> pure ()) (cnHandlers c)) (V.toList table)) tables
+
+-- | Two teams of one Pokemon: a battle at team preview whose Pokemon are the given species.
+oneVsOne :: Dex -> T.Text -> T.Text -> Maybe Battle
+oneVsOne dex a b = do
+  t1 <- either (const Nothing) Just (team a)
+  t2 <- either (const Nothing) Just (team b)
+  pure (fst (runSample (mkSMGen 1) (startBattle dex t1 t2)))
+  where
+    team sp = parseTeam dex (Array (V.fromList
+      [ Object (KM.fromList
+          [ ("species", String sp), ("moves", Array (V.fromList [String "tackle"])), ("nature", String "hardy")
+          , ("level", Number 100), ("ability", String "noability"), ("item", String "")
+          , ("evs", Object (KM.fromList [(K.fromText k, Number 0) | k <- ["hp", "atk", "def", "spa", "spd", "spe"]])) ]) ]))
+
+-- | The base power a callback gives a move used by the first species against the second (team preview state).
+callbackPower :: Dex -> T.Text -> Battle -> Int
+callbackPower dex move b = case V.find ((== move) . mvId) (dxMoves dex) of
+  Just mv -> runIdentity (evalStateT (basePowerCallback dex (Actor P1 0) (Actor P2 0) mv) b)
+  Nothing -> 0
+
+-- | Low Kick, Grass Knot and Heavy Slam compare weights (@weighthg@, tenths of a kilogram): the base power never decreases as
+-- the target gets heavier (Low Kick, Grass Knot) and never increases with the target's weight, nor decreases with the user's,
+-- for Heavy Slam; and it is one of the move's bands.
+weightBands :: Dex -> Property
+weightBands dex = property $ do
+  let species = [spId sp | sp <- V.toList (dxSpecies dex), spSupported sp]
+      weightOf name = maybe 0 spWeight (V.find ((== name) . spId) (dxSpecies dex))
+  user <- forAll (Gen.element species)
+  t1 <- forAll (Gen.element species)
+  t2 <- forAll (Gen.element species)
+  let (light, heavy) = if weightOf t1 <= weightOf t2 then (t1, t2) else (t2, t1)
+  case (oneVsOne dex user light, oneVsOne dex user heavy) of
+    (Just bl, Just bh) -> do
+      mapM_ (\mv -> do
+        assert (callbackPower dex mv bl <= callbackPower dex mv bh)
+        assert (callbackPower dex mv bl `elem` [20, 40, 60, 80, 100, 120])) ["lowkick", "grassknot"]
+      -- the user is fixed, the target varies: a heavier target never raises Heavy Slam
+      assert (callbackPower dex "heavyslam" bl >= callbackPower dex "heavyslam" bh)
+      assert (callbackPower dex "heavyslam" bl `elem` [40, 60, 80, 100, 120])
+    _ -> footnote "a supported species was not accepted as a team" >> failure
+  -- a heavier user never lowers Heavy Slam against a fixed target
+  case (oneVsOne dex light t1, oneVsOne dex heavy t1) of
+    (Just bl, Just bh) -> assert (callbackPower dex "heavyslam" bl <= callbackPower dex "heavyslam" bh)
+    _ -> footnote "a supported species was not accepted as a team" >> failure
+
+-- | The callbacks that add to a base power (Hex against a status, Acrobatics with no item, Stored Power and Power Trip with
+-- boosts, Rising Voltage on a grounded target in Electric Terrain) give at least the move's own power, and give exactly that
+-- when nothing of the kind is present (team preview state: no status, a boost of 0, the user's item as given, no terrain).
+callbacksRaise :: Dex -> Property
+callbacksRaise dex = property $ do
+  let species = [spId sp | sp <- V.toList (dxSpecies dex), spSupported sp]
+  a <- forAll (Gen.element species)
+  b <- forAll (Gen.element species)
+  case oneVsOne dex a b of
+    Nothing -> footnote "a supported species was not accepted as a team" >> failure
+    Just battle -> mapM_ (\name -> case V.find ((== name) . mvId) (dxMoves dex) of
+      Just mv -> do
+        footnote (T.unpack name)
+        -- no status, no boost and no terrain: Hex, Stored Power, Power Trip and Rising Voltage give the move's own power
+        -- (Acrobatics holds no item here, so it gives more)
+        let got = callbackPower dex name battle
+        assert (got >= mvPower mv)
+        assert (name == "acrobatics" || got == mvPower mv)
+      Nothing -> footnote (T.unpack name ++ " is not in the dex") >> failure) ["hex", "storedpower", "powertrip", "risingvoltage", "acrobatics"]

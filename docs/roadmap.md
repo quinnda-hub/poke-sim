@@ -129,8 +129,27 @@ Last updated 2026-11-25.
     should-fix findings are fixed: a move-acceptance hole for weather moves
     with unrelated `condition` blocks, and weak trace coverage of switch-in
     priority (now caught by 154 traces, from 2).
+- **Slice 4a: a move's own handlers** (design in docs/handlers.md, "A move's
+  own handlers (slice 4)").
+  - Moves are effects with bodies, on the same support rule as abilities and
+    items. Showdown's three call forms are mirrored: `singleEvent` on the
+    move, `runEvent` with `onEffect` for `BasePower`, and the direct
+    `basePowerCallback` and `damageCallback`. A per-use copy of the move
+    carries what `ModifyType` and `ModifyMove` change, and never enters the
+    battle state.
+  - New event points: `ModifyType`, `ModifyMove` (its result now counts),
+    `PrepareHit` on the Pokémon-target path, the move's own `TryHit` per hit,
+    `Effectiveness` and `ModifyPriority`. Species weights are loaded.
+  - 26 more moves accepted (358 in all): Low Kick, Grass Knot, Heavy Slam,
+    Hex, Stored Power, Power Trip, Acrobatics, Rising Voltage, Facade,
+    Psyblade, Expanding Force, Fickle Beam, Thunder, Blizzard, Bleakwind
+    Storm, Weather Ball, Terrain Pulse, Ivy Cudgel, Freeze-Dry, Flying Press,
+    Grassy Glide, Ruination, Super Fang, Venoshock, Barb Barrage and Brine.
+    Hurricane waits for confusion, and Misty Explosion for `selfdestruct`.
+  - 600 slice-4 battles are recorded. Parity checks 4,400 traces, 311,612
+    decision points and 681,577 draws.
 - **Test tiers.** The fast tier (`POKESIM_TIER=fast`) replays every 10th trace
-  and runs the hedgehog properties at 100 tests each, in about 14 s. The long
+  and runs the hedgehog properties at 100 tests each, in about 15 s. The long
   tier, which gates merges into main, replays everything and runs the
   properties at 2000 tests each.
 
@@ -186,6 +205,14 @@ even when none are attached. Cumulatively, 3a runs at about 0.54 of slice
 
 Slices 3b-3e were not benchmarked on the laptop. Measure slice 3 as a whole
 against `main` on the workstation at the start of the optimisation step.
+
+**Slice 4a costs about 9%** with slice-3 teams: 161.5 battles/s on `main`
+(`2fcedaf`) against 146.9 and 146.4 on 4a, run one after the other on the
+laptop rather than concurrently on pinned cores. The cost is `runEvent`s that
+no supported effect can listen to: `ModifyPriority` on every queue refresh,
+and `ModifyType`, `ModifyMove` and `PrepareHit` on every move use. An exact
+skip, for an event with no listener anywhere in the Dex, is a candidate for
+the optimisation step: an event with no handlers sorts and draws nothing.
 
 ## Known gaps in slice 0
 
@@ -257,7 +284,7 @@ Alongside:
 - **Scenario generation from rules.** For each rule, generate battles that
   exercise it with each random outcome forced both ways, and report coverage
   per rule.
-- **Trace size.** 3,800 battles take about 1.9 GB. Snapshots should become
+- **Trace size.** 4,400 battles take about 2.3 GB. Snapshots should become
   deltas.
 - **Benchmark tracking.** Record throughput at each slice so slowdowns are
   measured when they appear.

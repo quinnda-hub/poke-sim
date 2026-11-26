@@ -13,6 +13,7 @@ module Engine.Dex
   , conditionOf
   , condSpec
   , dexCondLookup
+  , moveSpec
   , effectOf
   , abilityId
   , itemId
@@ -64,6 +65,8 @@ data SpeciesData = SpeciesData
   -- ^ Fixed max HP (Shedinja), or 0 when HP follows the stat formula.
   , spSupported :: !Bool
   -- ^ A species the slice is tested on (same criteria as the species pool in tools/oracle/gen-slice0.js).
+  , spWeight :: !Int
+  -- ^ @weighthg@: the weight in tenths of a kilogram (@pokemon.weighthg@ before @ModifyWeight@).
   }
   deriving (Show)
 
@@ -89,6 +92,14 @@ data MoveData = MoveData
   -- ^ Why the move does not translate ('Engine.Rule.moveRule'), if it does not.
   , mvSupported :: !Bool
   -- ^ The move translates and its rule is 'executable'.
+  , mvEffect :: !Condition
+  -- ^ The move as an effect (docs/handlers.md, "A move's own handlers"): its own handlers (not its @condition.*@ ones),
+  -- with the metadata of the export and the bodies of "Engine.Effects" @moveBodies@. Empty when the move has none or
+  -- when a handler has no body ('cnReject').
+  --
+  -- A 'MoveData' is also the move in use (Showdown's @ActiveMove@, a copy made when the move is used): the handlers
+  -- that Showdown lets change the move return a changed copy, and every later step of the use reads the copy. It is never
+  -- stored in the battle state.
   }
   deriving (Show)
 
@@ -189,7 +200,13 @@ effectOf dx (EffectKey kind i) = case kind of
   EffWeather -> dxFieldConds dx V.!? i
   EffTerrain -> dxFieldConds dx V.!? i
   EffPseudoWeather -> dxFieldConds dx V.!? i
+  EffMove -> Nothing -- a move's effect is 'mvEffect' of the move in use
 {-# INLINE effectOf #-}
+
+-- | A move's own handler for a prefix and event, if the engine has one (docs/handlers.md, "A move's own handlers").
+moveSpec :: MoveData -> Prefix -> EventId -> Maybe HandlerSpec
+moveSpec mv = condSpec (mvEffect mv)
+{-# INLINE moveSpec #-}
 
 -- | The id (@toID@ name) of an ability.
 abilityId :: Dex -> Int -> T.Text
@@ -488,11 +505,12 @@ speciesOf tix v = do
     Object o | Just mh <- KM.lookup "maxHP" o, Number _ <- mh -> asInt mh
     _ -> Right 0
   num <- field "num" v >>= asInt
+  weight <- field "weighthg" v >>= asInt
   -- gen-slice0.js: num > 0, not nonstandard, a base forme, not battle-only; plus Shedinja for its fixed HP
   let supported =
         ident == "shedinja"
           || (num > 0 && not (truthyField "isNonstandard" v) && not (truthyField "forme" v) && not (truthyField "battleOnly" v))
-  pure (SpeciesData ident t1 t2 (U.fromList base) gender maxHp supported)
+  pure (SpeciesData ident t1 t2 (U.fromList base) gender maxHp supported weight)
 
 typeIx :: M.Map T.Text Int -> T.Text -> Either String Int
 typeIx tix t = maybe (Left ("unknown type " ++ T.unpack t)) Right (M.lookup t tix)
@@ -512,11 +530,20 @@ moveOf tix condLookup v = do
   noBoost <- field "noPPBoosts" v >>= \b -> case b of
     Bool x -> Right x
     _ -> Left "noPPBoosts is not a boolean"
-  let (rule, rejected) = case moveRule condLookup v of
+  -- the move's own handlers: the export's, except the @condition.*@ ones, which belong to the field condition the move
+  -- defines ('fieldConditions'). A move with none needs no bodies.
+  let ownNames = case v of
+        Object o | Just (Array hs) <- KM.lookup "handlers" o -> [h | String h <- V.toList hs, not ("condition." `T.isPrefixOf` h)]
+        _ -> []
+      ownV = case v of
+        Object o -> Object (KM.insert "handlers" (Array (V.fromList (map String ownNames))) o)
+        _ -> v
+  effect <- effectFor ident 0 POwn False ownV (if null ownNames then Just [] else moveBodies ident)
+  let (rule, rejected) = case moveRule condLookup (cnReject effect) v of
         Left why -> (plainRule, Just why)
         Right r -> (r, Nothing)
       supported = isNothing rejected && executable rule
-  pure (MoveData ident ty (cat == "Physical") (cat == "Status") bp acc prio crit pp noBoost (truthyField "struggleRecoil" v) rule rejected supported)
+  pure (MoveData ident ty (cat == "Physical") (cat == "Status") bp acc prio crit pp noBoost (truthyField "struggleRecoil" v) rule rejected supported effect)
 
 natureOf :: Value -> Either String NatureData
 natureOf v = do

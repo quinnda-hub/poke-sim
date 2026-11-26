@@ -94,6 +94,21 @@ data EventId
   | EvTakeItem
   -- ^ @runEvent('TakeItem', ...)@ in @takeItem@: no supported move takes items, so it is never run; it is an event only
   -- so that the handlers Booster Energy and Unburden list for it parse.
+  | EvModifyType
+  -- ^ @singleEvent('ModifyType', move, ...)@ then @runEvent('ModifyType', pokemon, target, move, move)@ in @useMoveInner@
+  -- (battle-actions.ts 494, 497). Only a move's own handler is supported.
+  | EvEffectiveness
+  -- ^ @singleEvent('Effectiveness', move, null, pokemon, type, move, typeMod)@ then @runEvent('Effectiveness', ...)@ in
+  -- @runEffectiveness@ (pokemon.ts 2237-2238), once per defending type. Only a move's own handler is supported.
+  | EvModifyPriority
+  -- ^ @singleEvent('ModifyPriority', move, ...)@ then @runEvent('ModifyPriority', ...)@ in @getActionSpeed@ (battle.ts
+  -- 2699-2700). Only a move's own handler is supported.
+  | EvBasePowerCallback
+  -- ^ Not an event: a move's @basePowerCallback@, called directly by @getDamage@ (battle-actions.ts 1676). The export
+  -- lists it as the handler @basePowerCallback@ and the engine keeps it as @(POwn, EvBasePowerCallback)@, as it does
+  -- @durationCallback@.
+  | EvDamageCallback
+  -- ^ Not an event: a move's @damageCallback@, called directly by @getDamage@ (battle-actions.ts 1665).
   deriving (Eq, Show, Enum, Bounded)
 
 -- | How @runEvent@ orders the handlers of an event (battle.ts 797-803).
@@ -173,6 +188,11 @@ eventName e = case e of
   EvUseItem -> "UseItem"
   EvAfterUseItem -> "AfterUseItem"
   EvTakeItem -> "TakeItem"
+  EvModifyType -> "ModifyType"
+  EvEffectiveness -> "Effectiveness"
+  EvModifyPriority -> "ModifyPriority"
+  EvBasePowerCallback -> "BasePowerCallback"
+  EvDamageCallback -> "DamageCallback"
 
 -- | Which Pokemon a handler reacts to: the holder (@onX@), its allies (@onAllyX@), its foes (@onFoeX@), the
 -- source of the event (@onSourceX@) or anyone (@onAnyX@).
@@ -199,6 +219,8 @@ prefixName p = case p of
 -- engine knows the event.
 parseHandlerName :: T.Text -> Maybe (Prefix, EventId)
 parseHandlerName "durationCallback" = Just (POwn, EvDurationCallback)
+parseHandlerName "basePowerCallback" = Just (POwn, EvBasePowerCallback)
+parseHandlerName "damageCallback" = Just (POwn, EvDamageCallback)
 parseHandlerName n = case T.stripPrefix "on" n of
   Nothing -> Nothing
   Just rest -> case [(p, e) | p <- [minBound .. maxBound], e <- [minBound .. maxBound], prefixName p <> eventName e == rest] of
@@ -227,7 +249,7 @@ condName c = case c of
   CUnburden -> "unburden"
 
 -- | What kind of effect holds a handler. Showdown's other kinds (slot conditions, the move itself) join when their
--- holders exist in the state.
+-- holders exist in the state. A move is one for @onEffect@ events.
 data EffectKind
   = EffStatus
   | EffVolatile
@@ -239,6 +261,9 @@ data EffectKind
   | EffTerrain
   | -- | @field.pseudoWeather@: Trick Room, Gravity, ...
     EffPseudoWeather
+  | -- | A move, as the effect of a @runEvent@ with @onEffect@ (@BasePower@): its state is @initEffectState({})@, which
+    -- has no id, so it is not in the state and the key's id is unused (the handler carries the move's spec).
+    EffMove
   deriving (Eq, Show)
 
 -- | The prefix of the callbacks an effect of this kind keeps for itself, as @singleEvent@ reads them: a side
@@ -420,6 +445,42 @@ data NativeId
   -- ^ A @TakeItem@ handler (Booster Energy, Unburden): no supported move takes an item, so it cannot run.
   | NBoosterEnergyStart
   | NBoosterEnergyUpdate
+  -- Moves' own handlers (slice 4a). Each is named for the move and the callback; a body shared by several moves is
+  -- named for what it does.
+  | NWeightPower
+  -- ^ lowkick, grassknot @basePowerCallback@: the target's weight bands.
+  | NHeavySlamPower
+  | NHexPower
+  | NStoredPower
+  -- ^ storedpower, powertrip @basePowerCallback@: @move.basePower + 20 * pokemon.positiveBoosts()@.
+  | NAcrobaticsPower
+  | NRisingVoltagePower
+  | NDynamaxTryHit
+  -- ^ lowkick, grassknot, heavyslam @onTryHit@: fails against a Dynamaxed target; nothing is ever Dynamaxed here.
+  | NFacadePower
+  | NPsybladePower
+  | NExpandingForcePower
+  | NExpandingForceModifyMove
+  -- ^ @move.target = 'allAdjacentFoes'@ under Psychic Terrain: the same single foe in singles.
+  | NFickleBeamPower
+  | NRainAccuracyModifyMove
+  -- ^ thunder, hurricane @onModifyMove@: accuracy @true@ in rain, 50 in sun.
+  | NBlizzardModifyMove
+  | NBleakwindModifyMove
+  | NWeatherBallType
+  | NWeatherBallModifyMove
+  | NTerrainPulseType
+  | NTerrainPulseModifyMove
+  | NIvyCudgelType
+  -- ^ @onModifyType@ by the Pokemon's species name (Ogerpon's forms, which are not species here).
+  | NFreezeDryEffectiveness
+  | NFlyingPressEffectiveness
+  | NGrassyGlidePriority
+  | NHalfHpDamage
+  -- ^ ruination, superfang @damageCallback@: @clampIntRange(floor(target.hp / 2), 1)@.
+  | NVenoshockPower
+  -- ^ venoshock, barbbarrage @onBasePower@: a poisoned target doubles the power.
+  | NBrinePower
   deriving (Eq, Show)
 
 -- | The body of each handler the engine implements (written by hand: Showdown's handlers are code). A condition

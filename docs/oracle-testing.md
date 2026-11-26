@@ -70,6 +70,7 @@ back to `local/showdown`.
 | `gen-slice0.js <outDir> <count> [firstSeed] [format] [profile]` | Generate random slice-0 battles and record each. Deterministic per seed. |
 | `gen-slice1.js <outDir> <count> <poolFile> [firstSeed]` | Generate random slice-1 battles from the engine's own pool and record each, then print a coverage tally from Showdown's log. Deterministic per seed and pool. |
 | `gen-slice3.js <outDir> <count> <poolFile> [firstSeed]` | Slice 1's teams with hazard, screen, Tailwind and Trick Room setters, Light Clay, Flying, Poison and Steel types, Shedinja, low levels, and abilities and items weighted toward Toxic Debris and Heavy-Duty Boots, recorded, then a tally of the hazard outcomes (each hazard's damage and layers, absorption, immunities, Boots blocks, hazard KOs, the order of several hazards on one switch-in, screens against each category and crits, both screens on one side, expiries, Trick Room restarts and speed ties under it, weather setters as moves and abilities, rocks, sand chip and immunities, weather speed abilities and Hydration, terrain setters, Terrain Extender, grounding, Overcoat and Leaf Guard, Protosynthesis and Quark Drive with and without Booster Energy, the seeds and Unburden; about one battle in six pairs a faster Paradox or seed holder against a slower opposing setter, so switch-in priority decides the order). Deterministic per seed and pool. Re-record the whole set when the pool changes. |
+| `gen-slice4.js <outDir> <count> <poolFile> [firstSeed]` | Slice 3's teams, with move slots weighted toward the moves with handler code and the conditions their bodies branch on (weights, statuses, boosts, held and used items, weather, terrain, grounding), recorded, then a tally of each branch from Showdown's own events. Deterministic per seed and pool. |
 | `gen-slice2.js <outDir> <count> <poolFile> [firstSeed] [profile]` | Slice 1's teams (or, with `struggle`, slice 0's Struggle teams) with abilities and items from the engine's pool, recorded, then a tally of the outcomes that distinguish each handler, observed by wrapping Showdown's event methods. Deterministic per seed and pool. |
 | `export-dex.js [outDir] [mod]` | Export species, moves, abilities, items, types and natures to `data/gen9/`. |
 
@@ -98,9 +99,12 @@ node tools/oracle/gen-slice1.js local/traces/slice1 600 local/traces/slice1-pool
 `engine-pool` prints the moves and species the engine accepts. Only the
 choice of battles comes from the engine. The expected draws and states still
 come from Showdown, so a wrong rule cannot agree with itself. When the engine
-accepts more moves, this set must be recorded again. Until then the parity
-test fails, because some accepted move is in no set's pool list. The long tier
-also requires every accepted move, species, ability and item to appear in some trace's teams. A third of the move slots are drawn from
+accepts more moves, abilities or items, only the newest slice's set is
+recorded again, from a fresh pool. Earlier sets stay as recorded: each set's
+pool must still be accepted by the engine, and the newest set's pool covers
+what is new. Until it is re-recorded the parity test fails, because some
+accepted move is in no set's pool list. The long tier also requires every
+accepted move, species, ability and item to appear in some trace's teams. A third of the move slots are drawn from
 moves with the slice's mechanics, so that rare cases are reached. The coverage
 tally (multi-hit counts, drain at full HP, recoil knockouts, a failed heal,
 spread moves into an immunity, every pool move used) should show none at zero.
@@ -120,7 +124,20 @@ cabal run -v0 engine-pool > local/traces/slice3-pool.json
 node tools/oracle/gen-slice3.js local/traces/slice3 1500 local/traces/slice3-pool.json
 ```
 
-Its teams are built so that hazards are set, stack and fire on switch-in, often two or three on one side. The order of several hazards on one side is visible only through effects on later draws and state, such as a knockout before the next hazard or a Poison type absorbing Toxic Spikes. The trace has no battle log, so a wrong order fails only the traces where it changes HP or a side condition.
+Slice 4 (a move's own handlers) records the same way:
+
+```sh
+cabal run -v0 engine-pool > local/traces/slice4-pool.json
+node tools/oracle/gen-slice4.js local/traces/slice4 600 local/traces/slice4-pool.json
+```
+
+Its teams put the moves with handler code where their bodies branch: weights
+across the weight-based bands, statused targets and users, boosts, items held
+and used up, each weather and terrain, grounded and ungrounded targets, and
+Grassy Glide in priority ties. Its tally counts each branch from Showdown's
+own events.
+
+Slice 3's teams are built so that hazards are set, stack and fire on switch-in, often two or three on one side. The order of several hazards on one side is visible only through effects on later draws and state, such as a knockout before the next hazard or a Poison type absorbing Toxic Spikes. The trace has no battle log, so a wrong order fails only the traces where it changes HP or a side condition.
 
 The set writes four lists: `slice2-moves.json`, `slice2-species.json`,
 `slice2-abilities.json` and `slice2-items.json`. A set without the last two
@@ -139,7 +156,7 @@ pass every argument through and run nothing Showdown would not run.
 
 Traces live under `local/` and are not committed. Slice 0's 800 battles take
 about 280 MB, slice 1's 600 about 320 MB, slice 2's 900 about 340 MB and slice 3's 1,500
-about 1.0 GB. They
+about 1.0 GB and slice 4's 600 about 380 MB. They
 are reproducible from the seeds.
 
 To isolate one behaviour, write a scenario by hand and give it explicit choices:

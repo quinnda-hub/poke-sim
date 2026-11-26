@@ -11,6 +11,11 @@ module Engine.Dispatch
   ( Eng
   , runEvent
   , runEventCrit
+  , runEventOnEffect
+  , singleMoveEvent
+  , basePowerCallback
+  , damageCallback
+  , movePriorityEvent
   , singleEvent
   , fieldEvent
   , eachEvent
@@ -50,7 +55,7 @@ import qualified Data.Vector.Strict as SV
 import qualified Data.Vector.Unboxed as U
 
 import Engine.Chance
-import Engine.Damage (hasItemNamed, hasTypeNamed, isGrounded, isSemiInvulnerable, statusKey, typeIdNamed, typeImmuneTo, typeIsNamed, typeMod)
+import Engine.Damage (hasItemNamed, hasTypeNamed, isGrounded, isSemiInvulnerable, moveTypeMod, statusKey, typeIdNamed, typeImmuneTo, typeIsNamed, typeMod)
 import Engine.Dex
 import Engine.Event
 import Engine.Modifier (baseMod, chainModify, modify)
@@ -708,19 +713,36 @@ data Ctx = Ctx
 -- holder that is not active, except for @Start@ and @SwitchIn@ (@ignoringItem@: Klutz, Embargo and Magic Room
 -- cannot happen yet); an ability of a holder that is not active (@ignoringAbility@: Gastro Acid and
 -- Neutralizing Gas cannot happen yet). The Air Lock gate joins with weather.
--- LATENT: the move's own callbacks (@onEffect@, 787-795), array targets (@AfterMoveSecondary@ and @DamagingHit@
--- pass the target as a one-element array; in singles that is the same as the single target) and @fastExit@ are not
--- modelled.
+-- The move's own callback (@onEffect@, 785-795) is 'runEventOnEffect'.
+-- LATENT: array targets (@AfterMoveSecondary@ and @DamagingHit@ pass the target as a one-element array; in singles that
+-- is the same as the single target) are not modelled.
 runEvent :: MonadChance m => Dex -> EventId -> Actor -> Maybe Actor -> Maybe MoveData -> Relay -> Eng m Relay
 runEvent dx = runEventCrit dx False
 
 -- | 'runEvent' for an event of a hit whose critical-hit result is known (@ModifyDamage@): the handlers can read it as
 -- 'cCrit'.
 runEventCrit :: MonadChance m => Dex -> Bool -> EventId -> Actor -> Maybe Actor -> Maybe MoveData -> Relay -> Eng m Relay
-runEventCrit dx crit ev target source mv relay0 = do
+runEventCrit dx crit = runEventFull dx crit False
+
+-- | @runEvent@ with @onEffect@ (battle.ts 785-795): the source effect's own @on<Event>@ callback joins the collected handlers
+-- (first, `handlers.unshift`), and the whole list is then sorted as usual. The source effect is the move in use. Its keys
+-- are those of @resolvePriority@ (957-1032) for `{effect: move, callback, state: initEffectState({}), end: null,
+-- effectHolder: target}`: order, priority and subOrder from the move's own @on<Event>Order@, @on<Event>Priority@ and
+-- @on<Event>SubOrder@ (subOrder falling back to 0, since @Move@ is not in @effectTypeOrder@), the speed of the event's
+-- target (the effect holder), and @effectOrder@ 0 (an @initEffectState({})@ has no id and does not advance the counter,
+-- 3381-3391). Its state has no duration. The callbacks that pass @onEffect@: @BasePower@ (battle-actions.ts 1708, here),
+-- @ModifyTarget@ (480) and @Damage@ (battle.ts 2138); only @BasePower@ has a supported handler of a move.
+runEventOnEffect :: MonadChance m => Dex -> EventId -> Actor -> Maybe Actor -> MoveData -> Relay -> Eng m Relay
+runEventOnEffect dx ev target source mv = runEventFull dx False True ev target source (Just mv)
+
+-- | 'runEventCrit' with the @onEffect@ flag.
+runEventFull :: MonadChance m => Dex -> Bool -> Bool -> EventId -> Actor -> Maybe Actor -> Maybe MoveData -> Relay -> Eng m Relay
+runEventFull dx crit onEffect ev target source mv relay0 = do
   b <- get
   let fmt = bFormat b
-  sorted <- sortHandlers ev (findEventHandlers dx b ev target source)
+      own = [ Handler (EffectKey EffMove 0) (OwnMon target) (Just target) spec (sortKey ev spec (monSpeedKey b ev target) noEffectState) 0 False 0 False
+            | onEffect, Just m <- [mv], Just spec <- [moveSpec m POwn ev] ]
+  sorted <- sortHandlers ev (own ++ findEventHandlers dx b ev target source)
   go fmt sorted relay0 baseMod
   where
     -- after the handlers: `typeof relayVar === 'number' && relayVar === Math.abs(Math.floor(relayVar))`
@@ -1054,13 +1076,66 @@ runNative dx n c relay = do
     NExpertBelt -> do
       b <- get
       case (cMove c, cSource c) of
-        (Just mv, Just d) | typeMod dx (mvType mv) (monOf b d) > 0 -> chained (4915, 4096)
+        (Just mv, Just d) | moveTypeMod dx mv (monOf b d) > 0 -> chained (4915, 4096)
         _ -> keep
     -- filter, solidrock, prismarmor .onSourceModifyDamage(damage, source, target, move): the holder is the target
     -- (the event's source): `typeMod > 0` -> chainModify(0.75)
     NFilterLike -> case cMove c of
-      Just mv | typeMod dx (mvType mv) m > 0 -> chained (3, 4)
+      Just mv | moveTypeMod dx mv m > 0 -> chained (3, 4)
       _ -> keep
+    -- The moves' own @onBasePower@ (run by 'runEventOnEffect': the holder is the attacker, the event's target, and the
+    -- source the defender, as in the move's `onBasePower(basePower, pokemon, target)`).
+    -- facade: `pokemon.status && pokemon.status !== 'slp'` -> chainModify(2) (sleep is not in the state)
+    NFacadePower | monStatus m /= StatusNone -> chained (2, 1)
+    -- psyblade: `this.field.isTerrain('electricterrain')` -> chainModify(1.5)
+    NPsybladePower -> do
+      b <- get
+      if terrainIs dx b ["electricterrain"] then chained (3, 2) else keep
+    -- expandingforce: `this.field.isTerrain('psychicterrain') && source.isGrounded()` -> chainModify(1.5)
+    NExpandingForcePower -> do
+      b <- get
+      if terrainIs dx b ["psychicterrain"] && isGrounded dx m then chained (3, 2) else keep
+    -- ficklebeam: `if (this.randomChance(3, 10))` -> chainModify(2). The draw is made when this handler runs, at its place in
+    -- the sorted BasePower handlers, after the crit roll (getDamage 1698-1708)
+    NFickleBeamPower -> do
+      hit <- randomChance 3 10
+      if hit then chained (2, 1) else keep
+    -- venoshock, barbbarrage: `target.status === 'psn' || target.status === 'tox'` -> chainModify(2)
+    NVenoshockPower -> do
+      b <- get
+      case cSource c of
+        Just d | monStatus (monOf b d) `elem` [StatusPsn, StatusTox] -> chained (2, 1)
+        _ -> keep
+    -- brine: `target.hp * 2 <= target.maxhp` -> chainModify(2)
+    NBrinePower -> do
+      b <- get
+      case cSource c of
+        Just d | let td = monOf b d, monHp td * 2 <= monMaxHp td -> chained (2, 1)
+        _ -> keep
+    -- The moves' other handlers are not run through here: basePowerCallback and damageCallback are called directly
+    -- ('basePowerCallback', 'damageCallback'), ModifyType, ModifyMove and TryHit by 'singleMoveEvent', Effectiveness by
+    -- 'Engine.Damage.moveTypeMod', ModifyPriority by 'movePriorityEvent'.
+    NFacadePower -> keep
+    NWeightPower -> keep
+    NHeavySlamPower -> keep
+    NHexPower -> keep
+    NStoredPower -> keep
+    NAcrobaticsPower -> keep
+    NRisingVoltagePower -> keep
+    NDynamaxTryHit -> keep
+    NExpandingForceModifyMove -> keep
+    NRainAccuracyModifyMove -> keep
+    NBlizzardModifyMove -> keep
+    NBleakwindModifyMove -> keep
+    NWeatherBallType -> keep
+    NWeatherBallModifyMove -> keep
+    NTerrainPulseType -> keep
+    NTerrainPulseModifyMove -> keep
+    NIvyCudgelType -> keep
+    NFreezeDryEffectiveness -> keep
+    NFlyingPressEffectiveness -> keep
+    NGrassyGlidePriority -> keep
+    NHalfHpDamage -> keep
     -- leftovers.onResidual: this.heal(pokemon.baseMaxhp / 16); battle.heal turns an amount in (0, 1] into 1 and
     -- truncates, so the amount is floor(maxhp / 16), at least 1
     NLeftovers -> modify' (healMon holder (max 1 (monMaxHp m `quot` 16))) >> keep
@@ -1427,6 +1502,130 @@ runNative dx n c relay = do
       let mv = moveData dx (msMove ms)
        in if mvStatus mv && mvId mv /= "mefirst" then ms {msDisabled = True} else ms
     setStage holder v = modify' (modifyMon holder (\x -> x {monStatusState = (monStatusState x) {esA = v}}))
+
+-- ---------------------------------------------------------------------------
+-- A move's own handlers (docs/handlers.md, "A move's own handlers")
+
+-- | The ids of the named field conditions (weathers, terrains) that the dex has.
+fieldIds :: Dex -> [T.Text] -> [Int]
+fieldIds dx names = [i | n <- names, Just i <- [M.lookup n (dxFieldIx dx)]]
+
+-- | @this.field.isTerrain(names)@ (field.ts 174).
+terrainIs :: Dex -> Battle -> [T.Text] -> Bool
+terrainIs dx b names = maybe False (`elem` fieldIds dx names) (effectiveTerrain b)
+
+-- | @pokemon.effectiveWeather()@ is one of the weathers.
+weatherIs :: Dex -> Battle -> Actor -> [T.Text] -> Bool
+weatherIs dx b a names = maybe False (`elem` fieldIds dx names) (effectiveWeatherOf b a)
+
+-- | @pokemon.getWeight()@ (pokemon.ts 706-709): @max(1, runEvent('ModifyWeight', this, null, null, this.weighthg))@.
+-- LATENT: @ModifyWeight@ is not run. Its listeners (Heavy Metal and Light Metal, Float Stone) are unsupported, so no
+-- handler is attached; the weight is @weighthg@ (the species' own: no forme changes). Run the event here when one of them
+-- is supported.
+monWeight :: Dex -> Mon -> Int
+monWeight dx m = max 1 (spWeight (speciesData dx (monSpecies m)))
+
+-- | A move's @basePowerCallback@ (@move.basePowerCallback.call(this.battle, source, target, move)@, battle-actions.ts
+-- 1675-1677), called directly by @getDamage@ for the user and the target, or the move's own base power when it has none.
+-- The callbacks read the move in use (@move.basePower@).
+basePowerCallback :: Monad m => Dex -> Actor -> Actor -> MoveData -> Eng m Int
+basePowerCallback dx user target mv = case moveSpec mv POwn EvBasePowerCallback >>= hsBody of
+  Just (BNative n) -> gets (\b -> calc (monOf b user) (monOf b target) b n)
+  _ -> pure (mvPower mv)
+  where
+    positive bs = sum [max 0 (boostOf s bs) | s <- [BAtk, BDef, BSpa, BSpd, BSpe, BAccuracy, BEvasion]]
+    calc u t b n = case n of
+      -- lowkick, grassknot: `targetWeight >= 2000` ... 120, 100, 80, 60, 40, else 20
+      NWeightPower -> let w = monWeight dx t in
+        if w >= 2000 then 120 else if w >= 1000 then 100 else if w >= 500 then 80 else if w >= 250 then 60 else if w >= 100 then 40 else 20
+      -- heavyslam: `pokemonWeight >= targetWeight * 5` ... 120, 100, 80, 60, else 40
+      NHeavySlamPower -> let uw = monWeight dx u; tw = monWeight dx t in
+        if uw >= tw * 5 then 120 else if uw >= tw * 4 then 100 else if uw >= tw * 3 then 80 else if uw >= tw * 2 then 60 else 40
+      -- hex: `target.status || target.hasAbility('comatose')` (Comatose is unsupported) -> move.basePower * 2
+      NHexPower -> if monStatus t /= StatusNone then mvPower mv * 2 else mvPower mv
+      -- storedpower, powertrip: move.basePower + 20 * pokemon.positiveBoosts()
+      NStoredPower -> mvPower mv + 20 * positive (monBoosts u)
+      -- acrobatics: `!pokemon.item` -> move.basePower * 2
+      NAcrobaticsPower -> if monItem u == noItem then mvPower mv * 2 else mvPower mv
+      -- risingvoltage: `this.field.isTerrain('electricterrain') && target.isGrounded()` -> move.basePower * 2
+      NRisingVoltagePower -> if terrainIs dx b ["electricterrain"] && isGrounded dx t then mvPower mv * 2 else mvPower mv
+      _ -> mvPower mv
+
+-- | A move's @damageCallback@ (battle-actions.ts 1665, called directly by @getDamage@ before the crit roll: the damage it
+-- returns skips the crit, @BasePower@, the random factor and every damage modifier), or 'Nothing' when it has none.
+damageCallback :: Monad m => MoveData -> Actor -> Eng m (Maybe Int)
+damageCallback mv target = case moveSpec mv POwn EvDamageCallback >>= hsBody of
+  Just (BNative NHalfHpDamage) ->
+    -- ruination, superfang: `this.clampIntRange(Math.floor(target.getUndynamaxedHP() / 2), 1)`
+    -- (getUndynamaxedHP is the HP: nothing is Dynamaxed)
+    gets (\b -> Just (max 1 (monHp (monOf b target) `quot` 2)))
+  _ -> pure Nothing
+
+-- | @battle.singleEvent(event, move, ...)@ on the move in use, for the events whose handler of a move changes the move or
+-- only logs: @ModifyType@ and @ModifyMove@ (battle-actions.ts 494-495), @PrepareHit@ (657) and @TryHit@ (1102). No sort, and
+-- a draw only if the body draws (none does). Returns the move after the handler: a copy changed only as
+-- Showdown's handler changes the @ActiveMove@. @user@ is the Pokemon the event's target argument names and @target@ its
+-- source argument, as the callbacks `(move, pokemon, target)` read them.
+-- LATENT: a handler that can fail (a falsy return) is not modelled; the only ones run here never do.
+singleMoveEvent :: Monad m => Dex -> EventId -> Actor -> Maybe Actor -> MoveData -> Eng m MoveData
+singleMoveEvent dx ev user target mv = case moveSpec mv POwn ev >>= hsBody of
+  Just (BNative n) -> gets (\b -> changed b n)
+  _ -> pure mv
+  where
+    changed b n = case n of
+      -- thunder, hurricane: `switch (target?.effectiveWeather())`: rain -> accuracy true, sun -> 50
+      NRainAccuracyModifyMove
+        | Just t <- target, weatherIs dx b t ["raindance", "primordialsea"] -> mv {mvAccuracy = neverMisses}
+        | Just t <- target, weatherIs dx b t ["sunnyday", "desolateland"] -> mv {mvAccuracy = 50}
+      -- blizzard: `this.field.isWeather(['hail', 'snowscape'])` -> accuracy true
+      NBlizzardModifyMove | maybe False (`elem` fieldIds dx ["hail", "snowscape"]) (effectiveWeather b) -> mv {mvAccuracy = neverMisses}
+      -- bleakwindstorm: `target && ['raindance', 'primordialsea'].includes(target.effectiveWeather())` -> accuracy true
+      NBleakwindModifyMove | Just t <- target, weatherIs dx b t ["raindance", "primordialsea"] -> mv {mvAccuracy = neverMisses}
+      -- weatherball onModifyType: `switch (pokemon.effectiveWeather())`
+      NWeatherBallType -> case [ty | (names, tyName) <- weatherTypes, weatherIs dx b user names, Just ty <- [typeIdNamed dx tyName]] of
+        (ty : _) -> mv {mvType = ty}
+        [] -> mv
+      -- weatherball onModifyMove: the power doubles in sun, rain, sand and snow
+      NWeatherBallModifyMove
+        | any (\(names, _) -> weatherIs dx b user names) weatherTypes -> mv {mvPower = mvPower mv * 2}
+      -- terrainpulse onModifyType: `if (!pokemon.isGrounded()) return; switch (this.field.terrain)`
+      NTerrainPulseType | isGrounded dx (monOf b user) ->
+        case [ty | (name, tyName) <- terrainTypes, [i] <- [fieldIds dx [name]], fTerrain (bField b) == i, Just ty <- [typeIdNamed dx tyName]] of
+          (ty : _) -> mv {mvType = ty}
+          [] -> mv
+      -- terrainpulse onModifyMove: `this.field.terrain && pokemon.isGrounded()` -> move.basePower *= 2
+      NTerrainPulseModifyMove | fTerrain (bField b) /= noCond, isGrounded dx (monOf b user) -> mv {mvPower = mvPower mv * 2}
+      -- ivycudgel onModifyType: Ogerpon-Wellspring, -Hearthflame and -Cornerstone (and their Tera forms) change the type.
+      -- LATENT: those forms are not species here (the engine has base formes only), so the type never changes.
+      -- expandingforce onModifyMove: under Psychic Terrain with a grounded user `move.target = 'allAdjacentFoes'`, which
+      -- in singles is the one foe it already hits (no spread, so no spread modifier; the target is re-picked as the same foe).
+      _ -> mv
+    weatherTypes =
+      [ (["sunnyday", "desolateland"], "Fire"), (["raindance", "primordialsea"], "Water")
+      , (["sandstorm"], "Rock"), (["hail", "snowscape"], "Ice") ] :: [([T.Text], T.Text)]
+    terrainTypes =
+      [ ("electricterrain", "Electric"), ("grassyterrain", "Grass"), ("mistyterrain", "Fairy"), ("psychicterrain", "Psychic") ] :: [(T.Text, T.Text)]
+
+-- | A move action's priority (battle.ts 2690-2705, @getActionSpeed@): the base move's priority, then
+-- @singleEvent('ModifyPriority', move, null, pokemon, target, null, priority)@ and @runEvent('ModifyPriority', pokemon,
+-- target, move, priority)@. Where @getActionSpeed@ runs, so the handler reads the field as it is then (Grassy Glide: the
+-- terrain, and whether the user is grounded). The fractional priority is the caller's.
+-- LATENT: for gen > 5 Showdown stores the result in @action.move.priority@ (2702), which is the priority of the move when it is
+-- used (@getActiveMove@ returns the same object), where "Engine.Turn" uses the Dex's. Only a handler that reads
+-- @move.priority@ can tell: Psychic Terrain's @onTryHit@ (a priority above 0.1 is blocked), and Grassy Glide's raised
+-- priority needs Grassy Terrain, so Psychic Terrain is not up. Whoever adds a second ModifyPriority move or another reader
+-- of @move.priority@ must carry the action's priority into the move in use.
+movePriorityEvent :: MonadChance m => Dex -> Actor -> Maybe Actor -> MoveData -> Eng m Int
+movePriorityEvent dx user target mv = do
+  b <- get
+  let single = case moveSpec mv POwn EvModifyPriority >>= hsBody of
+        -- grassyglide: `this.field.isTerrain('grassyterrain') && source.isGrounded()` -> priority + 1
+        Just (BNative NGrassyGlidePriority) | terrainIs dx b ["grassyterrain"] && isGrounded dx (monOf b user) -> mvPriority mv + 1
+        _ -> mvPriority mv
+  r <- runEvent dx EvModifyPriority user target (Just mv) (RInt single)
+  pure (fromRelayInt single r)
+  where
+    fromRelayInt d r = case r of RInt v -> v; _ -> d
 
 -- ---------------------------------------------------------------------------
 -- Speed

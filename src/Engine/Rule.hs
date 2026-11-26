@@ -93,8 +93,8 @@ data Secondary = Secondary
 -- | What a move does, by pipeline slot.
 data MoveRule = MoveRule
   { mrDamaging :: !Bool
-  -- ^ @basePower > 0@: @getDamage@ runs. A status move (@basePower 0@) deals no damage and has no hit
-  -- effects beyond 'mrOnHit'.
+  -- ^ @category !== 'Status'@: @getDamage@ runs (a move with a @basePowerCallback@ or @damageCallback@ has
+  -- @basePower 0@). A status move deals no damage and has no hit effects beyond 'mrOnHit'.
   , mrHits :: !Hits
   , mrTarget :: !RuleTarget
   , mrOnHit :: ![Effect]
@@ -207,7 +207,7 @@ ruleKeys =
 -- | Keys that are truthy on moves the engine accepts but cannot change the outcome, and why.
 inertKeys :: [(T.Text, T.Text)]
 inertKeys =
-  [ ("baseMoveType", "copy of type; only read by ModifyType handlers (Hidden Power, Weather Ball), which are rejected")
+  [ ("baseMoveType", "copy of type; only read by ModifyType handlers of Hidden Power and Terablast, which are rejected")
   ]
 
 -- | Flags that cannot matter while the engine has none of the thing that reads them.
@@ -262,14 +262,18 @@ conditionField moveId o = case [f | f <- ["sideCondition", "terrain", "pseudoWea
 -- The handlers a move's @condition@ block lists (the export names them @condition.on...@) belong to the field
 -- condition that the move's @sideCondition@, @weather@, @terrain@ or @pseudoWeather@ names: the move translates
 -- when 'CondLookup' accepts that condition. Every other handler (@onTry@, @onHit@, ...) is a rejection.
-moveRule :: CondLookup -> Value -> Either Reason MoveRule
-moveRule condOf (Object o) = do
+--
+-- The second argument is why the move's own handlers have no bodies, or 'Nothing' when each has one (or the move
+-- has none): "Engine.Dex" builds the move's effect and passes its rejection.
+moveRule :: CondLookup -> Maybe Reason -> Value -> Either Reason MoveRule
+moveRule condOf ownRejected (Object o) = do
   let handlerNames = case KM.lookup "handlers" o of
         Just (Array xs) -> [t | String t <- V.toList xs]
         _ -> []
       (conditionNames, ownNames) = partitionBy ("condition." `T.isPrefixOf`) handlerNames
   case KM.lookup "handlers" o of
-    Just hs | truthy hs, not (null ownNames) -> Left ("has handler code " <> showHandlers (Array (V.fromList (map String ownNames))))
+    Just hs | truthy hs, not (null ownNames), Just why <- ownRejected ->
+      Left ("has handler code " <> showHandlers (Array (V.fromList (map String ownNames))) <> ": " <> why)
     _ -> Right ()
   let hasCondField = conditionField (case KM.lookup "id" o of Just (String i) -> i; _ -> "") o /= Nothing
   when (not (null conditionNames) && not hasCondField) $
@@ -298,9 +302,9 @@ moveRule condOf (Object o) = do
       | t == "all" -> Right TargetAll
       | otherwise -> Left ("target " <> t)
     _ -> Left "no target"
-  damaging <- case KM.lookup "basePower" o of
-    Just (Number n) | Just p <- toBoundedInteger n -> Right ((p :: Int) > 0)
-    _ -> Left "no basePower"
+  damaging <- case (KM.lookup "basePower" o, KM.lookup "category" o) of
+    (Just (Number n), Just (String cat)) | Just _ <- (toBoundedInteger n :: Maybe Int) -> Right (cat /= "Status")
+    _ -> Left "no basePower or category"
   drain <- ratio "drain"
   recoil <- ratio "recoil"
   heal <- ratio "heal"
@@ -357,7 +361,7 @@ moveRule condOf (Object o) = do
       Just (Array xs) | [Number a, Number b] <- V.toList xs, Just x <- toBoundedInteger a, Just y <- toBoundedInteger b, y > 0, x > 0 ->
         Right (Just (x, y))
       Just v -> Left (k <> " " <> showV v)
-moveRule _ _ = Left "move is not an object"
+moveRule _ _ _ = Left "move is not an object"
 
 -- | A key of the move is accounted for. @condition@ is the block of the field condition that the move's
 -- @sideCondition@, @weather@, @terrain@ or @pseudoWeather@ names; it is translated into the condition table.

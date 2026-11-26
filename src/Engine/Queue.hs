@@ -17,7 +17,7 @@ import qualified Data.Vector.Strict as SV
 
 import Engine.Chance (MonadChance (..), speedSortWith)
 import Engine.Dex
-import Engine.Dispatch (Eng, getActionSpeed)
+import Engine.Dispatch (Eng, getActionSpeed, movePriorityEvent)
 import Engine.Event (SortKey (..), compareKey, priorityScale, speedScale)
 import Engine.State
 
@@ -50,24 +50,25 @@ sortQueue q = SV.fromList <$> speedSortWith comparePriority (SV.toList q)
 actionSpeedOf :: MonadChance m => Dex -> Action -> Eng m Action
 actionSpeedOf dx ac = do
   b <- get
-  let withPriority = case (acKind ac, acActor ac) of
-        (KMove, Just a) -> ac {acPriority = movePriority dx (monOf b a) (acArg ac) * priorityScale}
-        _ -> ac
+  withPriority <- case (acKind ac, acActor ac) of
+    (KMove, Just a@(Actor p _)) -> case moveInSlot dx (monOf b a) (acArg ac) of
+      -- the priority the action has now (battle.ts 2690-2705): the move's ModifyPriority handler reads the field as it is
+      Just mv -> (\pr -> ac {acPriority = pr * priorityScale}) <$> movePriorityEvent dx a (Just (activeActor (other p) b)) mv
+      Nothing -> pure ac {acPriority = 0}
+    _ -> pure ac
   case acActor ac of
     Nothing -> pure withPriority {acSpeed = 1 * speedScale}
     Just a -> do
       s <- getActionSpeed dx a
       pure withPriority {acSpeed = s * speedScale}
 
--- | Base priority of the move in a slot; Struggle is slot -1.
--- LATENT: Showdown's getActionSpeed also runs ModifyPriority and adds fractionalPriority (battle.ts ~2701); the
--- scaled keys have room for the fraction, but nothing sets one yet.
-movePriority :: Dex -> Mon -> Int -> Int
-movePriority dx m slot
-  | slot < 0 = mvPriority (dxStruggle dx)
-  | otherwise = case monMoves m SV.!? slot of
-      Just ms -> mvPriority (moveData dx (msMove ms))
-      Nothing -> 0
+-- | The move in a slot; Struggle is slot -1.
+-- LATENT: Showdown's getActionSpeed also adds fractionalPriority (battle.ts 2701); the scaled keys have room for the
+-- fraction, but nothing sets one yet.
+moveInSlot :: Dex -> Mon -> Int -> Maybe MoveData
+moveInSlot dx m slot
+  | slot < 0 = Just (dxStruggle dx)
+  | otherwise = (\ms -> moveData dx (msMove ms)) <$> monMoves m SV.!? slot
 
 -- | @queue.resolveAction@ for a freshly built action: fill in order, priority and speed,
 -- and clear the switch flag of a switching Pokemon.
