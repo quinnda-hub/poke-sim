@@ -334,11 +334,22 @@ checkTrace dex tr = case prepare of
                   [] -> pure ()
                 when (rsConsumed rsEnd /= total) $
                   endFail ("draws consumed at the end: expected " ++ show total ++ ", engine made " ++ show (rsConsumed rsEnd))
-                case runReplay rsEnd (step dex bEnd (Nothing, Nothing)) of
-                  Right (Left BattleFinished, _) -> Right ()
-                  res -> endFail ("step on a finished battle: expected BattleFinished, got " ++ showStepResult res)
+                -- A trace the recorder cut off at its turn limit ends at a decision point (record.js stops at the top of
+                -- the loop, before the choices): the battle is not over (`ended` is compared above), so an empty step
+                -- must be refused for the missing choice, without a draw. Otherwise the battle is over and the step is
+                -- refused as BattleFinished.
+                case (tr .: "truncated", runReplay rsEnd (step dex bEnd (Nothing, Nothing))) of
+                  (Bool True, Right (Left e, rs'))
+                    | isMissing e, rsConsumed rs' == rsConsumed rsEnd -> Right ()
+                  (Bool True, res) -> endFail ("empty step on a truncated battle: expected MissingChoice without a draw, got " ++ showStepResult res)
+                  (_, Right (Left BattleFinished, _)) -> Right ()
+                  (_, res) -> endFail ("step on a finished battle: expected BattleFinished, got " ++ showStepResult res)
                 Right (length (arr (tr .: "steps")), total)
           evaluate (forceE check)
+
+    isMissing e = case e of
+      MissingChoice _ -> True
+      _ -> False
 
     forceE e = case e of
       Left (Failure a t d m) -> length a + length m + d + maybe 0 id t `seq` e
@@ -389,6 +400,7 @@ diffState dex b st =
     ++ cmp "request" (txt (st .: "request")) requestName
     ++ cmp "ended" (st .: "ended") (Bool ended)
     ++ cmp "winner" (st .: "winner") winnerValue
+    ++ diffField dex (bField b) (st .: "field")
     ++ concat
       [ diffSide dex p (sideOf p b) sd
       | (p, sd) <- zip [P1, P2] (arr (st .: "sides"))
@@ -400,9 +412,38 @@ diffState dex b st =
       Awaiting MoveRequest _ _ -> ("move", False, Null)
       Awaiting SwitchRequest _ _ -> ("switch", False, Null)
 
+-- | The field as the trace records it (record.js @snapshot@): the weather and terrain ids and their durations (null
+-- when the state has none), and the pseudo-weathers with their duration.
+diffField :: Dex -> Field -> Value -> [Diff]
+diffField dex f ev =
+  cmp "field.weather" (txt (ev .: "weather")) (condIdName dex (fWeather f))
+    ++ cmp "field.weatherDuration" (ev .: "weatherDuration") (durationValue (fWeatherState f))
+    ++ cmp "field.terrain" (txt (ev .: "terrain")) (condIdName dex (fTerrain f))
+    ++ cmp "field.terrainDuration" (ev .: "terrainDuration") (durationValue (fTerrainState f))
+    ++ cmp "field.pseudoWeather" (ev .: "pseudoWeather") (condMap dex (fPseudo f))
+  where
+    durationValue st = if esDuration st == 0 then Null else Number (fromIntegral (esDuration st))
+
+-- | A field condition's id as Showdown spells it (@''@ for none). An index with no table entry still shows up, so
+-- it cannot hide from the compare.
+condIdName :: Dex -> Int -> String
+condIdName dex i
+  | i == noCond = ""
+  | otherwise = maybe ("<condition " ++ show i ++ ">") (T.unpack . cnId) (dxFieldConds dex V.!? i)
+
+-- | @conditionMap@ of record.js: each condition with its @duration@ and @layers@ when its state has them.
+condMap :: Dex -> SV.Vector CondEntry -> Value
+condMap dex es = Object (KM.fromList
+  [ (K.fromText (T.pack (condIdName dex i)), Object (KM.fromList
+      ([("duration", Number (fromIntegral (esDuration st))) | esDuration st /= 0]
+        ++ [("layers", Number (fromIntegral (esA st))) | esA st /= -1])))
+  | CondEntry i st <- SV.toList es
+  ])
+
 diffSide :: Dex -> Player -> Side -> Value -> [Diff]
 diffSide dex p s sd =
   cmp (name ++ ".pokemonLeft") (int (sd .: "pokemonLeft")) (Just (sLeft s))
+    ++ cmp (name ++ ".sideConditions") (sd .: "sideConditions") (condMap dex (sConds s))
     ++ cmp (name ++ ".pokemon count") (length expected) (U.length (sSlots s))
     ++ concat
       [ diffMon dex (name ++ ".pokemon[" ++ show slot ++ "]") orig m ev
@@ -424,11 +465,12 @@ diffMon dex path orig m ev =
     ++ cmp (path ++ ".status") (txt (ev .: "status")) (statusName (monStatus m))
     -- statusState.stage (toxic's counter): present with the value, or absent
     ++ cmp (path ++ ".statusState.stage") (int (ev .: "statusState" .: "stage")) (if esA (monStatusState m) < 0 then Nothing else Just (esA (monStatusState m)))
-    -- volatiles: the engine models only flinch (duration 1), which a battle that ends mid-residual leaves in the
-    -- final snapshot; every other volatile must be absent
+    -- volatiles: every volatile the engine holds, by name, with its duration as record.js writes it (only when
+    -- Showdown's state has one: the engine's 0 is "no duration", since a duration that counts down to 0 removes the
+    -- volatile); every other volatile must be absent
     ++ cmp (path ++ ".volatiles") (ev .: "volatiles")
          (Object (KM.fromList
-           [ (K.fromText name, Object (KM.singleton "duration" (Number (fromIntegral (esDuration vs)))))
+           [ (K.fromText name, Object (if esDuration vs == 0 then KM.empty else KM.singleton "duration" (Number (fromIntegral (esDuration vs)))))
            | Volatile i vs <- SV.toList (monVolatiles m)
              -- an id with no condition name still shows up (as "<volatile i>"), so it cannot hide from the compare
            , let name = case [condName c | c <- [minBound .. maxBound], fromEnum c == i] of
@@ -478,12 +520,8 @@ diffMon dex path orig m ev =
 -- out-of-slice mechanic fails loudly instead of going unchecked.
 unmodelled :: Value -> [Diff]
 unmodelled st =
-  isEmptyStr "field.weather" (st .: "field" .: "weather")
-    ++ isEmptyStr "field.terrain" (st .: "field" .: "terrain")
-    ++ isEmptyObj "field.pseudoWeather" (st .: "field" .: "pseudoWeather")
-    ++ concat
-      [ isEmptyObj (sp ++ ".sideConditions") (sd .: "sideConditions")
-          ++ concat
+  concat
+      [ concat
             [ let pp = sp ++ ".pokemon[" ++ show j ++ "]"
                in isEmptyObj (pp ++ ".statusState (keys other than stage)") (dropKey "stage" (pk .: "statusState"))
                     ++ isEmptyStr (pp ++ ".terastallized") (pk .: "terastallized")

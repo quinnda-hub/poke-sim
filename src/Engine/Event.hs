@@ -7,6 +7,7 @@ module Engine.Event
   , SortKind (..)
   , eventSort
   , eventPrefixed
+  , eventFastExit
   , eventName
   , Prefix (..)
   , prefixName
@@ -15,6 +16,7 @@ module Engine.Event
   , CondId (..)
   , condName
   , EffectKind (..)
+  , ownPrefix
   , EffectKey (..)
     -- * Handlers
   , HandlerSpec (..)
@@ -31,6 +33,7 @@ module Engine.Event
   , SortKey (..)
   , compareKey
   , compareLeftToRight
+  , compareRedirect
   ) where
 
 import qualified Data.Text as T
@@ -59,6 +62,38 @@ data EventId
   | EvDisableMove
   | EvUpdate
   | EvBeforeTurn
+  | EvRestart
+  -- ^ @SideRestart@ / @FieldRestart@ (the handler is @onSideRestart@, prefix 'PSide').
+  | EvPrepareHit
+  | EvTryHitSide
+  | EvTryHitField
+  | EvEnd
+  -- ^ @SideEnd@ / @FieldEnd@ (the handler is @onSideEnd@ / @onFieldEnd@).
+  | EvDurationCallback
+  -- ^ Not an event: the export lists a condition's @durationCallback@ as a handler, and the engine keeps it as the
+  -- handler @(POwn, EvDurationCallback)@, run where side.ts @addSideCondition@ and field.ts @addPseudoWeather@ call it.
+  | EvWeather
+  -- ^ @Weather@ (@eachEvent('Weather')@ from a weather's @onFieldResidual@): the handler @onWeather@ of sandstorm.
+  | EvWeatherChange
+  | EvWeatherModifyDamage
+  -- ^ @priorityEvent('WeatherModifyDamage', attacker, defender, move, damage)@ in @modifyDamage@.
+  | EvImmunity
+  -- ^ @runEvent('Immunity', pokemon, null, null, type)@ in @runStatusImmunity@; the relay value is the type or status key.
+  | EvSetWeather
+  | EvTryHit
+  -- ^ @runEvent('TryHit', targets, pokemon, move)@ (battle-actions.ts @hitStepTryHitEvent@): step 1 of @trySpreadMoveHit@.
+  | EvSetStatus
+  -- ^ @runEvent('SetStatus', pokemon, source, effect, status)@ in @setStatus@; the relay value is the status id.
+  | EvTryAddVolatile
+  -- ^ @runEvent('TryAddVolatile', pokemon, source, effect, status)@ in @addVolatile@; the relay value is the volatile id.
+  | EvTerrainChange
+  | EvUseItem
+  -- ^ @runEvent('UseItem', pokemon, null, null, item)@ in @useItem@ (pokemon.ts 1844).
+  | EvAfterUseItem
+  -- ^ @runEvent('AfterUseItem', pokemon, null, null, item)@ in @useItem@ (1867): Unburden.
+  | EvTakeItem
+  -- ^ @runEvent('TakeItem', ...)@ in @takeItem@: no supported move takes items, so it is never run; it is an event only
+  -- so that the handlers Booster Energy and Unburden list for it parse.
   deriving (Eq, Show, Enum, Bounded)
 
 -- | How @runEvent@ orders the handlers of an event (battle.ts 797-803).
@@ -67,6 +102,8 @@ data SortKind
     SpeedSort
   | -- | @compareLeftToRightOrder@: a stable sort, never draws.
     LeftToRight
+  | -- | @compareRedirectOrder@ (@priorityEvent@, @fastExit@): a stable sort, never draws.
+    RedirectSort
   deriving (Eq, Show)
 
 -- | @['Invulnerability', 'TryHit', 'DamagingHit', 'EntryHazard'].includes(eventid)@ sorts left to right; every
@@ -75,7 +112,15 @@ data SortKind
 eventSort :: EventId -> SortKind
 eventSort e = case e of
   EvDamagingHit -> LeftToRight
+  EvTryHit -> LeftToRight
+  EvWeatherModifyDamage -> RedirectSort
   _ -> SpeedSort
+
+-- | @priorityEvent@ is @runEvent(..., fastExit = true)@: the event ends at the first handler that returns a value (not
+-- @undefined@), and its handlers sort with @compareRedirectOrder@ (battle.ts 927-934, 797-803). Only
+-- @WeatherModifyDamage@ is one here.
+eventFastExit :: EventId -> Bool
+eventFastExit e = e == EvWeatherModifyDamage
 
 -- | Whether the @onAlly@, @onFoe@, @onAny@ and @onSource@ handlers of the event take part
 -- (battle.ts @findEventHandlers@ 1055: not for @BeforeTurn@, @Update@, @Weather@, @WeatherChange@,
@@ -84,6 +129,9 @@ eventPrefixed :: EventId -> Bool
 eventPrefixed e = case e of
   EvBeforeTurn -> False
   EvUpdate -> False
+  EvWeather -> False
+  EvWeatherChange -> False
+  EvTerrainChange -> False
   _ -> True
 
 -- | The event's name in Showdown (@on<Name>@ is a handler).
@@ -107,10 +155,34 @@ eventName e = case e of
   EvDisableMove -> "DisableMove"
   EvUpdate -> "Update"
   EvBeforeTurn -> "BeforeTurn"
+  EvRestart -> "Restart"
+  EvPrepareHit -> "PrepareHit"
+  EvTryHitSide -> "TryHitSide"
+  EvTryHitField -> "TryHitField"
+  EvEnd -> "End"
+  EvDurationCallback -> "DurationCallback"
+  EvWeather -> "Weather"
+  EvWeatherChange -> "WeatherChange"
+  EvWeatherModifyDamage -> "WeatherModifyDamage"
+  EvImmunity -> "Immunity"
+  EvSetWeather -> "SetWeather"
+  EvTryHit -> "TryHit"
+  EvSetStatus -> "SetStatus"
+  EvTryAddVolatile -> "TryAddVolatile"
+  EvTerrainChange -> "TerrainChange"
+  EvUseItem -> "UseItem"
+  EvAfterUseItem -> "AfterUseItem"
+  EvTakeItem -> "TakeItem"
 
 -- | Which Pokemon a handler reacts to: the holder (@onX@), its allies (@onAllyX@), its foes (@onFoeX@), the
 -- source of the event (@onSourceX@) or anyone (@onAnyX@).
-data Prefix = POwn | PAlly | PFoe | PSource | PAny
+--
+-- 'PSide' and 'PField' are the callbacks a side condition or a field condition keeps for itself:
+-- @onSide<Event>@ and @onField<Event>@ (battle.ts @fieldEvent@ collects them with @findSideEventHandlers(side,
+-- 'onSide' + eventid)@ and @findFieldEventHandlers(field, 'onField' + eventid)@, and @singleEvent('SideStart', ...)@
+-- reads @onSideStart@). The plain @on<Event>@ of a side or field condition ('POwn') is what @runEvent@ and the
+-- per-Pokemon collection of @fieldEvent@ (hazards' @onSwitchIn@) run.
+data Prefix = POwn | PAlly | PFoe | PSource | PAny | PSide | PField
   deriving (Eq, Show, Enum, Bounded)
 
 prefixName :: Prefix -> T.Text
@@ -120,10 +192,13 @@ prefixName p = case p of
   PFoe -> "Foe"
   PSource -> "Source"
   PAny -> "Any"
+  PSide -> "Side"
+  PField -> "Field"
 
 -- | Split a handler name of the export (@onBeforeMove@, @onFoeBeforeMove@) into its prefix and event, when the
 -- engine knows the event.
 parseHandlerName :: T.Text -> Maybe (Prefix, EventId)
+parseHandlerName "durationCallback" = Just (POwn, EvDurationCallback)
 parseHandlerName n = case T.stripPrefix "on" n of
   Nothing -> Nothing
   Just rest -> case [(p, e) | p <- [minBound .. maxBound], e <- [minBound .. maxBound], prefixName p <> eventName e == rest] of
@@ -135,7 +210,7 @@ parseHandlerName n = case T.stripPrefix "on" n of
 
 -- | The conditions the engine supports: the statuses of slice 1 and the flinch volatile. The index
 -- ('fromEnum') is the id used in the state and in the @Dex@ condition table.
-data CondId = CBrn | CPar | CPsn | CTox | CFrz | CFlinch
+data CondId = CBrn | CPar | CPsn | CTox | CFrz | CFlinch | CProtosynthesis | CQuarkDrive | CUnburden
   deriving (Eq, Show, Enum, Bounded)
 
 -- | The key of the condition in @conditions.json@ (data/conditions.ts).
@@ -147,14 +222,37 @@ condName c = case c of
   CTox -> "tox"
   CFrz -> "frz"
   CFlinch -> "flinch"
+  CProtosynthesis -> "protosynthesis"
+  CQuarkDrive -> "quarkdrive"
+  CUnburden -> "unburden"
 
--- | What kind of effect holds a handler. Showdown's other kinds (side and slot conditions, weather, terrain,
--- pseudo-weather, the move itself) join when their holders exist in the state.
-data EffectKind = EffStatus | EffVolatile | EffAbility | EffItem
+-- | What kind of effect holds a handler. Showdown's other kinds (slot conditions, the move itself) join when their
+-- holders exist in the state.
+data EffectKind
+  = EffStatus
+  | EffVolatile
+  | EffAbility
+  | EffItem
+  | -- | A side condition (@side.sideConditions@): hazards, screens, Tailwind.
+    EffSideCond
+  | EffWeather
+  | EffTerrain
+  | -- | @field.pseudoWeather@: Trick Room, Gravity, ...
+    EffPseudoWeather
   deriving (Eq, Show)
 
+-- | The prefix of the callbacks an effect of this kind keeps for itself, as @singleEvent@ reads them: a side
+-- condition's @SideStart@ is its @onSideStart@, a field condition's @FieldStart@ its @onFieldStart@.
+ownPrefix :: EffectKind -> Prefix
+ownPrefix k = case k of
+  EffSideCond -> PSide
+  EffWeather -> PField
+  EffTerrain -> PField
+  EffPseudoWeather -> PField
+  _ -> POwn
+
 -- | An effect: its kind and its id (a 'CondId' index for statuses and volatiles; an index into the @Dex@
--- ability or item table for the others).
+-- ability, item or field-condition table for the others).
 data EffectKey = EffectKey !EffectKind !Int
   deriving (Eq, Show)
 
@@ -178,7 +276,10 @@ data HandlerSpec = HandlerSpec
 -- | The vocabulary of data rules for handlers: @chainModify(n, d)@ of the event's modifier when every
 -- condition holds (docs/handlers.md section 3). A rule kind or condition kind exists only when at least three
 -- whitelisted effects are expressed by it exactly; the justification is in "Engine.Effects".
-data HandlerRule = RChainModify !Int !Int ![RuleCond]
+data HandlerRule
+  = RChainModify !Int !Int ![RuleCond]
+  | -- | @pokemon.useItem()@ when every condition holds (the seeds: @onStart@ and @onTerrainChange@ under their terrain).
+    RUseItem ![RuleCond]
   deriving (Eq, Show)
 
 -- | A condition of a rule, on the event's move or the handler's holder.
@@ -187,6 +288,11 @@ data RuleCond
     CMoveType !Int
   | -- | @holder.hp <= holder.maxhp * n / d@.
     CHolderHpAtMost !Int !Int
+  | -- | The effective weather is one of these field-condition ids (@pokemon.effectiveWeather()@ or
+    -- @field.isWeather(...)@: swiftswim, chlorophyll, sandrush, slushrush).
+    CWeather ![Int]
+  | -- | @this.field.isTerrain(...)@: the terrain is one of these field-condition ids (the seeds).
+    CTerrain ![Int]
   deriving (Eq, Show)
 
 -- | What a handler does.
@@ -200,7 +306,8 @@ data Body
 
 -- | The value an event threads through its handlers (Showdown's @relayVar@). 'RNone' is the hidden @true@ of an
 -- event run without one: it is not passed to the handlers and it is relayTruthy.
-data Relay = RNone | RBool !Bool | RInt !Int
+data Relay = RNone | RBool !Bool | RInt !Int | RText !T.Text
+  -- ^ 'RText' is a type or status key (@Immunity@: @'frz'@, @'sandstorm'@).
   deriving (Eq, Show)
 
 -- | Showdown's truthiness of a relay value: @false@ and 0 are falsy.
@@ -208,6 +315,7 @@ relayTruthy :: Relay -> Bool
 relayTruthy r = case r of
   RBool False -> False
   RInt 0 -> False
+  RText t | T.null t -> False
   _ -> True
 
 -- | The handlers written in Haskell. Each is named after the condition and event it implements.
@@ -237,12 +345,88 @@ data NativeId
   | NFlameOrb
   | NToxicOrb
   | NAssaultVestDisable
+  | NStealthRockSwitchIn
+  | NLayerStart
+  -- ^ @this.effectState.layers = 1@ (spikes, toxicspikes @onSideStart@).
+  | NSpikesRestart
+  | NToxicSpikesRestart
+  | NSpikesSwitchIn
+  | NToxicSpikesSwitchIn
+  | NStickyWebSwitchIn
+  | NToxicDebris
+  | NLightClayDuration
+  -- ^ reflect, lightscreen @durationCallback@: 8 with a Light Clay user, else 5.
+  | NTailwindDuration
+  | NTrickRoomDuration
+  | NReflectDamage
+  | NLightScreenDamage
+  | NTrickRoomRestart
+  | NWeatherDuration
+  -- ^ A weather's @durationCallback@: 8 turns when the setter holds its rock (heatrock, damprock, smoothrock, icyrock).
+  | NWeatherResidual
+  -- ^ @onFieldResidual@: a log line, then @eachEvent('Weather')@.
+  | NWeatherResidualIfActive
+  -- ^ The same when @field.isWeather(own id)@ (sandstorm, snowscape).
+  | NSandstormWeather
+  -- ^ sandstorm @onWeather@: chip damage of @baseMaxhp / 16@ behind the weather immunity.
+  | NSandstormSpD
+  | NSnowscapeDef
+  | NSunnyDayDamage
+  | NRainDanceDamage
+  | NSunnyDayImmunity
+  | NSandRushImmunity
+  | NHydration
+  | NDrought
+  | NDrizzle
+  | NSandStream
+  | NSnowWarning
+  | NTerrainDuration
+  -- ^ A terrain's @durationCallback@: 8 turns when the setter holds Terrain Extender, else 5.
+  | NElectricTerrainSetStatus
+  | NElectricTerrainTryAddVolatile
+  | NElectricTerrainPower
+  | NGrassyTerrainPower
+  | NGrassyTerrainHeal
+  | NMistyTerrainSetStatus
+  | NMistyTerrainTryAddVolatile
+  | NMistyTerrainPower
+  | NPsychicTerrainTryHit
+  | NPsychicTerrainPower
+  | NOvercoatImmunity
+  | NOvercoatTryHit
+  | NLeafGuardSetStatus
+  | NLeafGuardTryAddVolatile
+  | NElectricSurge
+  | NGrassySurge
+  | NPsychicSurge
+  | NMistySurge
+  | NParadoxStart
+  -- ^ protosynthesis, quarkdrive @condition.onStart@: @fromBooster@ when the effect is Booster Energy, @bestStat@.
+  | NParadoxAtk
+  | NParadoxDef
+  | NParadoxSpA
+  | NParadoxSpD
+  | NParadoxSpe
+  | NUnburdenSpe
+  | NProtosynthesisStart
+  | NProtosynthesisWeatherChange
+  | NProtosynthesisEnd
+  | NQuarkDriveStart
+  | NQuarkDriveTerrainChange
+  | NQuarkDriveEnd
+  | NUnburdenAfterUseItem
+  | NUnburdenEnd
+  | NInertTakeItem
+  -- ^ A @TakeItem@ handler (Booster Energy, Unburden): no supported move takes an item, so it cannot run.
+  | NBoosterEnergyStart
+  | NBoosterEnergyUpdate
   deriving (Eq, Show)
 
 -- | The body of each handler the engine implements (written by hand: Showdown's handlers are code). A condition
 -- is supported only when every handler the export lists for it has a body here.
 -- Source: data/conditions.ts, @brn@ (lines 2-19), @par@ (20-47), @frz@ (92-122), @psn@ (123-137), @tox@
--- (138-163) and @flinch@ (198-206).
+-- (138-163) and @flinch@ (198-206); and the @condition@ blocks of the abilities protosynthesis, quarkdrive and
+-- unburden (data/abilities.ts).
 nativeBody :: CondId -> Prefix -> EventId -> Maybe Body
 nativeBody c POwn e = BNative <$> case (c, e) of
   (CBrn, EvStart) -> Just NLogOnly
@@ -261,8 +445,22 @@ nativeBody c POwn e = BNative <$> case (c, e) of
   (CFrz, EvAfterMoveSecondary) -> Just NFrzAfterMoveSecondary
   (CFrz, EvDamagingHit) -> Just NFrzDamagingHit
   (CFlinch, EvBeforeMove) -> Just NFlinchBeforeMove
+  (CProtosynthesis, EvStart) -> Just NParadoxStart
+  (CProtosynthesis, EvEnd) -> Just NLogOnly
+  (CQuarkDrive, EvStart) -> Just NParadoxStart
+  (CQuarkDrive, EvEnd) -> Just NLogOnly
+  (CUnburden, EvModifySpe) -> Just NUnburdenSpe
+  (_, EvModifyAtk) | paradox c -> Just NParadoxAtk
+  (_, EvModifyDef) | paradox c -> Just NParadoxDef
+  (_, EvModifySpA) | paradox c -> Just NParadoxSpA
+  (_, EvModifySpD) | paradox c -> Just NParadoxSpD
+  (_, EvModifySpe) | paradox c -> Just NParadoxSpe
   _ -> Nothing
 nativeBody _ _ _ = Nothing
+
+-- | The two Paradox abilities' volatiles share their bodies.
+paradox :: CondId -> Bool
+paradox c = c == CProtosynthesis || c == CQuarkDrive
 
 -- ---------------------------------------------------------------------------
 -- Sort keys
@@ -308,3 +506,10 @@ absentLast o = if o == 0 then 4294967296 else o
 compareLeftToRight :: SortKey -> SortKey -> Ordering
 compareLeftToRight a b =
   compare (absentLast (skOrder a)) (absentLast (skOrder b)) <> compare (skPriority b) (skPriority a)
+
+-- | @battle.compareRedirectOrder@ (battle.ts 420): priority descending, speed descending, then (both holders being
+-- Pokemon) the order of their ability states, which is not modelled: its only other user is @RedirectTarget@, and a
+-- @WeatherModifyDamage@ list holds one handler.
+-- LATENT: the ability-state tie-break of @compareRedirectOrder@.
+compareRedirect :: SortKey -> SortKey -> Ordering
+compareRedirect a b = compare (skPriority b) (skPriority a) <> compare (skSpeed b) (skSpeed a)

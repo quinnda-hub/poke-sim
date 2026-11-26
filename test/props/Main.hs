@@ -25,14 +25,14 @@ import System.Random.SplitMix (mkSMGen)
 
 import Engine
 import Engine.Chance (runSample)
-import Engine.Dex (Condition (..), Dex (..), supportedMoves)
-import Engine.Effects (abilityBodies, itemBodies)
-import Engine.Event (CondId (..), HandlerSpec (..), condName)
+import Engine.Dex (Condition (..), Dex (..), dexCondLookup, supportedMoves)
+import Engine.Effects (abilityBodies, fieldCondBodies, itemBodies)
+import Engine.Event (CondId (..), EventId (..), HandlerSpec (..), Prefix (..), condName)
 import Engine.Format (trunc, truncBits)
 import Engine.Rule (executable, moveRule)
 import Engine.State
 import Engine.Modifier (baseMod, chain, chainModify, finalModify, modify, modifyBy)
-import Engine.Stats (boostedStat, finalSpeed, parSpe)
+import Engine.Stats (actionSpeed, boostedStat, finalSpeed, parSpe)
 import Engine.Turn (roundDiv, stagedAccuracy)
 import Playout
 
@@ -46,6 +46,8 @@ main = do
   dexDir <- fromMaybe "data/gen9" <$> lookupEnv "POKESIM_DEX"
   dex <- loadDex dexDir
   movesJson <- eitherDecodeFileStrict' (dexDir </> "moves.json") >>= either die pure
+  conditionsJson <- eitherDecodeFileStrict' (dexDir </> "conditions.json") >>= either die pure
+  abilitiesJson <- eitherDecodeFileStrict' (dexDir </> "abilities.json") >>= either die pure
   let n = if tier == ("fast" :: String) then 100 else 2000 :: Int
   putStrLn ("props: tier " ++ tier ++ ", " ++ show n ++ " tests per property")
   H.defaultMain
@@ -55,7 +57,9 @@ main = do
         , ("every move translates to Right or Left and supported moves are executable",
             withTests 1 (translation dex movesJson))
         , ("every condition the engine runs is supported: a body for each handler the export lists",
-            withTests 1 (conditionsSupported dex))
+            withTests 1 (conditionsSupported dex conditionsJson abilitiesJson))
+        , ("a field condition is supported exactly when it has bodies, one for each handler the export lists and no others",
+            withTests 1 (fieldConditionsSupported dex))
         , ("an ability or item is supported exactly when it has bodies, one for each handler the export lists and no others",
             withTests 1 (effectsSupported dex))
         ]
@@ -63,6 +67,7 @@ main = do
         [ ("roundDiv is Math.round(n / d)", withTests (fromIntegral n) propRoundDiv)
         , ("boostedStat is Math.floor(stat * stage multiplier)", withTests (fromIntegral n) propBoostedStat)
         , ("a paralysed action speed is floor(boosted speed * 50 / 100)", withTests (fromIntegral n) propParalysedSpeed)
+        , ("an action speed is a 13-bit value, and Trick Room reverses the order of speeds", withTests (fromIntegral n) propActionSpeed)
         , ("stagedAccuracy is trunc(acc * stage multiplier)", withTests (fromIntegral n) propAccuracy)
         , ("trunc and truncBits are >>> 0 and its masks", withTests (fromIntegral n) propTrunc)
         , ("chain and chainModify are ((a * b + 2048) >> 12) of the scaled modifiers", withTests (fromIntegral n) propChain)
@@ -131,12 +136,12 @@ translation dex movesJson = withTests 1 $ property $ do
     Object o -> pure (KM.toList o)
     _ -> footnote "moves.json is not an object" >> failure
   mapM_ (\(k, v) -> do
-    r <- evalIO (try (evaluate (forceResult (moveRule v)))) :: PropertyT IO (Either SomeException Int)
+    r <- evalIO (try (evaluate (forceResult (moveRule (dexCondLookup dex) v)))) :: PropertyT IO (Either SomeException Int)
     case r of
       Left ex -> footnote (show (K.toText k) ++ ": " ++ show ex) >> failure
       Right _ -> success) entries
   mapM_ (\name -> case [v | (k, v) <- entries, K.toText k == name] of
-    [v] -> case moveRule v of
+    [v] -> case moveRule (dexCondLookup dex) v of
       Right rule -> assert (executable rule) >> pure ()
       Left why -> footnote (T.unpack name ++ " is supported but does not translate: " ++ T.unpack why) >> failure
     _ -> footnote (T.unpack name ++ ": not exactly one entry in moves.json") >> failure) (supportedMoves dex)
@@ -179,6 +184,23 @@ propParalysedSpeed = property $ do
   -- other modifier); the Spe stat is then capped at 10000 (out of reach here) and getActionSpeed truncates to 13 bits
   finalSpeed gen9ou (fst (parSpe gen9ou baseMod boosted)) === boosted * 50 `div` 100 `mod` 8192
   finalSpeed gen9ou boosted === boosted `mod` 8192
+
+-- | Invariants of 'actionSpeed' that do not restate its formula: whatever the Speed stat, the result is a 13-bit value
+-- (battle.trunc(speed, 13), with and without Trick Room); and where no wrap or cap intervenes (a Speed of at least 1809 and
+-- at most 8191, so that neither the Speed nor its Trick Room value leaves 0..8191) a faster Pokemon is faster
+-- without Trick Room and slower under it, which is what Trick Room is.
+propActionSpeed :: Property
+propActionSpeed = property $ do
+  spe <- forAll (Gen.choice [Gen.int (Range.linear 0 999), Gen.int (Range.linear 0 20000)])
+  assert (all (\tr -> let v = actionSpeed gen9ou tr spe in v >= 0 && v <= 8191) [False, True])
+  a <- forAll (Gen.int (Range.linear 1809 8191))
+  b <- forAll (Gen.int (Range.linear 1809 8191))
+  let f tr = actionSpeed gen9ou tr
+  if a == b
+    then f True a === f True b
+    else do
+      (f False a < f False b) === (a < b)
+      (f True a > f True b) === (a < b)
 
 propAccuracy :: Property
 propAccuracy = property $ do
@@ -255,14 +277,27 @@ propDamageModifiers = property $ do
 
 -- | Every condition the engine runs has a body for each handler the export lists for it (the support rule of
 -- docs/handlers.md section 2), and a duration only where Showdown has one.
-conditionsSupported :: Dex -> Property
-conditionsSupported dex = withTests 1 $ property $ do
+conditionsSupported :: Dex -> Value -> Value -> Property
+conditionsSupported dex conditionsV abilitiesV = withTests 1 $ property $ do
   mapM_ (\c -> do
     let cn = dxConditions dex V.! fromEnum c
     footnote (T.unpack (condName c) ++ " has a handler without a body")
     assert (cnSupported cn)) [minBound .. maxBound :: CondId]
-  -- flinch has duration 1 (conditions.ts); the statuses have none
-  map (\c -> cnDuration (dxConditions dex V.! fromEnum c)) [minBound .. maxBound :: CondId] === [0, 0, 0, 0, 0, 1]
+  -- the duration of each condition is the export's: `duration` of its entry in conditions.json, or of the `condition`
+  -- block of its ability in abilities.json (flinch has 1; the statuses and the abilities' volatiles have none)
+  let exported c = case [d | Object o <- [entry c], Just (Number d) <- [KM.lookup "duration" o]] of
+        (d : _) -> round d
+        [] -> 0 :: Int
+      entry c = case c of
+        CProtosynthesis -> abilityCondition "protosynthesis"
+        CQuarkDrive -> abilityCondition "quarkdrive"
+        CUnburden -> abilityCondition "unburden"
+        _ -> lookupKey (condName c) conditionsV
+      abilityCondition name = lookupKey "condition" (lookupKey name abilitiesV)
+      lookupKey k v = case v of
+        Object o -> fromMaybe Null (KM.lookup (K.fromText k) o)
+        _ -> Null
+  map (\c -> cnDuration (dxConditions dex V.! fromEnum c)) [minBound .. maxBound :: CondId] === map exported [minBound .. maxBound]
 
 -- | An ability or item is supported exactly when "Engine.Effects" has bodies for it, and then the handlers the
 -- engine runs are exactly those bodies: one for each handler the export lists, and no body for a handler the export
@@ -270,6 +305,7 @@ conditionsSupported dex = withTests 1 $ property $ do
 effectsSupported :: Dex -> Property
 effectsSupported dex = withTests 1 $ property $ do
   let ty name = V.findIndex (== name) (dxTypeNames dex)
+      wx name = V.findIndex ((== name) . cnId) (dxFieldConds dex)
       checkTable what bodiesOf table = mapM_ (\c -> case bodiesOf ty (cnId c) of
         Nothing -> do
           footnote (what ++ " " ++ T.unpack (cnId c) ++ " is supported without bodies")
@@ -279,9 +315,31 @@ effectsSupported dex = withTests 1 $ property $ do
             ++ maybe "" T.unpack (cnReject c))
           assert (cnSupported c)
           let run = [(p, e) | (p, e, spec) <- cnHandlers c, Just _ <- [hsBody spec]]
+              -- an onStart is also run as the onSwitchIn (battle.ts getCallback 1025-1036)
               written = [(p, e) | (p, e, _) <- bs]
+              expected = written ++ [(POwn, EvSwitchIn) | (POwn, EvStart) <- written, (POwn, EvSwitchIn) `notElem` written]
           footnote (what ++ " " ++ T.unpack (cnId c) ++ ": bodies " ++ show written ++ ", run " ++ show run)
-          assert (all (`elem` run) written && all (`elem` written) run && length run == length written))
+          assert (all (`elem` run) expected && all (`elem` expected) run && length run == length expected))
         (V.toList table)
-  checkTable "ability" abilityBodies (dxAbilities dex)
-  checkTable "item" itemBodies (dxItems dex)
+  checkTable "ability" (\t -> abilityBodies t wx) (dxAbilities dex)
+  checkTable "item" (\t -> itemBodies t wx) (dxItems dex)
+
+-- | A field condition (side condition, weather, terrain, pseudo-weather) is supported exactly when "Engine.Effects"
+-- has bodies for it, and then the handlers the engine runs are exactly those bodies: one for each handler the export
+-- lists (a move's @condition.on...@ entries, or the entry of @conditions.json@), and none the export does not list.
+-- A move that names a supported condition translates, and one that names an unsupported condition does not.
+fieldConditionsSupported :: Dex -> Property
+fieldConditionsSupported dex = withTests 1 $ property $ do
+  assert (not (V.null (dxFieldConds dex)))
+  mapM_ (\c -> case fieldCondBodies (cnId c) of
+    Nothing -> do
+      footnote ("field condition " ++ T.unpack (cnId c) ++ " is supported without bodies")
+      assert (not (cnSupported c))
+    Just bs -> do
+      footnote ("field condition " ++ T.unpack (cnId c) ++ " has bodies but is not supported: " ++ maybe "" T.unpack (cnReject c))
+      assert (cnSupported c)
+      let run = [(p, e) | (p, e, spec) <- cnHandlers c, Just _ <- [hsBody spec]]
+          written = [(p, e) | (p, e, _) <- bs]
+      footnote ("field condition " ++ T.unpack (cnId c) ++ ": bodies " ++ show written ++ ", run " ++ show run)
+      assert (all (`elem` run) written && all (`elem` written) run && length run == length written))
+    (V.toList (dxFieldConds dex))

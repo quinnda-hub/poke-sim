@@ -4,8 +4,13 @@
 module Engine.Damage
   ( critDenominator
   , isImmune
-  , statusImmune
+  , typeImmuneTo
+  , statusKey
   , hasTypeNamed
+  , hasItemNamed
+  , typeIdNamed
+  , isGrounded
+  , isSemiInvulnerable
   , typeIsNamed
   , typeMod
   , baseDamage
@@ -20,7 +25,7 @@ import Engine.Dex
 import Engine.Format (Format, trunc, truncBits)
 import Engine.Modifier (modify)
 import Engine.Rule (StatusId (..))
-import Engine.State (Mon (..), MonStatus (..))
+import Engine.State (Mon (..), MonStatus (..), noItem)
 
 -- | Denominator of the crit chance for a crit stage, or 'Nothing' when the move cannot crit
 -- (gen 7+ table @[0, 24, 8, 2, 1]@ indexed by the clamped @critRatio@).
@@ -45,25 +50,54 @@ isImmune dx atkType m =
 hasTypeNamed :: Dex -> T.Text -> Mon -> Bool
 hasTypeNamed dx name m = typeIsNamed dx (monType1 m) name || typeIsNamed dx (monType2 m) name
 
+-- | Whether a Pokemon holds the item with this id (@pokemon.hasItem@).
+-- LATENT: @hasItem@ is false while @ignoringItem()@ (Klutz, Embargo, Magic Room); none can happen yet.
+hasItemNamed :: Dex -> T.Text -> Mon -> Bool
+hasItemNamed dx name m = monItem m /= noItem && itemId dx (monItem m) == name
+
+-- | The id of the type with this name.
+typeIdNamed :: Dex -> T.Text -> Maybe Int
+typeIdNamed dx name = V.findIndex (== name) (dxTypeNames dx)
+
+-- | @pokemon.isGrounded()@ (pokemon.ts 2170) as a boolean (Showdown's @null@, Levitate, counts as not grounded):
+-- a Flying type is not grounded.
+-- LATENT: the rest of the function reads state the engine does not hold yet. Grounded regardless of type:
+-- Gravity (field pseudo-weather), Ingrain and Smack Down (volatiles), Iron Ball (item). Not grounded: Levitate (and
+-- Eelevate), Magnet Rise and Telekinesis (volatiles), Air Balloon (item), and Roost's loss of the Flying type (a
+-- volatile). None of these is supported, so a Pokemon is grounded exactly when it is not a Flying type.
+-- The terrains' bodies also read @isSemiInvulnerable()@ ('isSemiInvulnerable').
+isGrounded :: Dex -> Mon -> Bool
+isGrounded dx m = not (hasTypeNamed dx "Flying" m)
+
+-- | @pokemon.isSemiInvulnerable()@ (pokemon.ts 2184): the @fly@, @bounce@, @dive@, @dig@, @phantomforce@, @shadowforce@
+-- and @skydrop@ volatiles.
+-- LATENT: none of these volatiles exists in the state (their moves are unsupported), so this is always false.
+isSemiInvulnerable :: Mon -> Bool
+isSemiInvulnerable _ = False
+
 -- | Whether a type id ('noType' included) is the type with this name.
 typeIsNamed :: Dex -> Int -> T.Text -> Bool
 typeIsNamed dx t name = t >= 0 && t < V.length (dxTypeNames dx) && dxTypeNames dx V.! t == name
 
--- | The natural status immunity of @pokemon.runStatusImmunity@ / @dex.getImmunity@ (pokemon.ts @setStatus@:
--- @tox@ is checked as @psn@): a type is immune when its typechart @damageTaken@ entry for the status key is 3
--- (loaded from @types.json@ @otherDamageTaken@).
--- LATENT: abilities (Limber, Immunity, Water Veil, ...), Misty Terrain, Safeguard and the @Immunity@ event
--- are not modelled; nothing in the engine can attach to them yet.
-statusImmune :: Dex -> StatusId -> Mon -> Bool
-statusImmune dx st m = any immune [monType1 m, monType2 m]
+-- | The natural immunity of @dex.getImmunity(type, pokemon)@ (pokemon.ts @runStatusImmunity@): a type is immune when
+-- its typechart @damageTaken@ entry for the key is 3 (loaded from @types.json@ @otherDamageTaken@). The key is the
+-- status (@tox@ is checked as @psn@: pokemon.ts @setStatus@) or the weather (@sandstorm@).
+-- The @Immunity@ event (Sunny Day, Sand Rush) runs after this in "Engine.Dispatch.runStatusImmunity".
+-- LATENT: Misty Terrain and Safeguard (@SetStatus@, @TryAddVolatile@), and the ability checks of @setStatus@
+-- (Corrosion), are not modelled; Overcoat's @Immunity@ (powder, sandstorm) comes with phase 3d.
+typeImmuneTo :: Dex -> T.Text -> Mon -> Bool
+typeImmuneTo dx key m = any immune [monType1 m, monType2 m]
   where
-    key = case st of
-      Brn -> "brn"
-      Par -> "par"
-      Psn -> "psn"
-      Tox -> "psn"
-      Frz -> "frz"
     immune t = t /= noType && key `elem` (dxTypeImmune dx V.! t)
+
+-- | The key @setStatus@ passes to @runStatusImmunity@ for a status.
+statusKey :: StatusId -> T.Text
+statusKey st = case st of
+  Brn -> "brn"
+  Par -> "par"
+  Psn -> "psn"
+  Tox -> "psn"
+  Frz -> "frz"
 
 -- | Total type effectiveness exponent (@runEffectiveness@): +1 per super-effective type, -1 per resisted, clamped to [-6, 6].
 typeMod :: Dex -> Int -> Mon -> Int
@@ -86,12 +120,13 @@ baseDamage f level power atk def =
     -- JS division by zero yields Infinity, which truncates to 0.
     quotZ a b = if b == 0 then 0 else a `quot` b
 
--- | @modifyDamage@ (battle-actions.ts ~1790-1890) up to the @ModifyDamage@ event: crit, random factor, STAB, type
--- effectiveness and the burn. 'finalDamage' is the rest. @roll16@ is the already drawn value of @random(16)@.
+-- | @modifyDamage@ (battle-actions.ts ~1790-1890) from after the @WeatherModifyDamage@ event, up to the @ModifyDamage@
+-- event: crit, random factor, STAB, type effectiveness and the burn. 'finalDamage' is the rest. The caller adds 2 to
+-- the base damage (`baseDamage += 2`), runs @WeatherModifyDamage@ on it (1804) and passes the result as @base1@.
+-- @roll16@ is the already drawn value of @random(16)@.
 modifyDamage :: Format -> Dex -> Mon -> Mon -> MoveData -> Bool -> Int -> Int -> Int
-modifyDamage f dx attacker defender mv crit roll16 base0 =
-  let base1 = base0 + 2
-      base2 = if crit then trunc f (base1 * 3 `quot` 2) else base1
+modifyDamage f dx attacker defender mv crit roll16 base1 =
+  let base2 = if crit then trunc f (base1 * 3 `quot` 2) else base1
       base3 = trunc f (trunc f (base2 * (100 - roll16)) `quot` 100)
       -- "???" never gets STAB (modifyDamage: `if (type !== '???')`); `baseDamage = this.battle.modify(baseDamage, stab)`
       -- with stab 1.5, a modify() of its own (battle-actions.ts ~1850), not a chainModify

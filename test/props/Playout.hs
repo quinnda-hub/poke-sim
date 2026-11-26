@@ -25,7 +25,7 @@ import qualified Hedgehog.Range as Range
 
 import Engine
 import Engine.Chance (Sample)
-import Engine.Dex (Dex (..), supportedAbilities, supportedItems, supportedMoves, supportedSpecies)
+import Engine.Dex (Condition (..), Dex (..), abilityId, supportedAbilities, supportedItems, supportedMoves, supportedSpecies)
 import Engine.Event (CondId (..))
 import Engine.State
 
@@ -84,7 +84,7 @@ playChecked dx t1 t2 = startBattle dx t1 t2 >>= go 0
     go :: Int -> Battle -> Sample (Either String Battle)
     go n b
       | n > stepCap = pure (Left ("no result within " ++ show stepCap ++ " decision steps"))
-      | Left e <- checkBattle b = pure (Left e)
+      | Left e <- checkBattle dx b = pure (Left e)
       | otherwise = case request b of
           Finished _ -> pure (Right b)
           Awaiting _ a1 a2 -> do
@@ -110,15 +110,68 @@ advanceWhile dx n p b = case request b of
 
 -- | State invariants and the decision-point contract: each side asked has legal choices and a side not asked
 -- has none; HP in 0..maxHp, PP in 0..maxPP, stages in -6..6, fainted means HP 0.
-checkBattle :: Battle -> Either String ()
-checkBattle b = do
+checkBattle :: Dex -> Battle -> Either String ()
+checkBattle dx b = do
   case request b of
     Awaiting _ a1 a2 -> do
       ask P1 a1
       ask P2 a2
     Finished _ -> mapM_ (\p -> if null (legalChoices b p) then Right () else Left ("choices after the end for " ++ show p)) [P1, P2]
   mapM_ side [(P1, bP1 b), (P2, bP2 b)]
+  conditions
   where
+    -- Side conditions and the field. Showdown's @sideConditions@ is an object keyed by id, so an id appears once, in
+    -- insertion order; each state took its @effectOrder@ from a counter that only grows, so the orders along the
+    -- insertion order are strictly increasing, and the battle's counter is ahead of every state's order. Layers
+    -- (Spikes 3, Toxic Spikes 2: the @onSideRestart@ guards, data/moves.ts) are in 1..max for exactly those
+    -- conditions; other conditions have none. A weather or terrain that is absent has the empty state.
+    conditions = do
+      mapM_ sideConds [(P1, bP1 b), (P2, bP2 b)]
+      let f = bField b
+      pseudo <- pure (SV.toList (fPseudo f))
+      if distinct [i | CondEntry i _ <- pseudo] then Right () else Left "a pseudo-weather appears twice"
+      mapM_ (\(CondEntry i st) -> durationOk "pseudo-weather " (maybe "" cnId (dxFieldConds dx V.!? i)) i st) pseudo
+      -- (clearWeather resets the state but keeps its target, so the empty state may have the bit set)
+      if fWeather f == noCond && (fWeatherState f) {esHasTarget = False} /= noEffectState then Left "no weather but a weather state" else Right ()
+      -- a weather in place has 1..8 turns left (5, or 8 with the setter's rock) and the countdown has not reached 0
+      if fWeather f /= noCond then durationOk "weather " (maybe "" cnId (dxFieldConds dx V.!? fWeather f)) (fWeather f) (fWeatherState f) else Right ()
+      if fTerrain f == noCond && (fTerrainState f) {esHasTarget = False} /= noEffectState then Left "no terrain but a terrain state" else Right ()
+      -- a terrain in place has 1..8 turns left (5, or 8 with Terrain Extender)
+      if fTerrain f /= noCond then durationOk "terrain " (maybe "" cnId (dxFieldConds dx V.!? fTerrain f)) (fTerrain f) (fTerrainState f) else Right ()
+      let orders = [esOrder st | (_, s) <- [(P1, bP1 b), (P2, bP2 b)], CondEntry _ st <- SV.toList (sConds s)]
+            ++ [esOrder st | CondEntry _ st <- pseudo]
+            ++ [esOrder st | (_, s) <- [(P1, bP1 b), (P2, bP2 b)], m <- SV.toList (sMons s)
+                           , st <- [monStatusState m, monAbilityState m, monItemState m] ++ [v | Volatile _ v <- SV.toList (monVolatiles m)]]
+      -- the first state takes order 0, so before any state exists the counter 0 is ahead of the default order 0
+      if all (< max 1 (bEffectOrder b)) orders then Right () else Left ("an effect order reaches the battle's counter " ++ show (bEffectOrder b))
+    sideConds (p, s) = do
+      let es = SV.toList (sConds s)
+          who = show p ++ " side condition "
+      if distinct [i | CondEntry i _ <- es] then Right () else Left (who ++ "appears twice")
+      let orders = [esOrder st | CondEntry _ st <- es]
+      if and (zipWith (<) orders (drop 1 orders))
+        then Right ()
+        else Left (who ++ "effect orders " ++ show orders ++ " are not strictly increasing")
+      mapM_ (\(CondEntry i st) -> do
+        let name = maybe "" cnId (dxFieldConds dx V.!? i)
+            layers = esA st
+            bound = lookup name [("spikes", 3), ("toxicspikes", 2)]
+        case bound of
+          Just hi | layers < 1 || layers > hi -> Left (who ++ show name ++ " has " ++ show layers ++ " layers, outside 1.." ++ show hi)
+          Nothing | layers /= -1 -> Left (who ++ show name ++ " has layers " ++ show layers)
+          _ -> Right ()
+        durationOk who name i st) es
+    distinct xs = length xs == length (nub xs)
+    -- A condition with a duration (condition.duration, data/moves.ts) is in place only with 1 or more turns left: the
+    -- residual countdown ends it at 0. Its duration is at most the static one, except the screens, whose
+    -- durationCallback gives 8 with a Light Clay user (the weathers: 8 with their rock, the terrains with Terrain Extender). A condition with no duration has none.
+    durationOk who name i st = do
+      let base = maybe 0 cnDuration (dxFieldConds dx V.!? i)
+          hi = if name `elem` ["reflect", "lightscreen", "sunnyday", "raindance", "sandstorm", "snowscape", "electricterrain", "grassyterrain", "mistyterrain", "psychicterrain"] then 8 else base
+          d = esDuration st
+      if (base == 0 && d /= 0) || (base /= 0 && (d < 1 || d > hi))
+        then Left (who ++ show name ++ " has duration " ++ show d ++ ", outside its bounds (static " ++ show base ++ ")")
+        else Right ()
     ask p asked = case (asked, null (legalChoices b p)) of
       (True, True) -> Left (show p ++ " is asked but has no legal choices")
       (False, False) -> Left (show p ++ " is not asked but has legal choices")
@@ -140,9 +193,23 @@ checkBattle b = do
       -- 15); the other statuses and a cured Pokemon have a fresh statusState (no stage); only a Pokemon that
       -- fainted badly poisoned keeps a stale stage (faint and the fnt / '' assignments leave statusState alone)
       let stage = esA (monStatusState m)
-      -- flinch is the only volatile: present exactly when the volatile vector is non-empty
-      let flinched = not (SV.null (monVolatiles m))
-      if all (\(Volatile i st) -> i == fromEnum CFlinch && esDuration st == 1) (SV.toList (monVolatiles m)) then Right () else bad "a volatile other than flinch with duration 1"
+      -- the volatiles: flinch (duration 1) and the volatiles of Protosynthesis, Quark Drive and Unburden (no duration).
+      -- A volatile of an ability lives only on a holder of that ability; the Paradox ones have a best stat in 0..4 and
+      -- a fromBooster flag that is 1 only on a holder whose item is gone (Booster Energy was used)
+      let flinched = any (\(Volatile i _) -> i == fromEnum CFlinch) (SV.toList (monVolatiles m))
+          volatileOk (Volatile i st)
+            | i == fromEnum CFlinch = esDuration st == 1
+            | i == fromEnum CProtosynthesis = ability "protosynthesis" && esDuration st == 0 && esA st >= 0 && esA st <= 4 && boosterOk st
+            | i == fromEnum CQuarkDrive = ability "quarkdrive" && esDuration st == 0 && esA st >= 0 && esA st <= 4 && boosterOk st
+            | i == fromEnum CUnburden = ability "unburden" && esDuration st == 0
+            | otherwise = False
+          ability name = abilityId dx (monAbility m) == name
+          boosterOk st = esB st == 0 || (esB st == 1 && monItem m == noItem)
+          ids = [i | Volatile i _ <- SV.toList (monVolatiles m)]
+      if all volatileOk (SV.toList (monVolatiles m)) then Right () else bad "a volatile that is not flinch, or an ability's volatile that breaks its invariant"
+      if length ids == length (nub ids) then Right () else bad "a volatile twice"
+      -- a Pokemon with no item has a default item state (useItem clears the state with the item)
+      if monItem m == noItem && monItemState m /= noEffectState then bad "no item but an item state" else Right ()
       if monStatus m == StatusTox && (stage < 0 || stage > 15) then bad ("badly poisoned with stage " ++ show stage) else Right ()
       if monStatus m /= StatusTox && stage /= -1 && not (monFainted m && stage >= 0 && stage <= 15)
         then bad ("stage " ++ show stage ++ " with status " ++ show (monStatus m) ++ " on a live Pokemon") else Right ()

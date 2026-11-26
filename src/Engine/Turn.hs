@@ -60,6 +60,8 @@ newBattle dx fmt t1 t2 = do
     , bQueue = SV.singleton start
     , bFaintQueue = SV.empty
     , bSpeedOrder = U.empty
+    , bField = noField
+    , bEffectOrder = 0
     , bP1 = s1
     , bP2 = s2
     }
@@ -232,7 +234,7 @@ switchAction dx ac = case acActor ac of
 afterAction :: MonadChance m => Dex -> Action -> Eng m ()
 afterAction dx ac = do
   -- fainting: resolveFaints({ checkWinIfNoFaints: true, checkWin: true })
-  resolveFaints True True
+  resolveFaints dx True True
   ended <- gets ((/= Ongoing) . bResult)
   unless ended $ do
     next <- gets (peekQueue . bQueue)
@@ -326,6 +328,9 @@ switchIn dx p target = do
       Just o | monHp (monOf b0 o) > 0 -> do
         -- runPursuitActivation(oldActive): eachEvent('Update') (the BeforeSwitchOut event has no handlers)
         eachEvent dx EvUpdate
+        -- singleEvent('End', oldActive.getAbility(), ...) and singleEvent('End', oldActive.getItem(), ...) (battle-actions.ts
+        -- 142-143: Protosynthesis, Quark Drive and Unburden remove their volatile)
+        endAbilityAndItem dx o
         -- queue.cancelAction(oldActive); oldActive.clearVolatile() (resets the stat stages, the volatiles and the cached speed; the status, and toxic's stage, stay)
         modify' (\b -> modifyMon o (\m -> m {monSpeed = stSpe (monStats m), monBoosts = noBoosts, monVolatiles = SV.empty}) b {bQueue = cancelAction o (bQueue b)})
       _ -> pure ()
@@ -337,6 +342,13 @@ switchIn dx p target = do
         modify' (modifySide p (\s -> s {sSlots = swapSlot0 target (sSlots s)}))
       Nothing -> pure ()
     modify' (modifyMon tgt (\m -> m {monActive = True}) . modifySide p (\s -> s {sHasActive = True}))
+    -- pokemon.abilityState = initEffectState({ id: pokemon.ability, target: pokemon }); pokemon.itemState =
+    -- initEffectState({ id: pokemon.item, target: pokemon }) (battle-actions.ts 185-186). The Pokemon is active, so a
+    -- state with an id takes the next effectOrder: the ability always (`noability` is an id), the item when held
+    let monT = monOf b0 tgt
+    abilityOrder <- nextEffectOrder (abilityId dx (monAbility monT) /= "")
+    itemOrder <- nextEffectOrder (monItem monT /= noItem)
+    modify' (modifyMon tgt (\m -> m {monAbilityState = noEffectState {esOrder = abilityOrder}, monItemState = noEffectState {esOrder = itemOrder}}))
     -- queue.insertChoice({ choice: 'runSwitch', pokemon }): updateSpeed first, then a tie-aware insert
     getActionSpeed dx tgt >>= \sp -> modify' (modifyMon tgt (\m -> m {monSpeed = sp}))
     new <- resolveAction dx Action
@@ -349,14 +361,24 @@ switchIn dx p target = do
       Just i | i /= 0 -> slots U.// [(0, slots U.! i), (i, slots U.! 0)]
       _ -> slots
 
+-- | @battle.initEffectState@'s counter (battle.ts 3381-3392) when the state has an id: its value, and the counter
+-- advances; a state with no id gets 0.
+nextEffectOrder :: Monad m => Bool -> Eng m Int
+nextEffectOrder False = pure 0
+nextEffectOrder True = do
+  b <- get
+  let (o, b') = takeEffectOrder b
+  modify' (const b')
+  pure o
+
 -- | @actions.runSwitch@ (battle-actions.ts 225-250): gather consecutive @runSwitch@ actions, speed-sort every
 -- Pokemon on the field (including fainted ones), record the result as @battle.speedOrder@ and run
 -- @fieldEvent('SwitchIn', switchersIn)@ for the switchers.
 --
 -- The @SwitchIn@ handlers' keys use @speedOrder@: @resolvePriority@ gives each the speed
 -- @pokemon.speed - speedOrder.indexOf(position) / 2@, so no two Pokemon tie and the sort draws nothing.
--- LATENT: @effectOrder@ (creation order of effect states, @bEffectOrder@) ties only handlers of one Pokemon or
--- hazards on one side; it joins with the field-state slice, which makes it observable.
+-- A Pokemon's own handlers and the hazards of its side tie on everything but @effectOrder@ (the order the states were
+-- created, 'bEffectOrder'), which is therefore what orders two hazards on one side.
 {-# INLINABLE runSwitch #-}
 runSwitch :: MonadChance m => Dex -> Actor -> Eng m ()
 runSwitch dx first = do
@@ -402,7 +424,8 @@ runMove fmt dx user@(Actor p _) slot = do
       -- runEvent('BeforeMove'): before PP is deducted; a move stopped here costs no PP and returns from
       -- runMove without the closing resolveFaints / checkWin (there is nothing to resolve)
       -- (a move on the user targets the user: battle.getRandomTarget returns the Pokemon for 'self')
-      let eventTarget = if mrTarget (mvRule mv) == TargetSelf then user else target
+      -- (battle.getRandomTarget: `self`, `all`, `allySide` and `allyTeam` return the Pokemon; foeSide the foe)
+      let eventTarget = if mrTarget (mvRule mv) `elem` [TargetSelf, TargetAllySide, TargetAll] then user else target
       proceed <- relayTruthy <$> runEvent dx EvBeforeMove user (Just eventTarget) (Just mv) RNone
       when proceed $ do
         void deductPP
@@ -410,7 +433,7 @@ runMove fmt dx user@(Actor p _) slot = do
         void (runEvent dx EvModifyMove user (Just eventTarget) (Just mv) RNone)
         useMove fmt dx user target mv
         -- resolveFaints(); checkWin()
-        resolveFaints False True
+        resolveFaints dx False True
         void (checkWin Nothing)
 
 -- | The hit steps of @trySpreadMoveHit@ (battle-actions.ts): target check, type immunity, accuracy, then the
@@ -420,6 +443,11 @@ runMove fmt dx user@(Actor p _) slot = do
 useMove :: MonadChance m => Format -> Dex -> Actor -> Actor -> MoveData -> Eng m ()
 useMove fmt dx user target mv = case mrTarget rule of
   TargetSelf -> statusMove dx user user mv
+  -- getMoveTargets (pokemon.ts 812): foeSide -> the foes (fainted ones too), allySide -> the allies and the user,
+  -- all -> both, and tryMoveHit takes targets[0]: the foe for foeSide, the user for allySide and all
+  TargetFoeSide -> sideMove dx user target mv
+  TargetAllySide -> sideMove dx user user mv
+  TargetAll -> sideMove dx user user mv
   TargetFoe -> do
     b <- get
     let tm = monOf b target
@@ -427,10 +455,21 @@ useMove fmt dx user target mv = case mrTarget rule of
     -- getMoveTargets (battle-actions.ts ~842-859, pokemon.ts getMoveTargets): a fainted target leaves no
     -- targets, so the move fails before any draw. getRandomTarget in singles returns foe.active[0] even when
     -- it has fainted; the spread targets (allAdjacentFoes, allAdjacent) use side.foes(), which skips it.
-    unless (monFainted tm) $
+    unless (monFainted tm) $ do
+     -- hitStepTryHitEvent (battle-actions.ts 709, step 1 of trySpreadMoveHit): runEvent('TryHit', targets, pokemon, move);
+     -- a falsy result removes the target and the move fails before any draw (Psychic Terrain, Overcoat). It is sorted
+     -- left to right (never a draw). Self-targeted moves skip it here: no handler acts on one (Psychic Terrain returns
+     -- for `effect.target === 'self'`, Overcoat for `target === source`).
+     -- LATENT: the Invulnerability event (step 0), the Try and PrepareHit events of the move and runEvent('PrepareHit')
+     -- of the hit steps have no handler.
+     tryHit <- relayTruthy <$> runEvent dx EvTryHit target (Just user) (Just mv) RNone
+     when tryHit $
       -- hitStepTypeImmunity (before accuracy: an immune target consumes no draws); a move with
       -- ignoreImmunity (every status move but a few) skips it
-      unless (not (mrIgnoreImmunity rule) && isImmune dx (mvType mv) tm) $ do
+      unless (not (mrIgnoreImmunity rule) && isImmune dx (mvType mv) tm) $
+       -- hitStepTryImmunity (battle-actions.ts 735): `gen >= 6 && move.flags['powder'] && target !== pokemon &&
+       -- !this.dex.getImmunity('powder', target)`: Grass types are immune to a powder move (no draw)
+       unless (mrPowder rule && typeImmuneTo dx "powder" tm) $ do
         -- hitStepAccuracy
         hits <- if mvAccuracy mv == neverMisses || (isToxic && hasTypeNamed dx "Poison" um) then pure True
           else randomChance (stagedAccuracy fmt (mvAccuracy mv) (monBoosts um) (monBoosts tm)) 100
@@ -449,6 +488,43 @@ useMove fmt dx user target mv = case mrTarget rule of
     -- used by a Poison-type skips the accuracy check (`accuracy = true`), so it draws nothing
     isToxic = mrOnHit rule == [EStatus Tox] && mvId mv == "toxic"
 
+-- | @tryMoveHit@ (battle-actions.ts 883-919) of a move on a side or the field (@foeSide@, @allySide@, @all@): no
+-- type immunity, accuracy or crit draw. The event points are @singleEvent('Try')@, @singleEvent('PrepareHit')@,
+-- @runEvent('PrepareHit')@, then @runEvent('TryHitField')@ for @all@ or @runEvent('TryHitSide')@, then @moveHit@.
+-- The @Try@ and @PrepareHit@ callbacks are the move's own (@onTry@, @onPrepareHit@), which a supported move has none
+-- of; the @runEvent@s sort the handlers of the Pokemon in play (none attached today: Magic Bounce's
+-- @onAllyTryHitSide@ is unsupported), and a sort over fewer than two handlers draws nothing, but they stay so that
+-- a handler that appears later is sorted where Showdown sorts it. A falsy result fails the move.
+-- @useMoveInner@ then runs @AfterMoveSecondarySelf@ (battle-actions.ts ~607), which this path skips like the
+-- Pokemon-targeted status path: its only listener, Life Orb, is gated on @move.category !== 'Status'@, so no
+-- supported handler can act. Unlike a Pokemon-targeted status move there are no @Update@ events inside: @hitStepMoveHitLoop@ is not used.
+{-# INLINABLE sideMove #-}
+sideMove :: MonadChance m => Dex -> Actor -> Actor -> MoveData -> Eng m ()
+sideMove dx user target mv = do
+  prepared <- relayTruthy <$> runEvent dx EvPrepareHit user (Just target) (Just mv) RNone
+  when prepared $ do
+    let tryHit = if mrTarget (mvRule mv) == TargetAll then EvTryHitField else EvTryHitSide
+    ok <- relayTruthy <$> runEvent dx tryHit target (Just user) (Just mv) RNone
+    when ok (moveHitSide dx user target mv)
+
+-- | @moveHit@ -> @spreadMoveHit@ -> @runMoveEffects@ (battle-actions.ts 1430, 1175, 1330) of a side-targeted move:
+-- the damage is @undefined@ (basePower 0), so only the effect on the target's side runs.
+-- The @TryHitSide@ and @TryHitField@ callbacks of the move itself (@onTryHitSide@, ...) are not supported.
+-- A failed effect (the condition is already there and cannot restart) fails the move; nothing else follows.
+{-# INLINABLE moveHitSide #-}
+moveHitSide :: MonadChance m => Dex -> Actor -> Actor -> MoveData -> Eng m ()
+moveHitSide dx user (Actor tp _) mv = do
+  -- `target.side.addSideCondition(moveData.sideCondition, source, move)`
+  forM_ (mrSideCondition rule) $ \ci -> void (addSideCondition dx tp ci user)
+  -- `this.battle.field.addPseudoWeather(moveData.pseudoWeather, source, move)`
+  forM_ (mrPseudoWeather rule) $ \ci -> void (addPseudoWeather dx ci user)
+  -- `this.battle.field.setWeather(moveData.weather, source, move)`
+  forM_ (mrWeather rule) $ \ci -> void (setWeather dx ci user False)
+  -- `this.battle.field.setTerrain(moveData.terrain, source, move)`
+  forM_ (mrTerrain rule) $ \ci -> void (setTerrain dx ci user)
+  where
+    rule = mvRule mv
+
 -- | @hitStepAccuracy@'s stage step (battle-actions.ts): the user's accuracy stage minus the target's evasion
 -- stage, each clamped to [-6, 6], scales the accuracy by @(3 + s) / 3@ or @3 / (3 - s)@, truncated.
 stagedAccuracy :: Format -> Int -> Boosts -> Boosts -> Int
@@ -458,26 +534,6 @@ stagedAccuracy fmt acc user tgt
   | otherwise = acc
   where
     stage = clampStage (clampStage (bsAccuracy user) - bsEvasion tgt)
-
-clampStage :: Int -> Int
-clampStage = max (-6) . min 6
-
--- | @battle.boost@ (battle.ts) of one target: each stage moves by its change clamped to [-6, 6]
--- (@getCappedBoost@). Returns whether any stage changed. It fails for a target with no HP or off the field,
--- and when the foe side has no Pokemon left. The order of the stats is unobservable (independent stages;
--- the boost events have no handlers).
-{-# INLINABLE boostMon #-}
-boostMon :: Monad m => Actor -> [(BoostStat, Int)] -> Eng m Bool
-boostMon a@(Actor p _) changes = do
-  b <- get
-  let m = monOf b a
-  if monHp m <= 0 || not (monActive m) || sLeft (sideOf (other p) b) == 0
-    then pure False
-    else do
-      let step' bs (s, d) = setBoostOf s (clampStage (boostOf s bs + d)) bs
-          new = foldl step' (monBoosts m) changes
-      modify' (modifyMon a (\x -> x {monBoosts = new}))
-      pure (new /= monBoosts m)
 
 -- | A status move's single hit (@trySpreadMoveHit@ -> @runMoveEffects@): a self-targeted heal, a stat
 -- change or a status condition on the target. When the effect does nothing (heal at full HP, a stage already
@@ -502,7 +558,7 @@ statusMove dx user tgt mv = do
     eachEvent dx EvUpdate -- eachEvent('Update') after the hit
     -- resolveFaints({ checkWin: !pokemon.hp }); the user is alive
     userDown <- gets (\bb -> monHp (monOf bb user) <= 0)
-    resolveFaints False userDown
+    resolveFaints dx False userDown
     eachEvent dx EvUpdate -- second eachEvent('Update')
 
 -- | @hitStepMoveHitLoop@ (battle-actions.ts): the hit count, then one @spreadMoveHit@ per hit with an
@@ -520,7 +576,7 @@ hitLoop fmt dx user target mv = do
   b <- get
   let userDown = monHp (monOf b user) <= 0
   -- gen >= 5: resolveFaints({ checkWin: !pokemon.hp })
-  resolveFaints False userDown
+  resolveFaints dx False userDown
   -- applyRecoilDamage (after the loop, from move.totalDamage; battle-actions.ts ~1439)
   let um = monOf b user
   case (mvStruggleRecoil mv, mrRecoil rule) of
@@ -619,10 +675,14 @@ hitMove fmt dx user target mv = do
   attack <- fromRelay attack0 <$> runEvent dx atkEv user (Just target) (Just mv) (RInt attack0)
   defense <- fromRelay defense0 <$> runEvent dx defEv target (Just user) (Just mv) (RInt defense0)
   let base = baseDamage fmt (monLevel um) power attack defense
+  -- modifyDamage (battle-actions.ts 1783-1804): `baseDamage += 2`, then (the spread and Parental Bond modifiers are not
+  -- here) the weather modifier, `priorityEvent('WeatherModifyDamage', pokemon, target, move, baseDamage)`, before the
+  -- crit multiplier and the random factor. The event draws nothing.
+  weathered <- fromRelay (base + 2) <$> runEvent dx EvWeatherModifyDamage user (Just target) (Just mv) (RInt (base + 2))
   r <- roll 0 16
   -- modifyDamage: ... runEvent('ModifyDamage', pokemon, target, move, baseDamage), then the minimum 1 and the 16-bit truncation
-  let pre = modifyDamage fmt dx um tm mv crit r base
-  dmg <- finalDamage fmt . fromRelay pre <$> runEvent dx EvModifyDamage user (Just target) (Just mv) (RInt pre)
+  let pre = modifyDamage fmt dx um tm mv crit r weathered
+  dmg <- finalDamage fmt . fromRelay pre <$> runEventCrit dx crit EvModifyDamage user (Just target) (Just mv) (RInt pre)
   let -- spreadDamage: clamp to at least 1 unless 0, then Pokemon.damage; `dealt` is the damage returned
       requested = if dmg == 0 then 0 else max 1 dmg
       dealt = min requested (monHp tm)

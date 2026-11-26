@@ -19,6 +19,10 @@ module Engine.State
   , EffectState (..)
   , noEffectState
   , Volatile (..)
+  , CondEntry (..)
+  , Field (..)
+  , noField
+  , noCond
   , Mon (..)
   , Side (..)
   , RequestState (..)
@@ -27,6 +31,7 @@ module Engine.State
   , ActionKind (..)
   , Action (..)
   , Battle (..)
+  , takeEffectOrder
   , sideOf
   , modifySide
   , monOf
@@ -133,22 +138,53 @@ data MonStatus = StatusNone | StatusFainted | StatusBrn | StatusPar | StatusPsn 
 -- to the effect (toxic's @stage@ is the status state's 'esA').
 data EffectState = EffectState
   { esOrder :: !Int
-  -- ^ @effectOrder@ (@battle.initEffectState@). Always 0 until @bEffectOrder@ exists (field-state slice).
+  -- ^ @effectOrder@ (@battle.initEffectState@, battle.ts 3381): the value of 'bEffectOrder' when the state was created
+  -- for an id and a target that is a side or an active Pokemon, else 0.
   , esDuration :: !Int
   -- ^ @duration@; 0 = none.
   , esA :: !Int
   , esB :: !Int
+  , esHasTarget :: !Bool
+  -- ^ Whether @effectState.target@ is set, for a field state (weather, terrain, pseudo-weather): it has none when
+  -- created (field.ts 70, 141, 200) and @runEvent@ sets it to the Field when it runs one of its callbacks
+  -- (battle.ts 908-909); @clearEffectState@ keeps it (3394). It changes the in-place check of @fieldEvent@
+  -- (battle.ts 548-561). Pokemon and side states are created with their target, and do not read this.
   }
   deriving (Eq, Show)
 
 -- | A fresh @initEffectState({})@: no duration, no keys.
 noEffectState :: EffectState
-noEffectState = EffectState 0 0 (-1) (-1)
+noEffectState = EffectState 0 0 (-1) (-1) False
 
 -- | An entry of @pokemon.volatiles@: the condition id (a 'Engine.Event.CondId' index) and its state. The vector
 -- keeps insertion order, as a JavaScript object does.
 data Volatile = Volatile !Int !EffectState
   deriving (Eq, Show)
+
+-- | An entry of @side.sideConditions@ or @field.pseudoWeather@: the field-condition id (an index into the @Dex@
+-- field-condition table) and its state. The vector keeps insertion order, as a JavaScript object does. Layers (Spikes,
+-- Toxic Spikes) are the state's 'esA', -1 when the key is absent.
+data CondEntry = CondEntry !Int !EffectState
+  deriving (Eq, Show)
+
+-- | No weather, terrain: the id of "no condition".
+noCond :: Int
+noCond = -1
+
+-- | Showdown's @battle.field@: the weather and terrain with their states (battle.ts @field@, field.ts), and the
+-- pseudo-weathers in insertion order. 'noCond' ids mean none (Showdown's @''@).
+data Field = Field
+  { fWeather :: !Int
+  , fWeatherState :: !EffectState
+  , fTerrain :: !Int
+  , fTerrainState :: !EffectState
+  , fPseudo :: !(SV.Vector CondEntry)
+  }
+  deriving (Eq, Show)
+
+-- | An empty field.
+noField :: Field
+noField = Field noCond noEffectState noCond noEffectState SV.empty
 
 -- | @pokemon.item === ''@.
 noItem :: Int
@@ -204,6 +240,8 @@ data Side = Side
   -- ^ @pokemonLeft@.
   , sHasActive :: !Bool
   -- ^ @side.active[0]@ is set (true once the lead has switched in).
+  , sConds :: !(SV.Vector CondEntry)
+  -- ^ @side.sideConditions@ in insertion order (hazards, screens, Tailwind).
   }
   deriving (Eq, Show)
 
@@ -259,10 +297,19 @@ data Battle = Battle
   , bSpeedOrder :: !(U.Vector Int)
   -- ^ @battle.speedOrder@: the field position values of the Pokemon in play, in speed order, as of the last
   -- @runSwitch@ (battle-actions.ts 236). Empty before the first one (Showdown's is @[]@ too).
+  , bField :: !Field
+  , bEffectOrder :: !Int
+  -- ^ @battle.effectOrder@: the counter of @initEffectState@ (battle.ts 3381-3392). It increments where a state is
+  -- created with an id and a target that is a side or an active Pokemon: side conditions, statuses, volatiles, and
+  -- the ability and item states of a switch-in.
   , bP1 :: !Side
   , bP2 :: !Side
   }
   deriving (Eq, Show)
+
+-- | @battle.initEffectState@'s counter: the value for the new state, and the battle with the counter advanced.
+takeEffectOrder :: Battle -> (Int, Battle)
+takeEffectOrder b = (bEffectOrder b, b {bEffectOrder = bEffectOrder b + 1})
 
 -- | A side of the battle.
 sideOf :: Player -> Battle -> Side

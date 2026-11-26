@@ -5,6 +5,7 @@ module Engine.Stats
   , boostedStat
   , parSpe
   , finalSpeed
+  , actionSpeed
   ) where
 
 import Engine.Format (Format (..), TruncRule (..), trunc, truncBits)
@@ -40,11 +41,18 @@ parSpe :: Format -> Int -> Int -> (Int, Int)
 parSpe f modifier spe = let (v, m) = finalModify f spe modifier in (v * 50 `quot` 100, m)
 
 -- | The end of @pokemon.getStat('spe')@ and @getActionSpeed()@ (pokemon.ts 655, 662-670), after the
--- @ModifySpe@ event: the stat is capped at 10000 unless the format overrides @trunc@, then @tr(speed, 13)@.
+-- @ModifySpe@ event: the stat is capped at 10000 unless the format overrides @trunc@, Trick Room turns it into
+-- @10000 - speed@, then @tr(speed, 13)@.
 -- The cap cannot be reached at levels <= 100 (the largest boosted Spe is under 3000); it is kept for fidelity.
--- LATENT: Trick Room (@10000 - speed@) needs pseudo-weather state.
+actionSpeed :: Format -> Bool -> Int -> Int
+actionSpeed f trickRoom modified = truncBits f 13 (if trickRoom then 10000 - capped else capped)
+  where
+    capped = case fmtTrunc f of
+      TruncUnsigned32 -> min 10000 modified
+      TruncPlain -> modified
+{-# INLINE actionSpeed #-}
+
+-- | 'actionSpeed' with no Trick Room.
 finalSpeed :: Format -> Int -> Int
-finalSpeed f modified = truncBits f 13 (case fmtTrunc f of
-  TruncUnsigned32 -> min 10000 modified
-  TruncPlain -> modified)
+finalSpeed f = actionSpeed f False
 {-# INLINE finalSpeed #-}
