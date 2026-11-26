@@ -19,6 +19,8 @@ module Engine.Dispatch
   , updateSpeedAll
   , Owner (..)
   , addVolatile
+  , useItem
+  , effectiveTerrain
   , addSideCondition
   , removeSideCondition
   , addPseudoWeather
@@ -31,6 +33,7 @@ module Engine.Dispatch
   , trySetStatus
   , clearStatus
   , resolveFaints
+  , endAbilityAndItem
   , checkWin
   , win
   , applyDamage
@@ -147,7 +150,12 @@ cureStatus a = modifyMon a (\x -> if monHp x > 0 && monStatus x /= StatusNone th
 -- reaches it too), either falsy failing it. The state gets the condition's duration; the @Start@ event runs (and,
 -- returning false, cancels it).
 addVolatile :: MonadChance m => Dex -> Actor -> CondId -> Eng m Bool
-addVolatile dx a c = do
+addVolatile dx a c = addVolatileFx dx a c Nothing
+
+-- | 'addVolatile' with the effect that adds it (@sourceEffect@: `effect?.name === 'Booster Energy'` in the Paradox
+-- volatiles' @onStart@).
+addVolatileFx :: MonadChance m => Dex -> Actor -> CondId -> Maybe EffectKey -> Eng m Bool
+addVolatileFx dx a c eff = do
   m <- gets (`monOf` a)
   if monHp m <= 0 || isJust (effectState m key)
     then pure False
@@ -160,7 +168,7 @@ addVolatile dx a c = do
           -- this.volatiles[status.id] = this.battle.initEffectState({ id, name, target: this }) (pokemon.ts 2021)
           order <- stateOrderFor a
           modify' (modifyMon a (\x -> x {monVolatiles = SV.snoc (monVolatiles x) (Volatile (fromEnum c) noEffectState {esOrder = order, esDuration = cnDuration (conditionOf dx c)})}))
-          r <- singleEvent dx EvStart key (OwnMon a) Nothing Nothing RNone
+          r <- singleEventFx dx EvStart key (OwnMon a) Nothing Nothing eff RNone
           if relayTruthy r
             then pure True
             else modify' (modifyMon a (removeVolatile (fromEnum c))) >> pure False
@@ -225,6 +233,62 @@ runStatusImmunity dx a key = do
     else if typeImmuneTo dx key m
       then pure False
       else relayTruthy <$> runEvent dx EvImmunity a Nothing Nothing (RText key)
+
+-- | @pokemon.ignoringAbility()@ (pokemon.ts 879): Gastro Acid and Neutralizing Gas, or a Pokemon not in play.
+-- LATENT: no supported effect suppresses an ability, and the callers check the Pokemon is active themselves, so this
+-- is always false.
+ignoringAbility :: Battle -> Actor -> Bool
+ignoringAbility _ _ = False
+
+-- | @pokemon.getBestStat(false, true)@ (pokemon.ts 677): the index (0 atk, 1 def, 2 spa, 3 spd, 4 spe) of the first stat
+-- with the greatest value after its stage (@getStat@ with @unboosted@ false and @unmodified@ true: no
+-- @ModifyBoost@ and no stat modifier events), compared with @>@ from 0, so a tie goes to the earlier stat.
+-- LATENT: with Wonder Room, @getStat(..., unmodified)@ swaps the defensive stats; Wonder Room is not supported.
+bestStatIx :: Mon -> Int
+bestStatIx m = fst (foldl pick (0, 0) (zip [0 ..] values))
+  where
+    st = monStats m
+    bs = monBoosts m
+    values = [boostedStat (stAtk st) (bsAtk bs), boostedStat (stDef st) (bsDef bs), boostedStat (stSpa st) (bsSpa bs), boostedStat (stSpd st) (bsSpd bs), boostedStat (stSpe st) (bsSpe bs)]
+    pick (bi, bv) (i, v) = if v > bv then (i, v) else (bi, bv)
+
+-- | @field.effectiveTerrain()@ (field.ts 177): the terrain after @runEvent('TryTerrain', target)@, which no supported
+-- handler listens to. 'Nothing' is @''@.
+-- LATENT: @TryTerrain@ (Gravity-like effects, abilities) has no handler, so it is not run.
+effectiveTerrain :: Battle -> Maybe Int
+effectiveTerrain b = if fTerrain (bField b) == noCond then Nothing else Just (fTerrain (bField b))
+
+-- | @pokemon.useItem(source, sourceEffect)@ (pokemon.ts 1833-1871) as far as the supported items reach. A fainted or
+-- inactive Pokemon, or one with no item, cannot; nor one an item tells to eat a different item than it holds.
+-- @runEvent('UseItem')@ (no handler) can refuse it. Then the item's @boosts@ go through @battle.boost@ (source the
+-- Pokemon, effect the item), @singleEvent('Use')@ runs (no handler), the item and its state are cleared, and
+-- @runEvent('AfterUseItem')@ runs (Unburden). Returns whether the item was used.
+-- LATENT: gems (an item that works at 0 HP), @lastItem@ (Recycle), @usedItemThisTurn@ and @usedItemThisBattle@ are not
+-- in the state: nothing supported reads them and the snapshot does not record them. @red card@'s log differs, and no
+-- berry is supported.
+useItem :: MonadChance m => Dex -> Actor -> Maybe EffectKey -> Eng m Bool
+useItem dx a sourceEffect = do
+  b <- get
+  let m = monOf b a
+      itemKey = EffectKey EffItem (monItem m)
+  if monHp m <= 0 || not (monActive m) || monItem m == noItem
+    then pure False
+    else case sourceEffect of
+      -- `sourceEffect?.effectType === 'Item' && this.item !== sourceEffect.id && source === this`: the source is the event's
+      -- target, the Pokemon itself, in every supported caller
+      Just (EffectKey EffItem i) | i /= monItem m -> pure False
+      _ -> do
+        ok <- relayTruthy <$> runEvent dx EvUseItem a Nothing Nothing (RText (itemId dx (monItem m)))
+        if not ok
+          then pure False
+          else do
+            -- `if (item.boosts) this.battle.boost(item.boosts, this, source, item)`
+            let boosts = maybe [] cnItemBoosts (effectOf dx itemKey)
+            unless (null boosts) (void (boostMon a boosts))
+            -- singleEvent('Use', item, itemState, ...): no item has an onUse; then the item and its state go
+            modify' (modifyMon a (\x -> x {monItem = noItem, monItemState = noEffectState}))
+            void (runEvent dx EvAfterUseItem a Nothing Nothing (RText (itemId dx (monItem m))))
+            pure True
 
 -- | @field.suppressingWeather()@ (field.ts 101): an active Pokemon with an ability that suppresses weather (Air Lock,
 -- Cloud Nine). The gates of @singleEvent@ (battle.ts 624-627) and @runEvent@ (897-900) and 'effectiveWeather' read it.
@@ -416,7 +480,7 @@ setDurationFromCallback dx key owner source = do
   case effectOf dx key >>= \cn -> condSpec cn POwn EvDurationCallback >>= hsBody of
     Nothing -> pure ()
     Just body -> do
-      Res out _ <- runBody dx body (Ctx (holderOf b owner) owner key (Just source) Nothing baseMod False) RNone
+      Res out _ <- runBody dx body (Ctx (holderOf b owner) owner key (Just source) Nothing baseMod Nothing False) RNone
       case out of
         Replace (RInt d) -> modify' (\bb -> maybe bb (\st -> setOwnerState owner key st {esDuration = d} bb) (ownerState bb owner key))
         _ -> pure ()
@@ -625,6 +689,9 @@ data Ctx = Ctx
   , cSource :: !(Maybe Actor)
   , cMove :: !(Maybe MoveData)
   , cMod :: !Int
+  , cEffect :: !(Maybe EffectKey)
+  -- ^ The effect that caused the event (Showdown's @sourceEffect@ argument of @singleEvent@) when it is not a move: the
+  -- Booster Energy that adds a volatile (`effect?.name === 'Booster Energy'`).
   , cCrit :: !Bool
   -- ^ The target's @getMoveHitData(move).crit@ of the hit the event belongs to (@ModifyDamage@: Reflect and Light Screen
   -- do not weaken a critical hit); false for every other event.
@@ -675,7 +742,7 @@ runEventCrit dx crit ev target source mv relay0 = do
               (OwnField, _) -> modify' (\bb -> maybe bb (\st -> setOwnerState OwnField (hKey h) st {esHasTarget = True} bb) (ownerState bb OwnField (hKey h)))
               _ -> pure ()
             -- a side or field handler is called with the event's own arguments: the Pokemon is the event's target
-            Res out md' <- runBody dx body (Ctx (fromMaybe target (hHolder h)) (hOwner h) (hKey h) source mv md crit) r
+            Res out md' <- runBody dx body (Ctx (fromMaybe target (hHolder h)) (hOwner h) (hKey h) source mv md Nothing crit) r
             case out of
               Keep -> go fmt hs r md'
               Replace r'
@@ -707,11 +774,15 @@ suppressingAbility _ _ = False
 -- holder that is not active, except for @Start@ (@TakeItem@ is not an event here); an ability of an inactive holder,
 -- except for @End@. The weather gate joins with weather.
 singleEvent :: MonadChance m => Dex -> EventId -> EffectKey -> Owner -> Maybe Actor -> Maybe MoveData -> Relay -> Eng m Relay
-singleEvent dx ev key@(EffectKey kind _) owner source mv relay = case effectOf dx key >>= \cn -> condSpec cn (ownPrefix kind) ev >>= hsBody of
+singleEvent dx ev key owner source mv = singleEventFx dx ev key owner source mv Nothing
+
+-- | 'singleEvent' with the effect that caused it (an item, when it is not a move).
+singleEventFx :: MonadChance m => Dex -> EventId -> EffectKey -> Owner -> Maybe Actor -> Maybe MoveData -> Maybe EffectKey -> Relay -> Eng m Relay
+singleEventFx dx ev key@(EffectKey kind _) owner source mv eff relay = case effectOf dx key >>= \cn -> condSpec cn (ownPrefix kind) ev >>= hsBody of
   Nothing -> pure relay
   Just body -> do
     b <- get
-    singleBody dx ev body key owner (holderOf b owner) source mv relay
+    singleBodyFx dx ev body key owner (holderOf b owner) source mv eff relay
 
 -- | The Pokemon an owner's callback is called with: the Pokemon itself, or for a side or field a placeholder (see
 -- 'Ctx').
@@ -724,7 +795,10 @@ holderOf b owner = case owner of
 -- | The part of @singleEvent@ after finding the callback. @holder@ is the target the callback is called with: the
 -- owner for a Pokemon's effect, the Pokemon a side's condition is collected for in @fieldEvent@.
 singleBody :: MonadChance m => Dex -> EventId -> Body -> EffectKey -> Owner -> Actor -> Maybe Actor -> Maybe MoveData -> Relay -> Eng m Relay
-singleBody dx ev body key owner holder source mv relay = do
+singleBody dx ev body key owner holder source mv = singleBodyFx dx ev body key owner holder source mv Nothing
+
+singleBodyFx :: MonadChance m => Dex -> EventId -> Body -> EffectKey -> Owner -> Actor -> Maybe Actor -> Maybe MoveData -> Maybe EffectKey -> Relay -> Eng m Relay
+singleBodyFx dx ev body key owner holder source mv eff relay = do
   b0 <- get
   let m = monOf b0 holder
       off = case (key, owner) of
@@ -739,7 +813,7 @@ singleBody dx ev body key owner holder source mv relay = do
   if off
     then pure relay
     else do
-      Res out _ <- runBody dx body (Ctx holder owner key source mv baseMod False) relay
+      Res out _ <- runBody dx body (Ctx holder owner key source mv baseMod eff False) relay
       pure (case out of Keep -> relay; Replace r -> r)
 
 -- | @battle.eachEvent@ (battle.ts 470), for @Update@, @BeforeTurn@, @Weather@ and @WeatherChange@: speed-sort the active Pokemon by their cached
@@ -854,7 +928,7 @@ fieldEvent dx ev targets = do
       b <- get
       void (singleBody dx ev body (hKey h) (hOwner h) (fromMaybe (holderOf b (hOwner h)) (hHolder h)) Nothing Nothing RNone)
     after rest = do
-      resolveFaints False True -- this.resolveFaints() (checkWin defaults to true)
+      resolveFaints dx False True -- this.resolveFaints() (checkWin defaults to true)
       ended <- gets ((/= Ongoing) . bResult)
       unless ended (run rest)
     endEffect owner key = case (owner, key) of
@@ -873,6 +947,17 @@ fieldEvent dx ev targets = do
 
 runBody :: MonadChance m => Dex -> Body -> Ctx -> Relay -> Eng m Res
 runBody dx body c relay = case body of
+  -- pokemon.useItem() when every condition holds (the seeds)
+  BRule (RUseItem conds) -> do
+    b <- get
+    let m = monOf b (cHolder c)
+        holds cond = case cond of
+          CTerrain ids -> maybe False (`elem` ids) (effectiveTerrain b)
+          CMoveType _ -> False
+          CHolderHpAtMost x y -> monHp m * y <= monMaxHp m * x
+          CWeather ids -> maybe False (`elem` ids) (effectiveWeatherOf b (cHolder c))
+    when (all holds conds) (void (useItem dx (cHolder c) (Just (cKey c))))
+    pure (Res Keep (cMod c))
   -- chainModify(n, d) of the event's modifier when every condition holds
   BRule (RChainModify n d conds) -> do
     b <- get
@@ -883,6 +968,7 @@ runBody dx body c relay = case body of
           -- `pokemon.effectiveWeather()` (swiftswim, chlorophyll, slushrush) or `field.isWeather(...)` (sandrush), which
           -- differ only for Utility Umbrella (unsupported)
           CWeather ids -> maybe False (`elem` ids) (effectiveWeatherOf b (cHolder c))
+          CTerrain ids -> maybe False (`elem` ids) (effectiveTerrain b)
     pure (Res Keep (if all holds conds then chainModify (bFormat b) (cMod c) (n, d) else cMod c))
   BConst r -> pure (Res (Replace r) (cMod c))
   BNative n -> runNative dx n c relay
@@ -1189,6 +1275,63 @@ runNative dx n c relay = do
     NLeafGuardTryAddVolatile -> do
       b <- get
       if relay == RText "yawn" && inSun b holder then returning stop else keep
+    -- protosynthesis, quarkdrive condition.onStart(pokemon, source, effect): `fromBooster` when the effect is Booster
+    -- Energy, and `bestStat = pokemon.getBestStat(false, true)`: the first of atk, def, spa, spd, spe with the greatest
+    -- stat after its stage (no stat modifier events), a tie going to the earlier
+    NParadoxStart -> do
+      b <- get
+      let fromBooster = case cEffect c of
+            Just (EffectKey EffItem i) -> itemId dx i == "boosterenergy"
+            _ -> False
+      modify' (\bb -> maybe bb (\st -> setOwnerState (cOwner c) (cKey c) st {esA = bestStatIx (monOf b holder), esB = if fromBooster then 1 else 0} bb) (ownerState bb (cOwner c) (cKey c)))
+      keep
+    -- the five modifiers: `this.effectState.bestStat !== stat || pokemon.ignoringAbility()` returns; else
+    -- chainModify([5325, 4096]), and 1.5 for Speed
+    NParadoxAtk -> paradoxBoost 0 (5325, 4096)
+    NParadoxDef -> paradoxBoost 1 (5325, 4096)
+    NParadoxSpA -> paradoxBoost 2 (5325, 4096)
+    NParadoxSpD -> paradoxBoost 3 (5325, 4096)
+    NParadoxSpe -> paradoxBoost 4 (3, 2)
+    -- unburden condition.onModifySpe(spe, pokemon): `!pokemon.item && !pokemon.ignoringAbility()` -> chainModify(2)
+    NUnburdenSpe -> if monItem m == noItem then chained (2, 1) else keep
+    -- protosynthesis.onStart(pokemon): this.singleEvent('WeatherChange', this.effect, this.effectState, pokemon); the
+    -- handler runs as the SwitchIn at priority -2
+    NProtosynthesisStart -> singleEvent dx EvWeatherChange (cKey c) (cOwner c) Nothing Nothing RNone >> keep
+    NQuarkDriveStart -> singleEvent dx EvTerrainChange (cKey c) (cOwner c) Nothing Nothing RNone >> keep
+    -- protosynthesis.onWeatherChange(pokemon): `this.field.isWeather('sunnyday')` (not Utility Umbrella's) ->
+    -- pokemon.addVolatile('protosynthesis') (the effect is the ability: no Booster Energy); else, a volatile that
+    -- is not fromBooster -> pokemon.removeVolatile('protosynthesis')
+    NProtosynthesisWeatherChange -> do
+      b <- get
+      let sun = M.lookup "sunnyday" (dxFieldIx dx)
+      if effectiveWeather b /= Nothing && effectiveWeather b == sun
+        then void (addVolatileFx dx holder CProtosynthesis (Just (cKey c)))
+        else unless (fromBoosterOf b holder CProtosynthesis) (modify' (modifyMon holder (\x -> if monHp x > 0 then removeVolatile (fromEnum CProtosynthesis) x else x)))
+      keep
+    -- quarkdrive.onTerrainChange(pokemon): the same with `this.field.isTerrain('electricterrain')`
+    NQuarkDriveTerrainChange -> do
+      b <- get
+      let electric = M.lookup "electricterrain" (dxFieldIx dx)
+      if effectiveTerrain b /= Nothing && effectiveTerrain b == electric
+        then void (addVolatileFx dx holder CQuarkDrive (Just (cKey c)))
+        else unless (fromBoosterOf b holder CQuarkDrive) (modify' (modifyMon holder (\x -> if monHp x > 0 then removeVolatile (fromEnum CQuarkDrive) x else x)))
+      keep
+    -- protosynthesis.onEnd, quarkdrive.onEnd(pokemon): `delete pokemon.volatiles[...]` (no End event for the volatile)
+    NProtosynthesisEnd -> modify' (modifyMon holder (removeVolatile (fromEnum CProtosynthesis))) >> keep
+    NQuarkDriveEnd -> modify' (modifyMon holder (removeVolatile (fromEnum CQuarkDrive))) >> keep
+    -- unburden.onAfterUseItem(item, pokemon): `pokemon !== this.effectState.target` returns (the event's holder is its
+    -- target); else pokemon.addVolatile('unburden')
+    NUnburdenAfterUseItem -> void (addVolatileFx dx holder CUnburden (Just (cKey c))) >> keep
+    -- unburden.onEnd(pokemon): pokemon.removeVolatile('unburden') (a Pokemon with no HP keeps it: clearVolatile follows)
+    NUnburdenEnd -> modify' (modifyMon holder (\x -> if monHp x > 0 then removeVolatile (fromEnum CUnburden) x else x)) >> keep
+    -- boosterenergy.onTakeItem, unburden.onTakeItem: no supported move takes an item (runEvent('TakeItem') is never run)
+    -- LATENT: Booster Energy returns false for a Paradox species, Unburden adds its volatile.
+    NInertTakeItem -> keep
+    -- boosterenergy.onStart(pokemon): `this.effectState.started = true`, then its onUpdate
+    NBoosterEnergyStart -> do
+      modify' (\bb -> maybe bb (\st -> setOwnerState (cOwner c) (cKey c) st {esA = 1} bb) (ownerState bb (cOwner c) (cKey c)))
+      boosterUpdate
+    NBoosterEnergyUpdate -> boosterUpdate
     -- grassysurge, psychicsurge, mistysurge, electricsurge.onStart(source): this.field.setTerrain(...)
     NGrassySurge -> setTerrainNamed "grassyterrain"
     NPsychicSurge -> setTerrainNamed "psychicterrain"
@@ -1215,6 +1358,28 @@ runNative dx n c relay = do
     duration d = pure (Res (Replace (RInt d)) (cMod c))
     -- the weather this handler belongs to is the effective weather as the Pokemon sees it
     ownWeather b a = let EffectKey _ ci = cKey c in effectiveWeatherOf b a == Just ci
+    paradoxBoost ix nd = do
+      b <- get
+      case ownerState b (cOwner c) (cKey c) of
+        Just st | esA st == ix -> chained nd -- (pokemon.ignoringAbility() is never true: see 'ignoringAbility')
+        _ -> pure (Res Keep (cMod c))
+    fromBoosterOf b a cid = maybe False ((== 1) . esB) (effectState (monOf b a) (EffectKey EffVolatile (fromEnum cid)))
+    -- boosterenergy.onUpdate(pokemon): once started, a Protosynthesis holder with no sun uses the item and adds the
+    -- volatile (the effect is Booster Energy: fromBooster), then a Quark Drive holder with no Electric Terrain
+    boosterUpdate = do
+      b0 <- get
+      case ownerState b0 (cOwner c) (cKey c) of
+        Just st | esA st == 1 -> do
+          paradox "protosynthesis" CProtosynthesis (\b -> effectiveWeather b /= Nothing && effectiveWeather b == M.lookup "sunnyday" (dxFieldIx dx))
+          paradox "quarkdrive" CQuarkDrive (\b -> effectiveTerrain b /= Nothing && effectiveTerrain b == M.lookup "electricterrain" (dxFieldIx dx))
+        _ -> pure ()
+      pure (Res Keep (cMod c))
+    paradox name cid active = do
+      b <- get
+      let mm = monOf b (cHolder c)
+      when (abilityId dx (monAbility mm) == name && not (ignoringAbility b (cHolder c)) && not (active b)) $ do
+        used <- useItem dx (cHolder c) (Just (cKey c))
+        when used (void (addVolatileFx dx (cHolder c) cid (Just (cKey c))))
     moveTypePower ty cond nd = case cMove c of
       Just mv | typeIsNamed dx (mvType mv) ty, cond -> chained nd
       _ -> pure (Res Keep (cMod c))
@@ -1307,6 +1472,15 @@ boostMon a@(Actor p _) changes = do
       modify' (modifyMon a (\x -> x {monBoosts = new}))
       pure (new /= monBoosts m)
 
+-- | @singleEvent('End', pokemon.getAbility(), pokemon.abilityState, pokemon)@ and the same for the item: run when a
+-- Pokemon switches out (battle-actions.ts 142-143) and when it faints (battle.ts 2605-2606), before @clearVolatile@.
+-- Protosynthesis, Quark Drive and Unburden remove their volatile here (which @clearVolatile@ then removes anyway).
+endAbilityAndItem :: MonadChance m => Dex -> Actor -> Eng m ()
+endAbilityAndItem dx a = do
+  m <- gets (`monOf` a)
+  void (singleEvent dx EvEnd (EffectKey EffAbility (monAbility m)) (OwnMon a) Nothing Nothing RNone)
+  when (monItem m /= noItem) (void (singleEvent dx EvEnd (EffectKey EffItem (monItem m)) (OwnMon a) Nothing Nothing RNone))
+
 -- | @battle.heal@ + @Pokemon.heal@: restore up to max HP; nothing for 0, or at full HP, or when fainted.
 healMon :: Actor -> Int -> Battle -> Battle
 healMon a amount b
@@ -1328,8 +1502,8 @@ applyDamage a d b
 
 -- | @battle.resolveFaints@ (battle.ts), gen 5+ path without events: faint everything in the faint
 -- queue, then optionally check for a winner. Arguments: @checkWinIfNoFaints@, @checkWin@.
-resolveFaints :: Monad m => Bool -> Bool -> Eng m ()
-resolveFaints checkWinIfNoFaints checkWin' = do
+resolveFaints :: MonadChance m => Dex -> Bool -> Bool -> Eng m ()
+resolveFaints dx checkWinIfNoFaints checkWin' = do
   b <- get
   when (bResult b == Ongoing) $
     case SV.toList (bFaintQueue b) of
@@ -1341,6 +1515,8 @@ resolveFaints checkWinIfNoFaints checkWin' = do
           m <- gets (\bb -> monOf bb a)
           unless (monFainted m) $ do
             modify' (modifySide p (\s -> if sLeft s > 0 then s {sLeft = sLeft s - 1} else s))
+            -- singleEvent('End', ability) and singleEvent('End', item) (battle.ts 2605-2606), before the volatiles go
+            endAbilityAndItem dx a
             -- pokemon.clearVolatile(false) resets the stat stages, the volatiles and the cached speed (setSpecies)
             modify' (modifyMon a (\mm -> mm
               { monSpeed = stSpe (monStats mm)

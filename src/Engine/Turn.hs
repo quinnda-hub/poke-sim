@@ -234,7 +234,7 @@ switchAction dx ac = case acActor ac of
 afterAction :: MonadChance m => Dex -> Action -> Eng m ()
 afterAction dx ac = do
   -- fainting: resolveFaints({ checkWinIfNoFaints: true, checkWin: true })
-  resolveFaints True True
+  resolveFaints dx True True
   ended <- gets ((/= Ongoing) . bResult)
   unless ended $ do
     next <- gets (peekQueue . bQueue)
@@ -328,6 +328,9 @@ switchIn dx p target = do
       Just o | monHp (monOf b0 o) > 0 -> do
         -- runPursuitActivation(oldActive): eachEvent('Update') (the BeforeSwitchOut event has no handlers)
         eachEvent dx EvUpdate
+        -- singleEvent('End', oldActive.getAbility(), ...) and singleEvent('End', oldActive.getItem(), ...) (battle-actions.ts
+        -- 142-143: Protosynthesis, Quark Drive and Unburden remove their volatile)
+        endAbilityAndItem dx o
         -- queue.cancelAction(oldActive); oldActive.clearVolatile() (resets the stat stages, the volatiles and the cached speed; the status, and toxic's stage, stay)
         modify' (\b -> modifyMon o (\m -> m {monSpeed = stSpe (monStats m), monBoosts = noBoosts, monVolatiles = SV.empty}) b {bQueue = cancelAction o (bQueue b)})
       _ -> pure ()
@@ -430,7 +433,7 @@ runMove fmt dx user@(Actor p _) slot = do
         void (runEvent dx EvModifyMove user (Just eventTarget) (Just mv) RNone)
         useMove fmt dx user target mv
         -- resolveFaints(); checkWin()
-        resolveFaints False True
+        resolveFaints dx False True
         void (checkWin Nothing)
 
 -- | The hit steps of @trySpreadMoveHit@ (battle-actions.ts): target check, type immunity, accuracy, then the
@@ -555,7 +558,7 @@ statusMove dx user tgt mv = do
     eachEvent dx EvUpdate -- eachEvent('Update') after the hit
     -- resolveFaints({ checkWin: !pokemon.hp }); the user is alive
     userDown <- gets (\bb -> monHp (monOf bb user) <= 0)
-    resolveFaints False userDown
+    resolveFaints dx False userDown
     eachEvent dx EvUpdate -- second eachEvent('Update')
 
 -- | @hitStepMoveHitLoop@ (battle-actions.ts): the hit count, then one @spreadMoveHit@ per hit with an
@@ -573,7 +576,7 @@ hitLoop fmt dx user target mv = do
   b <- get
   let userDown = monHp (monOf b user) <= 0
   -- gen >= 5: resolveFaints({ checkWin: !pokemon.hp })
-  resolveFaints False userDown
+  resolveFaints dx False userDown
   -- applyRecoilDamage (after the loop, from move.totalDamage; battle-actions.ts ~1439)
   let um = monOf b user
   case (mvStruggleRecoil mv, mrRecoil rule) of

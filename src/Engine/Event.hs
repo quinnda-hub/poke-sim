@@ -87,6 +87,13 @@ data EventId
   | EvTryAddVolatile
   -- ^ @runEvent('TryAddVolatile', pokemon, source, effect, status)@ in @addVolatile@; the relay value is the volatile id.
   | EvTerrainChange
+  | EvUseItem
+  -- ^ @runEvent('UseItem', pokemon, null, null, item)@ in @useItem@ (pokemon.ts 1844).
+  | EvAfterUseItem
+  -- ^ @runEvent('AfterUseItem', pokemon, null, null, item)@ in @useItem@ (1867): Unburden.
+  | EvTakeItem
+  -- ^ @runEvent('TakeItem', ...)@ in @takeItem@: no supported move takes items, so it is never run; it is an event only
+  -- so that the handlers Booster Energy and Unburden list for it parse.
   deriving (Eq, Show, Enum, Bounded)
 
 -- | How @runEvent@ orders the handlers of an event (battle.ts 797-803).
@@ -163,6 +170,9 @@ eventName e = case e of
   EvSetStatus -> "SetStatus"
   EvTryAddVolatile -> "TryAddVolatile"
   EvTerrainChange -> "TerrainChange"
+  EvUseItem -> "UseItem"
+  EvAfterUseItem -> "AfterUseItem"
+  EvTakeItem -> "TakeItem"
 
 -- | Which Pokemon a handler reacts to: the holder (@onX@), its allies (@onAllyX@), its foes (@onFoeX@), the
 -- source of the event (@onSourceX@) or anyone (@onAnyX@).
@@ -200,7 +210,7 @@ parseHandlerName n = case T.stripPrefix "on" n of
 
 -- | The conditions the engine supports: the statuses of slice 1 and the flinch volatile. The index
 -- ('fromEnum') is the id used in the state and in the @Dex@ condition table.
-data CondId = CBrn | CPar | CPsn | CTox | CFrz | CFlinch
+data CondId = CBrn | CPar | CPsn | CTox | CFrz | CFlinch | CProtosynthesis | CQuarkDrive | CUnburden
   deriving (Eq, Show, Enum, Bounded)
 
 -- | The key of the condition in @conditions.json@ (data/conditions.ts).
@@ -212,6 +222,9 @@ condName c = case c of
   CTox -> "tox"
   CFrz -> "frz"
   CFlinch -> "flinch"
+  CProtosynthesis -> "protosynthesis"
+  CQuarkDrive -> "quarkdrive"
+  CUnburden -> "unburden"
 
 -- | What kind of effect holds a handler. Showdown's other kinds (slot conditions, the move itself) join when their
 -- holders exist in the state.
@@ -263,7 +276,10 @@ data HandlerSpec = HandlerSpec
 -- | The vocabulary of data rules for handlers: @chainModify(n, d)@ of the event's modifier when every
 -- condition holds (docs/handlers.md section 3). A rule kind or condition kind exists only when at least three
 -- whitelisted effects are expressed by it exactly; the justification is in "Engine.Effects".
-data HandlerRule = RChainModify !Int !Int ![RuleCond]
+data HandlerRule
+  = RChainModify !Int !Int ![RuleCond]
+  | -- | @pokemon.useItem()@ when every condition holds (the seeds: @onStart@ and @onTerrainChange@ under their terrain).
+    RUseItem ![RuleCond]
   deriving (Eq, Show)
 
 -- | A condition of a rule, on the event's move or the handler's holder.
@@ -275,6 +291,8 @@ data RuleCond
   | -- | The effective weather is one of these field-condition ids (@pokemon.effectiveWeather()@ or
     -- @field.isWeather(...)@: swiftswim, chlorophyll, sandrush, slushrush).
     CWeather ![Int]
+  | -- | @this.field.isTerrain(...)@: the terrain is one of these field-condition ids (the seeds).
+    CTerrain ![Int]
   deriving (Eq, Show)
 
 -- | What a handler does.
@@ -382,12 +400,33 @@ data NativeId
   | NGrassySurge
   | NPsychicSurge
   | NMistySurge
+  | NParadoxStart
+  -- ^ protosynthesis, quarkdrive @condition.onStart@: @fromBooster@ when the effect is Booster Energy, @bestStat@.
+  | NParadoxAtk
+  | NParadoxDef
+  | NParadoxSpA
+  | NParadoxSpD
+  | NParadoxSpe
+  | NUnburdenSpe
+  | NProtosynthesisStart
+  | NProtosynthesisWeatherChange
+  | NProtosynthesisEnd
+  | NQuarkDriveStart
+  | NQuarkDriveTerrainChange
+  | NQuarkDriveEnd
+  | NUnburdenAfterUseItem
+  | NUnburdenEnd
+  | NInertTakeItem
+  -- ^ A @TakeItem@ handler (Booster Energy, Unburden): no supported move takes an item, so it cannot run.
+  | NBoosterEnergyStart
+  | NBoosterEnergyUpdate
   deriving (Eq, Show)
 
 -- | The body of each handler the engine implements (written by hand: Showdown's handlers are code). A condition
 -- is supported only when every handler the export lists for it has a body here.
 -- Source: data/conditions.ts, @brn@ (lines 2-19), @par@ (20-47), @frz@ (92-122), @psn@ (123-137), @tox@
--- (138-163) and @flinch@ (198-206).
+-- (138-163) and @flinch@ (198-206); and the @condition@ blocks of the abilities protosynthesis, quarkdrive and
+-- unburden (data/abilities.ts).
 nativeBody :: CondId -> Prefix -> EventId -> Maybe Body
 nativeBody c POwn e = BNative <$> case (c, e) of
   (CBrn, EvStart) -> Just NLogOnly
@@ -406,8 +445,22 @@ nativeBody c POwn e = BNative <$> case (c, e) of
   (CFrz, EvAfterMoveSecondary) -> Just NFrzAfterMoveSecondary
   (CFrz, EvDamagingHit) -> Just NFrzDamagingHit
   (CFlinch, EvBeforeMove) -> Just NFlinchBeforeMove
+  (CProtosynthesis, EvStart) -> Just NParadoxStart
+  (CProtosynthesis, EvEnd) -> Just NLogOnly
+  (CQuarkDrive, EvStart) -> Just NParadoxStart
+  (CQuarkDrive, EvEnd) -> Just NLogOnly
+  (CUnburden, EvModifySpe) -> Just NUnburdenSpe
+  (_, EvModifyAtk) | paradox c -> Just NParadoxAtk
+  (_, EvModifyDef) | paradox c -> Just NParadoxDef
+  (_, EvModifySpA) | paradox c -> Just NParadoxSpA
+  (_, EvModifySpD) | paradox c -> Just NParadoxSpD
+  (_, EvModifySpe) | paradox c -> Just NParadoxSpe
   _ -> Nothing
 nativeBody _ _ _ = Nothing
+
+-- | The two Paradox abilities' volatiles share their bodies.
+paradox :: CondId -> Bool
+paradox c = c == CProtosynthesis || c == CQuarkDrive
 
 -- ---------------------------------------------------------------------------
 -- Sort keys

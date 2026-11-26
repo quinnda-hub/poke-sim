@@ -272,8 +272,8 @@ conditionsSupported dex = withTests 1 $ property $ do
     let cn = dxConditions dex V.! fromEnum c
     footnote (T.unpack (condName c) ++ " has a handler without a body")
     assert (cnSupported cn)) [minBound .. maxBound :: CondId]
-  -- flinch has duration 1 (conditions.ts); the statuses have none
-  map (\c -> cnDuration (dxConditions dex V.! fromEnum c)) [minBound .. maxBound :: CondId] === [0, 0, 0, 0, 0, 1]
+  -- flinch has duration 1 (conditions.ts); the statuses and the volatiles of the abilities have none
+  map (\c -> cnDuration (dxConditions dex V.! fromEnum c)) [minBound .. maxBound :: CondId] === [0, 0, 0, 0, 0, 1, 0, 0, 0]
 
 -- | An ability or item is supported exactly when "Engine.Effects" has bodies for it, and then the handlers the
 -- engine runs are exactly those bodies: one for each handler the export lists, and no body for a handler the export
@@ -298,7 +298,7 @@ effectsSupported dex = withTests 1 $ property $ do
           assert (all (`elem` run) expected && all (`elem` expected) run && length run == length expected))
         (V.toList table)
   checkTable "ability" (\t -> abilityBodies t wx) (dxAbilities dex)
-  checkTable "item" itemBodies (dxItems dex)
+  checkTable "item" (\t -> itemBodies t wx) (dxItems dex)
 
 -- | A field condition (side condition, weather, terrain, pseudo-weather) is supported exactly when "Engine.Effects"
 -- has bodies for it, and then the handlers the engine runs are exactly those bodies: one for each handler the export

@@ -465,11 +465,12 @@ diffMon dex path orig m ev =
     ++ cmp (path ++ ".status") (txt (ev .: "status")) (statusName (monStatus m))
     -- statusState.stage (toxic's counter): present with the value, or absent
     ++ cmp (path ++ ".statusState.stage") (int (ev .: "statusState" .: "stage")) (if esA (monStatusState m) < 0 then Nothing else Just (esA (monStatusState m)))
-    -- volatiles: the engine models only flinch (duration 1), which a battle that ends mid-residual leaves in the
-    -- final snapshot; every other volatile must be absent
+    -- volatiles: every volatile the engine holds, by name, with its duration as record.js writes it (only when
+    -- Showdown's state has one: the engine's 0 is "no duration", since a duration that counts down to 0 removes the
+    -- volatile); every other volatile must be absent
     ++ cmp (path ++ ".volatiles") (ev .: "volatiles")
          (Object (KM.fromList
-           [ (K.fromText name, Object (KM.singleton "duration" (Number (fromIntegral (esDuration vs)))))
+           [ (K.fromText name, Object (if esDuration vs == 0 then KM.empty else KM.singleton "duration" (Number (fromIntegral (esDuration vs)))))
            | Volatile i vs <- SV.toList (monVolatiles m)
              -- an id with no condition name still shows up (as "<volatile i>"), so it cannot hide from the compare
            , let name = case [condName c | c <- [minBound .. maxBound], fromEnum c == i] of

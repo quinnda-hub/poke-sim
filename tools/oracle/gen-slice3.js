@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 // Generates random battles for "slice 3" (field state: 3a entry hazards, 3b screens, Tailwind and Trick Room, 3c
-// weather, 3d terrain) and records each on Showdown.
+// weather, 3d terrain, 3e weather- and terrain-driven boosts and item use) and records each on Showdown.
 //
 // Slice 3a adds side conditions (Stealth Rock, Spikes, Toxic Spikes, Sticky Web), Heavy-Duty Boots and Toxic Debris,
 // and with them the effect order (`battle.effectOrder`) that sorts two hazards on one side. Slice 3b adds durations:
@@ -20,6 +20,10 @@
 //     grounded), Grass types (powder immune, Grassy Terrain) and Dragon types (Misty Terrain) meet them; in a mirror
 //     match the lead is a terrain or weather setter, so the two leads tie on speed and both set a field condition at
 //     the turn-0 switch-in;
+//   - a share are Paradox-style holders (Protosynthesis, Quark Drive, with and without Booster Energy), seed holders
+//     (Electric, Grassy, Misty, Psychic Seed) and Unburden holders; low-level Pokemon often tie on their best stat; in
+//     a mirror match the lead often holds one of these, so two listeners tie on speed at the same WeatherChange or
+//     TerrainChange;
 //   - a share get a paralysing move (Tailwind and Trick Room against paralysed Pokemon), and in a mirror match the
 //     two sides tie on speed, under Trick Room too;
 //   - a share are Flying types (not grounded: the hazards skip them), Poison types (a grounded one absorbs Toxic
@@ -46,7 +50,7 @@ const path = require('path');
 
 const SHOWDOWN_DIR = process.env.SHOWDOWN_DIR ||
 	path.resolve(__dirname, '..', '..', 'local', 'showdown');
-const { Dex, Battle, Side } = require(path.join(SHOWDOWN_DIR, 'dist', 'sim'));
+const { Dex, Battle, Side, Pokemon } = require(path.join(SHOWDOWN_DIR, 'dist', 'sim'));
 const { record } = require('./record.js');
 const { makeScenario } = require('./gen-slice1.js');
 
@@ -74,6 +78,9 @@ const TERRAIN_SETTERS = ['electricsurge', 'grassysurge', 'mistysurge', 'psychics
 const TERRAINS = ['electricterrain', 'grassyterrain', 'mistyterrain', 'psychicterrain'];
 const POWDER_MOVES = ['stunspore', 'poisonpowder', 'cottonspore'];
 const GROUND_MOVES = ['earthquake', 'bulldoze'];
+const PARADOX = ['protosynthesis', 'quarkdrive'];
+const SEEDS = ['electricseed', 'grassyseed', 'mistyseed', 'psychicseed'];
+const SEED_TERRAIN = { electricseed: 'electricterrain', grassyseed: 'grassyterrain', mistyseed: 'mistyterrain', psychicseed: 'psychicterrain' };
 const ROCKS = ['heatrock', 'damprock', 'smoothrock', 'icyrock'];
 const WEATHERS = ['sunnyday', 'raindance', 'sandstorm', 'snowscape'];
 const PARALYSERS = ['thunderwave', 'glare', 'stunspore', 'nuzzle'];
@@ -102,9 +109,9 @@ function assign(scenario, pool, seed) {
 	const items = pool.items.filter(id => id !== '');
 	const weightedAbilities = abilities.concat(abilities.filter(id => id === 'toxicdebris').flatMap(id => [id, id, id, id, id]))
 		.concat(abilities.filter(id => WEATHER_SETTERS.includes(id) || WEATHER_SPEED.includes(id) || id === 'hydration' ||
-			TERRAIN_SETTERS.includes(id) || id === 'overcoat' || id === 'leafguard').flatMap(id => [id, id, id]));
+			TERRAIN_SETTERS.includes(id) || id === 'overcoat' || id === 'leafguard' || PARADOX.includes(id) || id === 'unburden').flatMap(id => [id, id, id]));
 	const weightedItems = items.concat(items.filter(id => id === 'heavydutyboots' || id === 'lightclay').flatMap(id => [id, id, id, id]))
-		.concat(items.filter(id => ROCKS.includes(id) || id === 'terrainextender').flatMap(id => [id, id, id]));
+		.concat(items.filter(id => ROCKS.includes(id) || id === 'terrainextender' || id === 'boosterenergy' || SEEDS.includes(id)).flatMap(id => [id, id, id]));
 	const setterAbilities = abilities.filter(id => WEATHER_SETTERS.includes(id) || TERRAIN_SETTERS.includes(id));
 	const mirror = JSON.stringify(scenario.teams[0]) === JSON.stringify(scenario.teams[1]);
 	const set = (s) => {
@@ -147,10 +154,19 @@ function assign(scenario, pool, seed) {
 		const it = int(100) < 20 ? '' : pick(weightedItems);
 		s.ability = ab === 'noability' ? 'No Ability' : dex.abilities.get(ab).name;
 		s.item = it === '' ? '' : dex.items.get(it).name;
+		// Paradox holders often carry Booster Energy; Unburden holders often a seed (the item it loses)
+		if (PARADOX.includes(ab) && pool.items.includes('boosterenergy') && int(100) < 45) s.item = dex.items.get('boosterenergy').name;
+		if (ab === 'unburden' && int(100) < 55) s.item = dex.items.get(pick(SEEDS.filter(id => pool.items.includes(id)))).name;
 	};
 	for (const s of scenario.teams[0]) set(s);
 	// in a mirror match the lead is a weather setter in a third of the battles: two setters tie on speed at turn 0
 	if (mirror && setterAbilities.length && int(3) === 0) scenario.teams[0][0].ability = dex.abilities.get(pick(setterAbilities)).name;
+	// ... or the lead is a listener: a Paradox ability or a seed, so two of them tie on speed at a WeatherChange or TerrainChange
+	if (mirror && int(3) === 0) {
+		const lead = scenario.teams[0][0];
+		if (int(2) === 0 && pool.abilities.includes('protosynthesis')) lead.ability = dex.abilities.get(pick(PARADOX.filter(id => pool.abilities.includes(id)))).name;
+		else if (pool.items.includes('grassyseed')) lead.item = dex.items.get(pick(SEEDS.filter(id => pool.items.includes(id)))).name;
+	}
 	if (mirror) scenario.teams[1] = JSON.parse(JSON.stringify(scenario.teams[0]));
 	else for (const s of scenario.teams[1]) set(s);
 	return scenario;
@@ -218,6 +234,17 @@ function newTally() {
 		psychicBlocksPriority: 0, psychicPriorityAllowedUngrounded: 0, psychicNonPriorityAllowed: 0, psychicBoost: 0,
 		overcoatPowderBlocked: 0, overcoatSandImmune: 0, grassTypePowderImmune: 0, powderMoveHit: 0,
 		leafGuardBlocksStatus: 0, leafGuardStatusAllowedNoSun: 0, statusUnderSunWithoutLeafGuard: 0,
+		paradoxStarted: { protoFromAbility: 0, protoFromBooster: 0, quarkFromAbility: 0, quarkFromBooster: 0 },
+		paradoxBestStat: { atk: 0, def: 0, spa: 0, spd: 0, spe: 0 }, paradoxBestStatTie: 0,
+		paradoxStatBoost: { atk: 0, def: 0, spa: 0, spd: 0, spe: 0 },
+		paradoxRemovedByFieldChange: 0, paradoxFromBoosterKept: 0, boosterThenFieldArrives: 0,
+		boosterEnergyUsed: { proto: 0, quark: 0 }, boosterUsedWithNoField: 0, boosterKeptInSun: 0,
+		seedUsed: { electricseed: 0, grassyseed: 0, mistyseed: 0, psychicseed: 0 },
+		seedUsedAtSwitchIn: 0, seedUsedOnTerrainChange: 0,
+		unburdenAfterSeed: 0, unburdenSpeedDoubled: 0,
+		// (no Unburden-after-Booster-Energy counter: Booster Energy is used only by a Protosynthesis or Quark Drive holder, and a
+		// Pokemon has one ability, so it can never also have Unburden: structurally zero)
+		listenerTieWeatherChange: 0, listenerTieTerrainChange: 0,
 	};
 }
 
@@ -403,6 +430,7 @@ function install() {
 
 	installWeather(t);
 	installTerrain(t);
+	installParadox(t);
 
 	// speed ties among the Pokemon in play when they switch in (runSwitch's speedSort of getAllActive)
 	const speedSort = Battle.prototype.speedSort;
@@ -672,6 +700,106 @@ function installTerrain(t) {
 			if (targets.some(surge) && targets.some(weather)) c.leadWeatherAndTerrainSetters++;
 		}
 		return fieldEvent.call(this, eventid, targets, ...rest);
+	};
+}
+
+// The Paradox, item-use and Unburden observations (3e): all observation only.
+function installParadox(t) {
+	const STATS = ['atk', 'def', 'spa', 'spd', 'spe'];
+	const singleEvent = Battle.prototype.singleEvent;
+	Battle.prototype.singleEvent = function (eventid, effect, state, target, ...rest) {
+		const r = singleEvent.call(this, eventid, effect, state, target, ...rest);
+		const c = t();
+		if (c && effect && eventid === 'Start' && (effect.id === 'protosynthesis' || effect.id === 'quarkdrive') && state && target && target.hp !== undefined) {
+			const key = (effect.id === 'protosynthesis' ? 'proto' : 'quark') + (state.fromBooster ? 'FromBooster' : 'FromAbility');
+			c.paradoxStarted[key]++;
+			// getStat with unmodified true runs no event
+			const stats = STATS.map(i => target.getStat(i, false, true));
+			const best = Math.max(...stats);
+			c.paradoxBestStat[state.bestStat]++;
+			if (stats.filter(v => v === best).length > 1) c.paradoxBestStatTie++;
+		}
+		return r;
+	};
+
+	const removeVolatile = Pokemon.prototype.removeVolatile;
+	Pokemon.prototype.removeVolatile = function (status) {
+		const r = removeVolatile.call(this, status);
+		const c = t();
+		const id = typeof status === 'string' ? status : status.id;
+		if (c && r && (id === 'protosynthesis' || id === 'quarkdrive') && this.battle.event &&
+			(this.battle.event.id === 'WeatherChange' || this.battle.event.id === 'TerrainChange')) c.paradoxRemovedByFieldChange++;
+		return r;
+	};
+
+	const useItem = Pokemon.prototype.useItem;
+	Pokemon.prototype.useItem = function (...args) {
+		const c = t();
+		const item = this.item, ability = this.ability, ev = this.battle.event && this.battle.event.id;
+		const noField = !this.battle.field.weather && !this.battle.field.terrain;
+		const r = useItem.call(this, ...args);
+		if (!c || !r) return r;
+		if (SEEDS.includes(item)) {
+			c.seedUsed[item]++;
+			if (ev === 'SwitchIn') c.seedUsedAtSwitchIn++; else if (ev === 'TerrainChange') c.seedUsedOnTerrainChange++;
+		}
+		if (item === 'boosterenergy') {
+			if (ability === 'protosynthesis') c.boosterEnergyUsed.proto++; else if (ability === 'quarkdrive') c.boosterEnergyUsed.quark++;
+			if (noField) c.boosterUsedWithNoField++;
+		}
+		if (ability === 'unburden' && SEEDS.includes(item)) c.unburdenAfterSeed++;
+		return r;
+	};
+
+	const runEvent = Battle.prototype.runEvent;
+	Battle.prototype.runEvent = function (eventid, target, source, ...rest) {
+		const c = t();
+		const holder = Array.isArray(target) ? target[0] : target;
+		if (!c || !holder || holder.hp === undefined || !holder.volatiles) return runEvent.call(this, eventid, target, source, ...rest);
+		if (eventid === 'WeatherChange' || eventid === 'TerrainChange') {
+			const key = eventid === 'WeatherChange' ? 'protosynthesis' : 'quarkdrive';
+			const before = holder.volatiles[key];
+			const r = runEvent.call(this, eventid, target, source, ...rest);
+			if (before && before.fromBooster) {
+				const active = eventid === 'WeatherChange' ? this.field.weather === 'sunnyday' : this.field.terrain === 'electricterrain';
+				if (holder.volatiles[key]) { if (active) c.boosterThenFieldArrives++; else c.paradoxFromBoosterKept++; }
+			}
+			return r;
+		}
+		const statOf = { ModifyAtk: 'atk', ModifyDef: 'def', ModifySpA: 'spa', ModifySpD: 'spd', ModifySpe: 'spe' }[eventid];
+		if (statOf && typeof rest[1] === 'number') {
+			const v = holder.volatiles.protosynthesis || holder.volatiles.quarkdrive;
+			if (v && v.bestStat === statOf) {
+				const r = runEvent.call(this, eventid, target, source, ...rest);
+				if (r > rest[1]) c.paradoxStatBoost[statOf]++;
+				return r;
+			}
+			if (eventid === 'ModifySpe' && holder.ability === 'unburden' && holder.volatiles.unburden && !holder.item) {
+				const r = runEvent.call(this, eventid, target, source, ...rest);
+				if (r > rest[1]) c.unburdenSpeedDoubled++;
+				return r;
+			}
+		}
+		if (eventid === 'Update' && holder.item === 'boosterenergy' && holder.ability === 'protosynthesis' && this.field.weather === 'sunnyday') {
+			const r = runEvent.call(this, eventid, target, source, ...rest);
+			if (holder.item === 'boosterenergy') c.boosterKeptInSun++;
+			return r;
+		}
+		return runEvent.call(this, eventid, target, source, ...rest);
+	};
+
+	// two listeners tie on speed at the same WeatherChange or TerrainChange
+	const eachEvent = Battle.prototype.eachEvent;
+	Battle.prototype.eachEvent = function (eventid, ...rest) {
+		const c = t();
+		if (c && (eventid === 'WeatherChange' || eventid === 'TerrainChange')) {
+			const a = this.getAllActive();
+			if (a.length === 2 && a[0].speed === a[1].speed) {
+				if (eventid === 'WeatherChange' && a.every(p => p.ability === 'protosynthesis')) c.listenerTieWeatherChange++;
+				if (eventid === 'TerrainChange' && a.every(p => p.ability === 'quarkdrive' || SEEDS.includes(p.item))) c.listenerTieTerrainChange++;
+			}
+		}
+		return eachEvent.call(this, eventid, ...rest);
 	};
 }
 

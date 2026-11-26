@@ -34,6 +34,11 @@
 -- @CWeather@, used by three whitelisted abilities (swiftswim, chlorophyll, sandrush; slushrush shares it). Reflect and Light Screen's damage halving, the duration callbacks and Trick Room's restart
 -- are native: one or two users each.
 --
+-- The seeds share one body shape (@RUseItem [CTerrain ids]@: use the item when the terrain is one of these), and
+-- three whitelisted seeds (grassyseed, psychicseed, mistyseed) meet the bar, so it is a rule. The Protosynthesis and
+-- Quark Drive bodies (a best-stat check and a start that computes it) are shared by two abilities, under the bar:
+-- natives. Booster Energy's and Unburden's bodies are used once each: natives.
+--
 -- The weather and terrain setters (drought, drizzle, sandstream, snowwarning, grassysurge, psychicsurge, mistysurge,
 -- electricsurge) are natives. Eight whitelisted-or-free users would meet the bar for one rule kind ("set this field
 -- condition"), but the ids of the field conditions are only known after the field table is built from the moves, so
@@ -95,6 +100,19 @@ abilityBodies ty wx name = case name of
   "overcoat" -> Just [(POwn, EvImmunity, BNative NOvercoatImmunity), (POwn, EvTryHit, BNative NOvercoatTryHit)]
   -- leafguard: onSetStatus (any status, in sun), onTryAddVolatile (yawn, in sun)
   "leafguard" -> Just [(POwn, EvSetStatus, BNative NLeafGuardSetStatus), (POwn, EvTryAddVolatile, BNative NLeafGuardTryAddVolatile)]
+  -- protosynthesis: onStart runs its onWeatherChange (priority -2 as the SwitchIn), which adds the volatile in sun and
+  -- removes it otherwise unless it came from Booster Energy; onEnd deletes the volatile
+  "protosynthesis" ->
+    Just [ (POwn, EvStart, BNative NProtosynthesisStart), (POwn, EvWeatherChange, BNative NProtosynthesisWeatherChange)
+         , (POwn, EvEnd, BNative NProtosynthesisEnd) ]
+  -- quarkdrive: the same under Electric Terrain
+  "quarkdrive" ->
+    Just [ (POwn, EvStart, BNative NQuarkDriveStart), (POwn, EvTerrainChange, BNative NQuarkDriveTerrainChange)
+         , (POwn, EvEnd, BNative NQuarkDriveEnd) ]
+  -- unburden: onAfterUseItem adds the volatile, onTakeItem too (no supported move takes items), onEnd removes it
+  "unburden" ->
+    Just [ (POwn, EvAfterUseItem, BNative NUnburdenAfterUseItem), (POwn, EvTakeItem, BNative NInertTakeItem)
+         , (POwn, EvEnd, BNative NUnburdenEnd) ]
   -- toxicdebris: onDamagingHit, a Physical move sets Toxic Spikes on the attacker's side
   "toxicdebris" -> Just [(POwn, EvDamagingHit, BNative NToxicDebris)]
   -- technician: onBasePower, basePower after the accumulated modifier <= 60 -> chainModify(1.5)
@@ -113,9 +131,10 @@ abilityBodies ty wx name = case name of
       let r = BRule (RChainModify 3 2 [CMoveType i, CHolderHpAtMost 1 3])
       Just [(POwn, EvModifyAtk, r), (POwn, EvModifySpA, r)]
 
--- | The bodies of an item, or 'Nothing' when the engine does not implement it.
-itemBodies :: (T.Text -> Maybe Int) -> T.Text -> Maybe [(Prefix, EventId, Body)]
-itemBodies ty name = case name of
+-- | The bodies of an item, or 'Nothing' when the engine does not implement it. The arguments resolve a type name and
+-- a field-condition name (the seeds' terrain) to their ids.
+itemBodies :: (T.Text -> Maybe Int) -> (T.Text -> Maybe Int) -> T.Text -> Maybe [(Prefix, EventId, Body)]
+itemBodies ty fid name = case name of
   -- data/items.ts leftovers: onResidual heal(baseMaxhp / 16); blacksludge: heal 1/16 for a Poison-type, else
   -- damage 1/8
   "leftovers" -> Just [(POwn, EvResidual, BNative NLeftovers)]
@@ -147,6 +166,17 @@ itemBodies ty name = case name of
   "damprock" -> Just []
   "smoothrock" -> Just []
   "icyrock" -> Just []
+  -- boosterenergy: onStart (sets `started`, then runs onUpdate), onUpdate (a Paradox ability with no sun or no Electric
+  -- Terrain: use the item and add the volatile), onTakeItem (Paradox species cannot lose it)
+  "boosterenergy" ->
+    Just [ (POwn, EvStart, BNative NBoosterEnergyStart), (POwn, EvUpdate, BNative NBoosterEnergyUpdate)
+         , (POwn, EvTakeItem, BNative NInertTakeItem) ]
+  -- electricseed, grassyseed, mistyseed, psychicseed: onStart and onTerrainChange call pokemon.useItem() under their
+  -- terrain (onStart also needs `!pokemon.ignoringItem()`, always true here); the boosts are the item's `boosts`
+  "electricseed" -> seed "electricterrain"
+  "grassyseed" -> seed "grassyterrain"
+  "mistyseed" -> seed "mistyterrain"
+  "psychicseed" -> seed "psychicterrain"
   -- terrainextender: no handlers (the terrains' durationCallback reads the item)
   "terrainextender" -> Just []
   _ -> case lookup name typeItems of
@@ -156,6 +186,11 @@ itemBodies ty name = case name of
       i <- ty t
       Just [(POwn, EvBasePower, BRule (RChainModify 4915 4096 [CMoveType i]))]
     Nothing -> Nothing
+  where
+    seed terrain = do
+      i <- fid terrain
+      let r = BRule (RUseItem [CTerrain [i]])
+      Just [(POwn, EvStart, r), (POwn, EvTerrainChange, r)]
 
 -- | Items whose only handler is the plain type check above. Excluded: souldew and the orbs (a species check),
 -- the plates and masks (onTakeItem), punchingglove, pinkbow and polkadotbow (@basePower * 1.1@), muscleband

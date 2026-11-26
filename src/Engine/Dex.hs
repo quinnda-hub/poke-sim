@@ -113,6 +113,8 @@ data Condition = Condition
   , cnBreakable :: !Bool
   -- ^ @flags.breakable@ (Mold Breaker suppresses the effect's handlers).
   , cnId :: !T.Text
+  , cnItemBoosts :: ![(BoostStat, Int)]
+  -- ^ An item's @boosts@ (the seeds): the stages @useItem@ raises (pokemon.ts 1857).
   }
   deriving (Show)
 
@@ -236,24 +238,21 @@ loadDex dir = do
     let tix = M.fromList (zip (V.toList tnames) [0 ..])
     chart <- chartOf tnames typesV
     immune <- immunityOf tnames typesV
-    conds <- traverse (conditionFor conditionsV) [minBound .. maxBound]
+    conds <- traverse (conditionFor conditionsV abilitiesV) [minBound .. maxBound]
     let tyOf n = M.lookup n tix
     abilityEntries <- objectEntries abilitiesV
-    -- the weathers lead the field-condition table, in the order of conditions.json ('fieldConditions'), so their ids
-    -- are known before the table is built (the weather rules of abilities name them)
-    condEntries <- objectEntries conditionsV
-    let weatherKeys = [k | (k, v) <- condEntries, field "effectType" v == Right (String "Weather")]
-        weatherIx = M.fromList (zip weatherKeys [0 ..])
-        wxOf n = M.lookup n weatherIx
-    abilityL <- traverse (\(k, v) -> effectFor k 7 POwn True v (abilityBodies tyOf wxOf k)) abilityEntries
-    itemEntries <- objectEntries itemsV
-    itemL <- traverse (\(k, v) -> effectFor k 8 POwn True v (itemBodies tyOf k)) itemEntries
-    speciesL <- objectEntries speciesV >>= traverse (speciesOf tix . snd)
+    -- the field-condition table first: its ids (the weathers, then the terrains and the rest in the order of moves.json)
+    -- are named by the rules of abilities and items (swiftswim's weather, the seeds' terrain)
     moveEntries <- objectEntries movesV
     fieldL <- fieldConditions conditionsV moveEntries
     let fieldV = V.fromList (map snd fieldL)
         fieldIx = M.fromList (zip (map fst fieldL) [0 ..])
         condLookup = fieldLookup fieldIx fieldV
+        fieldIdOf n = M.lookup n fieldIx
+    abilityL <- traverse (\(k, v) -> effectFor k 7 POwn True v (abilityBodies tyOf fieldIdOf k)) abilityEntries
+    itemEntries <- objectEntries itemsV
+    itemL <- traverse (\(k, v) -> effectFor k 8 POwn True v (itemBodies tyOf fieldIdOf k)) itemEntries
+    speciesL <- objectEntries speciesV >>= traverse (speciesOf tix . snd)
     movesL <- traverse (moveOf tix condLookup . snd) moveEntries
     struggleV <- maybe (Left "moves.json has no struggle") Right (lookup "struggle" moveEntries)
     -- Struggle's onModifyMove makes 'moveRule' reject it, so 'moveOf' gives it 'plainRule'. Its flags still apply:
@@ -333,12 +332,23 @@ immunityOf names v = do
       Right [K.toText k | (k, Number x) <- KM.toList ks, x == 3]
     _ -> Right []) names
 
--- | A condition from @conditions.json@, with the bodies of 'nativeBody'. See 'effectFor'.
-conditionFor :: Value -> CondId -> Either String Condition
-conditionFor conditionsV c = do
-  v <- field (condName c) conditionsV
-  effectType <- field "effectType" v >>= asText
-  let typeOrder = case effectType of
+-- | A condition with the bodies of 'nativeBody': from @conditions.json@, or for the volatiles of the abilities
+-- protosynthesis, quarkdrive and unburden the @condition@ block of the ability (@dex.conditions.get@ finds it there:
+-- dex-conditions.ts 692-699), whose handler names are the ability's @condition.on...@ entries. See 'effectFor'.
+conditionFor :: Value -> Value -> CondId -> Either String Condition
+conditionFor conditionsV abilitiesV c = do
+  (v, typeOrder) <- case abilityOf c of
+    Just ab -> do
+      a <- field ab abilitiesV
+      cond <- field "condition" a
+      let hs = case a of
+            Object o | Just (Array xs) <- KM.lookup "handlers" o -> [String (T.drop 10 h) | String h <- V.toList xs, "condition." `T.isPrefixOf` h]
+            _ -> []
+      pure (case cond of Object o -> Object (KM.insert "handlers" (Array (V.fromList hs)) o); _ -> cond, 2) -- effectType Condition
+    Nothing -> do
+      v <- field (condName c) conditionsV
+      effectType <- field "effectType" v >>= asText
+      pure (v, case effectType of
         "Condition" -> 2
         "Weather" -> 5
         "Format" -> 5
@@ -346,9 +356,15 @@ conditionFor conditionsV c = do
         "Ruleset" -> 5
         "Ability" -> 7
         "Item" -> 8
-        _ -> 0 :: Int
-      bodies = [(p, e, b) | p <- [minBound .. maxBound], e <- [minBound .. maxBound], Just b <- [nativeBody c p e]]
+        _ -> 0 :: Int)
+  let bodies = [(p, e, b) | p <- [minBound .. maxBound], e <- [minBound .. maxBound], Just b <- [nativeBody c p e]]
   effectFor (condName c) typeOrder POwn False v (Just bodies)
+  where
+    abilityOf x = case x of
+      CProtosynthesis -> Just "protosynthesis"
+      CQuarkDrive -> Just "quarkdrive"
+      CUnburden -> Just "unburden"
+      _ -> Nothing
 
 -- | A move's field condition by key, if the engine runs it ('Engine.Rule.CondLookup').
 fieldLookup :: M.Map T.Text Int -> V.Vector Condition -> CondLookup
@@ -404,8 +420,16 @@ fieldConditions conditionsV moveEntries = do
 -- status-with-@ability:@-id case are not reachable here).
 effectFor :: T.Text -> Int -> Prefix -> Bool -> Value -> Maybe [(Prefix, EventId, Body)] -> Either String Condition
 effectFor ident typeOrder ownPfx startAsSwitchIn v mbodies = do
-  names <- case v of
+  names0 <- case v of
     Object o | Just hs <- KM.lookup "handlers" o -> asArray hs >>= traverse asText
+    _ -> Right []
+  -- the @condition.on...@ handlers of these abilities belong to their volatile ('conditionFor'), not to the ability
+  let names = if ident `elem` ["protosynthesis", "quarkdrive", "unburden"] && startAsSwitchIn
+        then filter (not . ("condition." `T.isPrefixOf`)) names0
+        else names0
+  boosts <- case v of
+    Object o | startAsSwitchIn, Just (Object bo) <- KM.lookup "boosts" o ->
+      traverse (\(k, x) -> (,) <$> boostStatOf (K.toText k) <*> asInt x) (KM.toList bo)
     _ -> Right []
   duration <- case v of
     Object o | Just d <- KM.lookup "duration" o -> asInt d
@@ -441,7 +465,7 @@ effectFor ident typeOrder ownPfx startAsSwitchIn v mbodies = do
   let breakable = case v of
         Object o | Just (Object fl) <- KM.lookup "flags" o -> maybe False truthy (KM.lookup "breakable" fl)
         _ -> False
-  pure (Condition duration (specs ++ startSwitchIn ++ residual) (reject == Nothing) reject breakable ident)
+  pure (Condition duration (specs ++ startSwitchIn ++ residual) (reject == Nothing) reject breakable ident boosts)
 
 speciesOf :: M.Map T.Text Int -> Value -> Either String SpeciesData
 speciesOf tix v = do
@@ -521,3 +545,15 @@ truthy _ = True
 truthyField :: T.Text -> Value -> Bool
 truthyField k (Object o) = maybe False truthy (KM.lookup (K.fromText k) o)
 truthyField _ _ = False
+
+-- | A stat key of @boosts@.
+boostStatOf :: T.Text -> Either String BoostStat
+boostStatOf k = case k of
+  "atk" -> Right BAtk
+  "def" -> Right BDef
+  "spa" -> Right BSpa
+  "spd" -> Right BSpd
+  "spe" -> Right BSpe
+  "accuracy" -> Right BAccuracy
+  "evasion" -> Right BEvasion
+  _ -> Left ("boost stat " ++ T.unpack k)

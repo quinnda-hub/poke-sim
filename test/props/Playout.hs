@@ -25,7 +25,7 @@ import qualified Hedgehog.Range as Range
 
 import Engine
 import Engine.Chance (Sample)
-import Engine.Dex (Condition (..), Dex (..), supportedAbilities, supportedItems, supportedMoves, supportedSpecies)
+import Engine.Dex (Condition (..), Dex (..), abilityId, supportedAbilities, supportedItems, supportedMoves, supportedSpecies)
 import Engine.Event (CondId (..))
 import Engine.State
 
@@ -193,9 +193,23 @@ checkBattle dx b = do
       -- 15); the other statuses and a cured Pokemon have a fresh statusState (no stage); only a Pokemon that
       -- fainted badly poisoned keeps a stale stage (faint and the fnt / '' assignments leave statusState alone)
       let stage = esA (monStatusState m)
-      -- flinch is the only volatile: present exactly when the volatile vector is non-empty
-      let flinched = not (SV.null (monVolatiles m))
-      if all (\(Volatile i st) -> i == fromEnum CFlinch && esDuration st == 1) (SV.toList (monVolatiles m)) then Right () else bad "a volatile other than flinch with duration 1"
+      -- the volatiles: flinch (duration 1) and the volatiles of Protosynthesis, Quark Drive and Unburden (no duration).
+      -- A volatile of an ability lives only on a holder of that ability; the Paradox ones have a best stat in 0..4 and
+      -- a fromBooster flag that is 1 only on a holder whose item is gone (Booster Energy was used)
+      let flinched = any (\(Volatile i _) -> i == fromEnum CFlinch) (SV.toList (monVolatiles m))
+          volatileOk (Volatile i st)
+            | i == fromEnum CFlinch = esDuration st == 1
+            | i == fromEnum CProtosynthesis = ability "protosynthesis" && esDuration st == 0 && esA st >= 0 && esA st <= 4 && boosterOk st
+            | i == fromEnum CQuarkDrive = ability "quarkdrive" && esDuration st == 0 && esA st >= 0 && esA st <= 4 && boosterOk st
+            | i == fromEnum CUnburden = ability "unburden" && esDuration st == 0
+            | otherwise = False
+          ability name = abilityId dx (monAbility m) == name
+          boosterOk st = esB st == 0 || (esB st == 1 && monItem m == noItem)
+          ids = [i | Volatile i _ <- SV.toList (monVolatiles m)]
+      if all volatileOk (SV.toList (monVolatiles m)) then Right () else bad "a volatile that is not flinch, or an ability's volatile that breaks its invariant"
+      if length ids == length (nub ids) then Right () else bad "a volatile twice"
+      -- a Pokemon with no item has a default item state (useItem clears the state with the item)
+      if monItem m == noItem && monItemState m /= noEffectState then bad "no item but an item state" else Right ()
       if monStatus m == StatusTox && (stage < 0 || stage > 15) then bad ("badly poisoned with stage " ++ show stage) else Right ()
       if monStatus m /= StatusTox && stage /= -1 && not (monFainted m && stage >= 0 && stage <= 15)
         then bad ("stage " ++ show stage ++ " with status " ++ show (monStatus m) ++ " on a live Pokemon") else Right ()
