@@ -114,8 +114,6 @@ parseSet dx (Object o) = do
   teraType <- case KM.lookup "teraType" o of
     Nothing -> Right Nothing
     Just (String "") -> Right Nothing
-    -- phase 5a: Stellar is unsupported until 5b (it changes STAB, the 60 floor and getTypes)
-    Just (String "Stellar") -> Left "unsupported teraType Stellar (Stellar Terastallization is phase 5b)"
     Just (String t) -> maybe (Left ("unknown teraType " ++ T.unpack t)) (Right . Just) (V.elemIndex t (dxTypeNames dx))
     Just _ -> Left "teraType must be a string"
   pure (SetSpec species moves nature evs ivs level ability item gender teraType)

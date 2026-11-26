@@ -204,8 +204,14 @@ Last updated 2026-11-25.
     is rejected until 5b.
   - A new set, slice 5, of 1,000 battles with Tera offered. Parity checks
     6,300 traces, 476,038 decision points and 942,236 draws.
+- **Slice 5b: Stellar.** A Stellar Pokémon keeps its types; its STAB is 2x
+  for an original type and 1.2x for any other, once per type and for every
+  hit of that move, and the floor applies to any type not yet boosted. The
+  boosted types are never cleared. Slice 5 is re-recorded at 1,200 battles
+  with about a quarter of sets Stellar. Parity checks 6,500 traces, 492,063
+  decision points and 983,270 draws.
 - **Test tiers.** The fast tier (`POKESIM_TIER=fast`) replays every 10th trace
-  and runs the hedgehog properties at 100 tests each, in about 25 s. The long
+  and runs the hedgehog properties at 100 tests each, in about 35 s. The long
   tier, which gates merges into main, replays everything and runs the
   properties at 2000 tests each.
 
@@ -331,9 +337,9 @@ The mechanics come in this order (decided 2026-11-26). Each one gets real
 Gen 9 OU battles simulated sooner, and each makes the later ones cheaper.
 
 1. **Finish slice 4: 4d, Knock Off and item removal.** Done 2026-11-26.
-2. **Terastallization.** At 0% today, and no real OU battle can be simulated
-   without it. It changes `getTypes`, STAB and the request, and adds the Tera
-   choice to `legalChoices`.
+2. **Terastallization.** Done 2026-11-26 (slices 5a and 5b). Before it, no
+   real OU battle could be simulated. It changed `getTypes`, STAB and the
+   request, and added the Tera choice to `legalChoices`.
 3. **Moves that switch mid-turn.** U-turn (0.73 of usage), Flip Turn,
    Volt Switch, Chilly Reception, and the forced switches of Roar, Whirlwind
    and Dragon Tail. They need a switch request inside the turn, which is a
@@ -392,6 +398,7 @@ Gen 9 OU battles simulated sooner, and each makes the later ones cheaper.
    | 2026-11-26 | Slice 4c | Baseline |
    | 2026-11-26 | Slice 4d | On pace: step 1 done the day it was estimated |
    | 2026-11-26 | Slice 5a | Ahead: most of step 2 done the same day |
+   | 2026-11-26 | Slice 5b | Ahead: step 2 done, about 3 days before its milestone window |
 6. **Per-player view.** What each side can observe, as a first-class value.
 7. **Showdown seed compatibility.** Implement Showdown's own generators so a
    battle can be reproduced from its seed alone.
@@ -439,7 +446,9 @@ Alongside:
 - **Scenario generation from rules.** For each rule, generate battles that
   exercise it with each random outcome forced both ways, and report coverage
   per rule.
-- **Trace size.** 6,300 battles take about 3.6 GB. Snapshots should become
+- **Trace size.** 6,500 battles take about 3.7 GB. The long tier now takes about 325 s,
+  growing with every set: delta snapshots and a faster replay are due before
+  the catalog work. Snapshots should become
   deltas.
 - **Benchmark tracking.** Record throughput at each slice so slowdowns are
   measured when they appear.

@@ -16,6 +16,7 @@ module Engine.Turn
 
 import Control.Monad (forM_, unless, void, when)
 import Control.Monad.Trans.State.Strict (execStateT, get, gets, modify')
+import Data.Bits (setBit)
 import Data.Maybe (fromMaybe, isNothing)
 import qualified Data.Vector.Strict as SV
 import qualified Data.Map.Strict as M
@@ -672,7 +673,7 @@ hitLoop fmt dx user target mv = do
     OneHit -> pure 1
     FixedHits n -> pure n
     TwoToFive -> (\i -> if i < 7 then 2 else if i < 14 then 3 else if i < 17 then 4 else 5) <$> roll 0 20
-  total <- hits targetHits (1 :: Int) 0
+  total <- hits targetHits (1 :: Int) 0 mv
   b <- get
   let userDown = monHp (monOf b user) <= 0
   -- gen >= 5: resolveFaints({ checkWin: !pokemon.hp })
@@ -693,7 +694,8 @@ hitLoop fmt dx user target mv = do
   void (runEvent dx EvAfterMoveSecondary target (Just user) (Just mv) RNone)
   where
     -- the loop `for (hit = 1; hit <= targetHits; hit++)`; returns move.totalDamage
-    hits n hit acc
+    -- the copy of the move threads through the hits: a Stellar boost spent on one hit stays on it ('mvStellarBoosted')
+    hits n hit acc m
       | hit > n = pure acc
       | otherwise = do
           b <- get
@@ -701,12 +703,12 @@ hitLoop fmt dx user target mv = do
           if monHp (monOf b target) <= 0
             then pure acc
             else do
-              dealt <- hitMove fmt dx user target mv
-              hitEffects dx user target mv
+              (dealt, m') <- hitMove fmt dx user target m
+              hitEffects dx user target m'
               eachEvent dx EvUpdate -- eachEvent('Update') after each hit
               -- `if (!pokemon.hp && targets.length === 1) break;`
               userDown <- gets (\bb -> monHp (monOf bb user) <= 0)
-              if userDown then pure (acc + dealt) else hits n (hit + 1) (acc + dealt)
+              if userDown then pure (acc + dealt) else hits n (hit + 1) (acc + dealt) m'
 
 -- | The steps of @spreadMoveHit@ after the damage, run once per hit: @selfDrops@ (4), @secondaries@ (5), then
 -- the @DamagingHit@ event. They run even when the hit fainted the target (its faint is only queued), so the
@@ -754,7 +756,7 @@ applyEffect dx a e = case e of
 -- | One @spreadMoveHit@ of a damaging move: crit roll, random factor, damage, drain. Returns the damage
 -- actually dealt (@move.totalDamage@ accumulates it).
 {-# INLINABLE hitMove #-}
-hitMove :: MonadChance m => Format -> Dex -> Actor -> Actor -> MoveData -> Eng m Int
+hitMove :: MonadChance m => Format -> Dex -> Actor -> Actor -> MoveData -> Eng m (Int, MoveData)
 hitMove fmt dx user target mv = do
   b <- get
   let tm = monOf b target
@@ -773,7 +775,7 @@ hitMove fmt dx user target mv = do
         (_, Just DamageLevel) -> Just (monLevel um)
         (_, Just (DamageFixed n)) -> Just n
         _ -> Nothing
-  dmg <- maybe (getDamage fmt dx user target mv) pure fixed
+  (dmg, mv') <- maybe (getDamage fmt dx user target mv) (\d -> pure (d, mv)) fixed
   let -- spreadDamage: clamp to at least 1 unless 0, then Pokemon.damage; `dealt` is the damage returned
       requested = if dmg == 0 then 0 else max 1 dmg
       dealt = min requested (monHp tm)
@@ -788,13 +790,13 @@ hitMove fmt dx user target mv = do
   -- LATENT: a damaging move's onHit that returns false (the target would be dropped from the steps after it) is not modelled;
   -- Clear Smog's never does.
   when (mrOnHit (mvRule mv) == [EOwnHit]) (void (moveOwnHit dx user target mv))
-  pure dealt
+  pure (dealt, mv')
 
 -- | @getDamage@ (battle-actions.ts 1650-1779) of a move with no @damageCallback@ and no fixed @damage@: base power (its callback,
 -- the crit roll, @BasePower@), the stats (with the overrides of Body Press, Psyshock, Foul Play and the ignored defensive stage of
 -- Sacred Sword), the base damage, then @modifyDamage@.
 {-# INLINABLE getDamage #-}
-getDamage :: MonadChance m => Format -> Dex -> Actor -> Actor -> MoveData -> Eng m Int
+getDamage :: MonadChance m => Format -> Dex -> Actor -> Actor -> MoveData -> Eng m (Int, MoveData)
 getDamage fmt dx user target mv = do
   b <- get
   let um = monOf b user
@@ -848,7 +850,16 @@ getDamage fmt dx user target mv = do
   r <- roll 0 16
   -- modifyDamage: ... runEvent('ModifyDamage', pokemon, target, move, baseDamage), then the minimum 1 and the 16-bit truncation
   let pre = modifyDamage fmt dx um tm mv crit r weathered
-  finalDamage fmt . fromRelay pre <$> runEventCrit dx crit EvModifyDamage user (Just target) (Just mv) (RInt pre)
+  dmg <- finalDamage fmt . fromRelay pre <$> runEventCrit dx crit EvModifyDamage user (Just target) (Just mv) (RInt pre)
+  -- modifyDamage's STAB step (1835-1841): a Stellar user's boost marks the move in use and pushes its type onto
+  -- @stellarBoostedTypes@ (never cleared: pokemon.ts 504 is the constructor). The marker is set where the state is written, the
+  -- hit's result is the same either way.
+  -- LATENT: Terapagos-Stellar does not push (1839); Terapagos has no supported forme.
+  if stellarBoosts dx um mv
+    then do
+      modify' (modifyMon user (\x -> x {monStellarBoosted = setBit (monStellarBoosted x) (mvType mv)}))
+      pure (dmg, mv {mvStellarBoosted = True})
+    else pure (dmg, mv)
 
 -- | The stat of a Pokemon a stat selector names (only the five stats the overrides can name).
 statOf :: BoostStat -> Stats -> Int

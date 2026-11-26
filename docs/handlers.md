@@ -665,3 +665,11 @@ Stellar-type move can appear.
    (`stellarBoostedTypes`, kept as `monStellarBoosted`); the 60 floor
    applies to any type not yet boosted. A Stellar-type move against a
    terastallized target (typeMod 1) cannot occur in gen9ou.
+   Found while building it:
+   - `stellarBoostedTypes` is never cleared: only the constructor sets it
+     (pokemon.ts 504), so a switch, a faint and a forme change keep it.
+   - `move.stellarBoosted` lives on the move in use, so every hit of a
+     multi-hit move keeps the boost. The engine carries it on the per-use
+     `MoveData` copy (`mvStellarBoosted`), not in the battle state.
+   - Struggle's type `???` is never boosted (the STAB block skips it), so a
+     Stellar Pokémon's Struggle always gets the 60 floor.
