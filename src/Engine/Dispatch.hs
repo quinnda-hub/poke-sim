@@ -1948,9 +1948,10 @@ runNative dx n c relay = do
       | otherwise -> keep
     NInnerFocusTryAddVolatile -> if relay == RText "flinch" then returning stop else keep
     -- guarddog.onTryBoost(boost, target, source, effect) (priority 2): `effect.name === 'Intimidate' && boost.atk` deletes the drop, then
-    -- `this.boost({atk: 1}, target, target, null, false, true)`
+    -- `this.boost({atk: 1}, target, target, null, false, true)`. `boost.atk` is a truthiness test (data/abilities.ts 1736): `getCappedBoost`
+    -- keeps a stat whose change caps to 0 (pokemon.ts 1236-1237, a holder at -6), and so does 'boostMon', so the value is tested, not the key
     NGuardDogTryBoost
-      | RBoosts t <- relay, byAbility c "intimidate", any ((== BAtk) . fst) t -> do
+      | RBoosts t <- relay, byAbility c "intimidate", any (\(st, v) -> st == BAtk && v /= 0) t -> do
           void (boostMon dx (Just holder) (cMove c) (Just (cKey c)) holder [(BAtk, 1)])
           returning (Replace (RBoosts (filter ((/= BAtk) . fst) t)))
       | otherwise -> keep

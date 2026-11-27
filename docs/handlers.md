@@ -1712,12 +1712,9 @@ collection and state lookup, the ability's `End` and `Start` calls, and
   as it was, since `End` runs through `singleEvent`.
 
 Lead review (2026-11-27):
-- `boostMon` drops table entries whose change caps to 0. Showdown's
-  `getCappedBoost` keeps them, and `TryBoost` and `AfterBoost` see them. Every
-  slice 8 handler that reads the table (Clear Body, Mirror Armor, Guard Dog,
-  Defiant, Rattled, Eject Pack) acts only on a non-zero entry, so a zero entry
-  changes nothing. A phase whose handler iterates the table and treats a zero
-  entry differently must restore the zeros. It must not work around them.
+- `boostMon` keeps the table entries whose change caps to 0, as Showdown's `getCappedBoost` does (pokemon.ts 1236-1237), and
+  `TryBoost` and `AfterBoost` see them. A handler that tests a stat's truthiness (`boost.atk`) must therefore test the value, not
+  the key: Guard Dog (data/abilities.ts 1736) acts only on a non-zero Attack entry, so a holder at -6 gains nothing from Intimidate.
 - The base is 4.5% slower than main on slice 6 teams (86.2k against 82.4k
   decision steps/s, banana, one P-core). That is the cost of running the events
   Showdown runs on every boost and every damage. It is accepted: speed work is
