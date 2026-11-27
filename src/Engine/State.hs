@@ -41,6 +41,8 @@ module Engine.State
   , activeMon
   , activeActor
   , slotMon
+  , willAct
+  , willMove
   ) where
 
 import qualified Data.Vector.Strict as SV
@@ -394,3 +396,16 @@ activeMon p b = monOf b (activeActor p b)
 -- | The Pokemon in a given slot, if any.
 slotMon :: Side -> Int -> Maybe Mon
 slotMon s i = (sMons s SV.!?) =<< (sSlots s U.!? i)
+
+-- | @queue.willAct()@ (battle-queue.ts 315-322): the first queued @move@, @switch@ or @instaswitch@ action (@shift@ is
+-- doubles-only). The running action has already left 'bQueue' (@queue.shift()@ in @battle.go@), as in Showdown, so
+-- @Nothing@ means the running action is the last of the turn's actions.
+willAct :: Battle -> Maybe Action
+willAct b = SV.find (\ac -> acKind ac == KMove || acKind ac == KSwitch || acKind ac == KInstaSwitch) (bQueue b)
+
+-- | @queue.willMove(pokemon)@ (battle-queue.ts 324-332): @Nothing@ for a fainted Pokemon, else its first queued @move@
+-- action. A 'KPriorityChargeMove' is Showdown's @priorityChargeMove@ choice, not @move@, so it does not count.
+willMove :: Battle -> Actor -> Maybe Action
+willMove b a
+  | monFainted (monOf b a) = Nothing
+  | otherwise = SV.find (\ac -> acKind ac == KMove && acActor ac == Just a) (bQueue b)
