@@ -646,7 +646,11 @@ checkStep dx b b' (c1, c2) = (mappend (stallSeen <> seen8d <> pressureSeen) <$>)
     -- slice 8f: Neutralizing Gas suppresses Regenerator and Natural Cure (their SwitchOut handlers are skipped for an ignored ability), so
     -- those two checks hold only when no unfainted Neutralizing Gas holder is in play on the other side at the start or at the end of the
     -- step: the holder that is there at the switch-out (the foe's own switch can come first in the step) is in play at one of the two
-    noGas p = null [() | bb <- [b, b'], sHasActive (sideOf (otherP p) bb), let m = activeMon (otherP p) bb, not (monFainted m), abilityId dx (monAbility m) == "neutralizinggas"]
+    -- A holder can also be in play at the switch-out and gone from both ends: every switch runs before any runSwitch (battle-queue.ts
+    -- 182-183, switch 103 and runSwitch 101), so a foe's gas holder that switches in first suppresses the switch-out, then faints
+    -- to a hazard in its own runSwitch (fieldEvent('SwitchIn'), battle-actions.ts 237). It had HP before the step and is fainted after.
+    noGas p = null ([() | bb <- [b, b'], sHasActive (sideOf (otherP p) bb), let m = activeMon (otherP p) bb, not (monFainted m), abilityId dx (monAbility m) == "neutralizinggas"]
+      ++ [() | (m0, m1) <- zip (SV.toList (sMons (sideOf (otherP p) b))) (SV.toList (sMons (sideOf (otherP p) b'))), abilityId dx (monAbility m0) == "neutralizinggas", monHp m0 > 0, monFainted m1])
     -- slice 8d: the three events the ability phase's covers count (see 'Seen')
     seen8d = mempty
       { seenMoxie = length [() | p <- [P1, P2], (m0, m1) <- pairs p, abilityIs "moxie" m0, monActive m0, monActive m1, monHp m1 > 0, bsAtk (monBoosts m1) > bsAtk (monBoosts m0), foeDown p]
