@@ -1,7 +1,7 @@
 # Engine architecture
 
 This describes the new engine core under `src/Engine/` and the decisions behind
-it. The older simulator under `src/Pokemon/` is described at the end.
+it.
 
 Status: slices 0, 1 and 2 (2a and 2b) are built and replay 2,300 recorded
 Showdown battles with identical draws and state. Decisions 1 to 5 and 7 are
@@ -261,30 +261,4 @@ needed. Handler collection, about 65% of allocation, is the next target.
 
 `data/gen9/` is exported from the pinned Showdown build by
 `tools/oracle/export-dex.js`. The engine's tables and the test's referee share
-one source. The older files directly under `data/` (`moves.json`,
-`pokedex.json`, `learnsets.json`) are earlier Showdown exports used only by the
-legacy simulator.
-
-## The legacy simulator
-
-`src/Pokemon/`, `src/MyLib.hs` and `app/Main.hs` are the original simulator,
-written before any reference was chosen. It still builds and is left untouched
-until the new core overtakes it. Its parsers (PokePaste, the type chart) are
-candidates for reuse.
-
-It cannot serve search as it stands:
-
-- The only entry point runs a whole battle. There is no single-step function.
-- Each player's strategy is a closure stored inside the state.
-- The monad is `StateT` over `WriterT` over `IO`, and it prints every turn.
-- Randomness can only be sampled, never enumerated or forced.
-- Every strategy can read the whole state. There is no per-player view.
-
-Known bugs, found by reading and not fixed:
-
-- `applyStatusEffects` (burn and poison residual damage) has no callers.
-- `applyHealToActive` uses `max` where it needs `min`, so any heal sets HP to at
-  least full (`src/Pokemon/Battle/MoveEffect/GenericSelfHeal.hs`).
-- `applyMultiHitDamage` has no callers, so multi-hit moves deal no damage.
-- Speed ties always resolve in player 1's favour.
-- There is no test suite; `test/Main.hs` was a placeholder.
+one source.

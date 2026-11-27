@@ -74,10 +74,8 @@ cabal test parity --test-show-details=direct
 | Path | Contents |
 |---|---|
 | `src/Engine/` | The new engine core. |
-| `src/Pokemon/`, `src/MyLib.hs`, `app/` | The original simulator, kept building until the new core replaces it. |
 | `tools/oracle/` | Node scripts that record Showdown battles and export its data. |
 | `data/gen9/` | Game data exported from the pinned Showdown build. |
-| `data/*.json`, `data/*.txt` | Data and sample teams for the original simulator. |
 | `docs/` | Design, testing, roadmap and research notes. |
 | `local/` | Not committed: the Showdown checkout and recorded battles. |
 

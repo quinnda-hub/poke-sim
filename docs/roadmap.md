@@ -540,7 +540,9 @@ Alongside:
   catalog work.
 - **Benchmark tracking.** Record throughput at each slice so slowdowns are
   measured when they appear.
-- **Retire the legacy simulator** once the new core covers what it does.
+- **Retire the legacy simulator.** Done 2026-11-27: `src/Pokemon/`,
+  `src/MyLib.hs`, `app/`, its data files under `data/` and the `poke-sim`
+  executable are removed. They remain in git history.
 
 ## Later: the bot
 
