@@ -3,6 +3,7 @@
 -- interpreter, and invariant checks over a battle state. Nothing here knows an expected battle outcome.
 module Playout
   ( genTeams
+  , genPivotTeams
   , playChecked
   , advanceWhile
   , startBattle
@@ -20,6 +21,7 @@ import qualified Data.Map.Strict as M
 import Data.List (nub)
 import qualified Data.Vector as V
 import qualified Data.Vector.Strict as SV
+import qualified Data.Vector.Unboxed as U
 import Hedgehog (Gen)
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
@@ -38,10 +40,29 @@ stepCap = 5000
 -- | A pair of random legal teams (1 to 6 Pokemon each) built through 'parseTeam', the path the trace teams
 -- and the benchmark use.
 genTeams :: Dex -> Gen (Team, Team)
-genTeams dx = (,) <$> genTeam <*> genTeam
+genTeams dx = genTeamsWith dx False
+
+-- | 'genTeams' weighted toward the moves that switch their user out (U-turn, Flip Turn, Volt Switch, Teleport, Parting Shot, Chilly
+-- Reception), Rocky Helmet and Shedinja (1 HP: a contact pivot into a Rocky Helmet faints its user after the flag is set), so that the
+-- playouts reach the mid-turn switch requests that a uniform draw over every move seldom does.
+genPivotTeams :: Dex -> Gen (Team, Team)
+genPivotTeams dx = genTeamsWith dx True
+
+genTeamsWith :: Dex -> Bool -> Gen (Team, Team)
+genTeamsWith dx pivotHeavy = (,) <$> genTeam <*> genTeam
   where
     species = supportedSpecies dx
     moves = supportedMoves dx
+    pivots = [m | m <- ["uturn", "flipturn", "voltswitch", "teleport", "partingshot", "chillyreception"], m `elem` moves]
+    pickSpecies
+      | pivotHeavy && "shedinja" `elem` species = Gen.frequency [(3, pure "shedinja"), (7, Gen.element species)]
+      | otherwise = Gen.element species
+    pickMove
+      | pivotHeavy && not (null pivots) = Gen.frequency [(3, Gen.element pivots), (2, Gen.element moves)]
+      | otherwise = Gen.element moves
+    pickItem
+      | pivotHeavy && "rockyhelmet" `elem` items = Gen.frequency [(2, pure "rockyhelmet"), (3, Gen.element items)]
+      | otherwise = Gen.element items
     -- every ability and item the engine accepts ("noability" and the empty item among them)
     abilities = supportedAbilities dx
     items = supportedItems dx
@@ -55,13 +76,13 @@ genTeams dx = (,) <$> genTeam <*> genTeam
         (parseTeam dx (toJSONArray sets))
     toJSONArray = Array . V.fromList
     genSet = do
-      sp <- Gen.element species
-      ms <- nub <$> Gen.list (Range.linear 1 4) (Gen.element moves)
+      sp <- pickSpecies
+      ms <- nub <$> Gen.list (Range.linear 1 4) pickMove
       nat <- Gen.element natures
       lvl <- Gen.int (Range.linear 1 100)
       evs <- Gen.list (Range.singleton 6) (Gen.int (Range.linear 0 252))
       ab <- Gen.element abilities
-      it <- Gen.element items
+      it <- pickItem
       tera <- Gen.frequency [(3, Gen.element teraTypes), (1, pure "Stellar")]
       pure (object
         [ "species" .= sp, "teraType" .= tera, "moves" .= ms, "nature" .= nat, "level" .= lvl, "ability" .= ab, "item" .= it
@@ -102,9 +123,28 @@ playChecked dx t1 t2 = startBattle dx t1 t2 >>= go 0
 -- | What one decision step may do to a Stellar Pokemon's @stellarBoostedTypes@ (pokemon.ts 504 sets it in the constructor
 -- and nothing ever clears or removes from it, so a switch or a faint keeps it): it never loses a type, and a Pokemon that
 -- is on the bench before and after the step does not change it.
+--
+-- Switching (slice 6a): a step that ends at a switch request is in the middle of a turn (or at its end, before @endTurn@), so the
+-- turn counter has not advanced; and a Pokemon that was flagged by a self-switch move (alive, 'SwitchMove') and whose side then
+-- chose its replacement is benched afterwards with no queued action left, except a @runSwitch@ (@queue.cancelAction@ keeps those,
+-- and none can be its own).
 checkStep :: Battle -> Battle -> Either String ()
-checkStep b b' = mapM_ one [(p, i) | (p, side) <- [(P1, bP1), (P2, bP2)], i <- [0 .. SV.length (sMons (side b)) - 1]]
+checkStep b b' = mapM_ one [(p, i) | (p, side) <- [(P1, bP1), (P2, bP2)], i <- [0 .. SV.length (sMons (side b)) - 1]] >> turnOk >> pivotsOk
   where
+    turnOk = case request b' of
+      Awaiting SwitchRequest _ _ | bTurn b' /= bTurn b -> Left ("the turn counter went from " ++ show (bTurn b) ++ " to " ++ show (bTurn b') ++ " across a switch request")
+      _ -> Right ()
+    pivotsOk = case request b of
+      Awaiting SwitchRequest _ _ -> mapM_ pivoted [(p, o) | p <- [P1, P2], o <- activeOrigs p]
+      _ -> Right ()
+    activeOrigs p = [i | (i, m) <- zip [0 ..] (SV.toList (sMons (sideOf p b))), monActive m, monSwitchFlag m == SwitchMove, monHp m > 0]
+    pivoted (p, o) =
+      let m' = monOf b' (Actor p o)
+          queued = [a | a <- SV.toList (bQueue b'), acActor a == Just (Actor p o), acKind a /= KRunSwitch]
+       in if monActive m' then Left (show p ++ " member " ++ show o ++ " is still active after its self-switch")
+          else if monHp m' <= 0 then Left (show p ++ " member " ++ show o ++ " has no HP after its self-switch")
+          else if not (null queued) then Left (show p ++ " member " ++ show o ++ " has queued actions after its self-switch: " ++ show queued)
+          else Right ()
     side' p = if p == P1 then bP1 b' else bP2 b'
     side0 p = if p == P1 then bP1 b else bP2 b
     one (p, i) = case (sMons (side0 p) SV.!? i, sMons (side' p) SV.!? i) of
@@ -138,8 +178,31 @@ checkBattle dx b = do
       ask P2 a2
     Finished _ -> mapM_ (\p -> if null (legalChoices b p) then Right () else Left ("choices after the end for " ++ show p)) [P1, P2]
   mapM_ side [(P1, bP1 b), (P2, bP2 b)]
+  switchFlags
   conditions
   where
+    -- The switch flag (slice 6a): only the Pokemon in the active slot has one (a fainted one is no longer 'isActive' there: faintMessages
+    -- sets `isActive = false`); a self-switch move's flag (SwitchMove) is on an active Pokemon with HP, a faint's (SwitchForced) on a
+    -- fainted one. A flag outlives no decision point except the switch request that asks for it, and a switch request asks exactly
+    -- the sides whose active-slot Pokemon is flagged (and that have a Pokemon left).
+    switchFlags = do
+      let flagged p = [(i, m) | (i, m) <- zip [0 :: Int ..] (SV.toList (sMons (sideOf p b))), monSwitchFlag m /= NoSwitch]
+      mapM_ (\(p, (i, m)) -> do
+        if U.head (sSlots (sideOf p b)) == i then Right () else Left (show p ++ ": a switch flag on member " ++ show i ++ ", not the one in the active slot")
+        case monSwitchFlag m of
+          SwitchMove | monHp m <= 0 || not (monActive m) -> Left (show p ++ ": a self-switch flag on a Pokemon with no HP or off the field")
+          SwitchForced | not (monFainted m) -> Left (show p ++ ": a forced-switch flag on a Pokemon that has not fainted")
+          _ -> Right ())
+        [(p, im) | p <- [P1, P2], im <- flagged p]
+      case request b of
+        Awaiting SwitchRequest a1 a2 -> do
+          let want p = sLeft (sideOf p b) > 0 && not (null (flagged p))
+          if (a1, a2) == (want P1, want P2) then Right () else Left ("a switch request asks " ++ show (a1, a2) ++ " but the flagged sides are " ++ show (want P1, want P2))
+          if a1 || a2 then Right () else Left "a switch request that asks no side"
+          mapM_ (\p -> if all isSwitch (legalChoices b p) then Right () else Left (show p ++ ": a choice other than a switch at a switch request")) [P1, P2]
+        Awaiting _ _ _ -> if null (flagged P1) && null (flagged P2) then Right () else Left "a switch flag at a team preview or a move request"
+        Finished _ -> Right ()
+    isSwitch c = case c of Switch _ -> True; _ -> False
     -- Side conditions and the field. Showdown's @sideConditions@ is an object keyed by id, so an id appears once, in
     -- insertion order; each state took its @effectOrder@ from a counter that only grows, so the orders along the
     -- insertion order are strictly increasing, and the battle's counter is ahead of every state's order. Court Change keeps this: it
@@ -232,6 +295,7 @@ checkBattle dx b = do
       -- untagged holders (Gouging Fire, Raging Bolt, Iron Boulder, Iron Crown) can receive one and keep it in sun or
       -- Electric Terrain, where it is not used.
       let flinched = any (\(Volatile i _) -> i == fromEnum CFlinch) (SV.toList (monVolatiles m))
+          chilled = any (\(Volatile i _) -> i == fromEnum CChillyReception) (SV.toList (monVolatiles m))
           volatileOk (Volatile i st)
             | i == fromEnum CFlinch = esDuration st == 1
             | i == fromEnum CProtosynthesis = ability "protosynthesis" && esDuration st == 0 && esA st >= 0 && esA st <= 4 && boosterOk st
@@ -239,6 +303,8 @@ checkBattle dx b = do
             | i == fromEnum CUnburden = ability "unburden" && esDuration st == 0
             -- roost: one turn (duration 1), and the state keeps the species' types as they were (typeWas, esA and esB)
             | i == fromEnum CRoost = esDuration st == 1
+            -- chilly reception: one turn (duration 1); its priorityChargeMove action adds it
+            | i == fromEnum CChillyReception = esDuration st == 1
             | otherwise = False
           sp = speciesData dx (monSpecies m)
           ability name = abilityId dx (monAbility m) == name
@@ -287,6 +353,12 @@ checkBattle dx b = do
         Awaiting MoveRequest _ _ | roosted -> bad "Roost at a move request"
         _ -> Right ()
       if roosted && (not (monActive m) || monFainted m || monHp m <= 0) then bad "Roost on a Pokemon that is not active or has no HP" else Right ()
+      -- chilly reception's volatile (duration 1) is the same: an active Pokemon with HP, removed by the Residual of its turn (or by the
+      -- switch, since its user pivots out)
+      if chilled && (not (monActive m) || monFainted m || monHp m <= 0) then bad "chilly reception on a Pokemon that is not active or has no HP" else Right ()
+      case request b of
+        Awaiting MoveRequest _ _ | chilled -> bad "chilly reception at a move request"
+        _ -> Right ()
       -- flinch (duration 1) lives only on an active Pokemon with HP, and never survives to a move request
       -- (Residual removes it); the one exception is a battle that ends mid-residual
       if flinched && (not (monActive m) || monFainted m || monHp m <= 0) then bad "flinch on a Pokemon that is not active or has no HP" else Right ()

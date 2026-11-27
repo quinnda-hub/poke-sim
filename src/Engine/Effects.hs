@@ -409,4 +409,10 @@ moveBodies name = case name of
   "poltergeist" -> Just [(POwn, EvTry, BNative NPoltergeistTry), (POwn, EvTryHit, BNative NLogOnly)]
   -- auroraveil (830): onTry needs snow (its condition is in 'fieldCondBodies')
   "auroraveil" -> Just [(POwn, EvTry, BNative NAuroraVeilTry)]
+  -- Slice 6a. teleport (19183): onTry fails it when the side cannot switch; partingshot (13179): onHit drops Attack and Special
+  -- Attack and deletes the move's selfSwitch when neither dropped; chillyreception (2408): priorityChargeCallback adds its volatile
+  -- (the volatile's onBeforeMove only logs)
+  "teleport" -> Just [(POwn, EvTry, BNative NTeleportTry)]
+  "partingshot" -> Just [(POwn, EvHit, BNative NPartingShotHit)]
+  "chillyreception" -> Just [(POwn, EvPriorityChargeCallback, BNative NChillyReceptionCharge)]
   _ -> Nothing

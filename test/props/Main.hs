@@ -60,6 +60,8 @@ main = do
   H.defaultMain
     [ checkSequential $ Group "engine"
         [ ("random playouts keep the decision-point and state invariants", withTests (fromIntegral n) (playouts dex))
+        , ("random playouts over teams heavy in self-switch moves, Rocky Helmet and Shedinja keep the invariants, switch flags and mid-turn requests included",
+            withTests (fromIntegral n) (pivotPlayouts dex))
         , ("bad input is rejected without draws", withTests (fromIntegral n) (badInput dex))
         , ("every move translates to Right or Left and supported moves are executable",
             withTests 1 (translation dex movesJson))
@@ -107,6 +109,18 @@ main = do
 playouts :: Dex -> Property
 playouts dex = property $ do
   (t1, t2) <- forAll (genTeams dex)
+  seed <- forAll (Gen.word64 Range.linearBounded)
+  case fst (runSample (mkSMGen seed) (playChecked dex t1 t2)) of
+    Left e -> footnote e >> failure
+    Right b -> case request b of
+      Finished _ -> success
+      Awaiting {} -> footnote "playout ended without a result" >> failure
+
+-- | 'playouts' over 'genPivotTeams': the switch-flag invariants of 'checkBattle' and the mid-turn ones of 'checkStep' (slice 6a) are checked at
+-- every state and step, and these teams reach the requests they are about at every few turns.
+pivotPlayouts :: Dex -> Property
+pivotPlayouts dex = property $ do
+  (t1, t2) <- forAll (genPivotTeams dex)
   seed <- forAll (Gen.word64 Range.linearBounded)
   case fst (runSample (mkSMGen seed) (playChecked dex t1 t2)) of
     Left e -> footnote e >> failure
@@ -323,6 +337,7 @@ conditionsSupported dex conditionsV abilitiesV movesV = withTests 1 $ property $
         CQuarkDrive -> abilityCondition "quarkdrive"
         CUnburden -> abilityCondition "unburden"
         CRoost -> lookupKey "condition" (lookupKey "roost" movesV)
+        CChillyReception -> lookupKey "condition" (lookupKey "chillyreception" movesV)
         _ -> lookupKey (condName c) conditionsV
       abilityCondition name = lookupKey "condition" (lookupKey name abilitiesV)
       lookupKey k v = case v of
@@ -679,7 +694,7 @@ itemMoves dex = property $ do
       mapM_ (\name -> case moveNamed name of
         Nothing -> footnote (T.unpack name ++ " is not in the dex") >> failure
         Just mv -> do
-          let ((res, b'), draws) = runCounter (runStateT (moveOwnHit dex user target mv) b)
+          let ((res, b'), draws) = runCounter (runStateT (fst <$> moveOwnHit dex user target mv) b)
               noneToSwap = itemOf b user == noItem && itemOf b target == noItem
               refused = holdsBoosterParadox b user || holdsBoosterParadox b target
                 || (booster b user && isParadox b target) || (booster b target && isParadox b user)

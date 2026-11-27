@@ -673,3 +673,81 @@ Stellar-type move can appear.
      `MoveData` copy (`mvStellarBoosted`), not in the battle state.
    - Struggle's type `???` is never boosted (the STAB block skips it), so a
      Stellar Pokémon's Struggle always gets the 60 floor.
+
+## Mid-turn switching (slice 6)
+
+Designed 2026-11-26 from Showdown 0.11.11. Baton Pass and Shed Tail are
+banned in gen9ou, and Pursuit is a Past move.
+
+### What already works
+
+A request in the middle of a turn needs no new structure. `turnLoop` stops
+when an action's tail makes a request and keeps the rest of the queue in
+`bQueue`. `commitChoices` sorts only the new choices and puts them before the
+saved queue, as Showdown does ("the rest of the turn is saved (and not
+re-sorted)", battle.ts commitChoices). A switch chosen at a switch request is
+an `instaswitch` (order 3), so it and the `runSwitch` it queues (101) run
+before the rest of the turn. record.js and the parity test already handle a
+decision point whose turn has not advanced and whose request is `switch`.
+What is missing is anything that sets the switch flag from a move.
+
+### Self-switch (6a)
+
+- `selfSwitch: true` becomes a rule field. It has 6 whitelisted users:
+  U-turn, Flip Turn, Volt Switch, Teleport, Parting Shot and Chilly Reception.
+- `runMoveEffects` (battle-actions.ts 1349-1353) counts the move as having
+  done something when the side can switch. At the end of the hits
+  (1369-1372), if the move did anything, the user has HP and its side can
+  switch, the flag is set. So a user that a Rocky Helmet or Rough Skin has
+  just fainted never switches, and a move that fails (Volt Switch into a
+  Ground type) sets nothing. Strictly, the flag is set before Rocky Helmet's
+  `DamagingHit`, and the faint clears it (`faint()` sets `switchFlag =
+  false`, pokemon.ts 1607); the outcome is the same.
+- `switchFlag` holds the move id after a self-switch and `true` after a
+  faint or an item. Eject Button, Eject Pack and Emergency Exit test
+  `=== true`, so the state's flag tells the two apart (`SwitchFlag`).
+- Every switch-out runs `runEvent('SwitchOut')` (battle-actions.ts 100). No
+  supported effect listens until Regenerator and Natural Cure (6c), but the
+  event point goes in now.
+- When the flag turns into a request, the action tail runs
+  `runPursuitActivation` for each flagged Pokémon with HP (battle.ts
+  2954-2958): one `eachEvent('Update')`, which can draw, before the request.
+  It sets `skipPursuit`, so the instaswitch's `switchIn` does not run it
+  again. The engine derives this from the action kind: a plain switch runs
+  it, an instaswitch whose outgoing Pokémon has HP does not. 6b's drags skip
+  it too, and 6c's Eject Button and Emergency Exit must keep this true.
+- The switched-out Pokémon's queued actions are cancelled
+  (`queue.cancelAction`, battle-actions.ts 124-127).
+- Own handler code:
+  - Teleport's `onTry` fails it when the side cannot switch.
+  - Parting Shot's `onHit` deletes `selfSwitch` from the move in use when
+    neither drop happened (data/moves.ts 13182). That is a field of the
+    per-use `MoveData` copy. With no switch target it still succeeds: an
+    `onHit` that returns nothing gives `singleEvent` its relay value `true`
+    (battle.ts 658), so the drops stay and the move does not fail.
+  - Chilly Reception's `priorityChargeCallback` queues a
+    `priorityChargeMove` action at order 107 (battle-queue.ts 189), which
+    adds its volatile. The volatile's `onBeforeMove` only logs; its
+    `duration: 1` lets the Residual remove it, so it is still in the state
+    at a mid-turn switch request. That is a new action kind,
+    `KPriorityChargeMove`.
+- A fainted Pokémon in the active slot is not `isActive` (battle.ts 2615)
+  but carries the faint's flag, so the invariants speak of the active slot.
+
+### Forced switch (6b)
+
+- `forceSwitch: true` becomes a rule field. It has 3 whitelisted users,
+  Roar, Whirlwind and Dragon Tail, plus Circle Throw.
+- The move sets the target's `forceSwitchFlag` after `runEvent('DragOut')`
+  (battle-actions.ts 1413-1428). The action tail then drags in a random
+  replacement before anything else (battle.ts 2866-2873).
+- `dragIn` (battle-actions.ts 216-227) draws one `random(n)` over the
+  benched Pokémon that are not fainted, in roster order (`possibleSwitches`,
+  battle.ts 1589-1602). The switch-in runs at once rather than through the
+  queue, and skips Pursuit's activation.
+
+### Items and abilities (6c)
+
+- Eject Button (0.036 of usage), Red Card (0.069) and Eject Pack (0.008),
+  through the same flags. Emergency Exit and Wimp Out are not whitelisted.
+- The SwitchOut listeners: Regenerator (0.34) and Natural Cure (0.03).

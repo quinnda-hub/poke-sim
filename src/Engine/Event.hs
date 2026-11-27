@@ -135,6 +135,14 @@ data EventId
   | EvAfterTerastallization
   -- ^ @runEvent('AfterTerastallization', pokemon)@ at the end of @terastallize@ (battle-actions.ts 2024). No supported effect
   -- listens to it, but the event point keeps its (draw-free, with fewer than two handlers) sort.
+  | EvSwitchOut
+  -- ^ @runEvent('SwitchOut', oldActive)@ in @switchIn@ (battle-actions.ts 100): every switch-out of a Pokemon with HP, after
+  -- @runPursuitActivation@. No supported effect listens until Regenerator and Natural Cure (slice 6c), but the event point keeps
+  -- its (draw-free, with fewer than two handlers) sort.
+  | EvPriorityChargeCallback
+  -- ^ Not an event: a move's @priorityChargeCallback@, called directly by the @priorityChargeMove@ action (battle.ts 2793-2798).
+  -- The export lists it as the handler @priorityChargeCallback@ and the engine keeps it as @(POwn, EvPriorityChargeCallback)@,
+  -- as it does @durationCallback@.
   deriving (Eq, Show, Enum, Bounded)
 
 -- | How @runEvent@ orders the handlers of an event (battle.ts 797-803).
@@ -227,6 +235,8 @@ eventName e = case e of
   EvAfterSubDamage -> "AfterSubDamage"
   EvHitField -> "HitField"
   EvAfterTerastallization -> "AfterTerastallization"
+  EvSwitchOut -> "SwitchOut"
+  EvPriorityChargeCallback -> "PriorityChargeCallback"
 
 -- | Which Pokemon a handler reacts to: the holder (@onX@), its allies (@onAllyX@), its foes (@onFoeX@), the
 -- source of the event (@onSourceX@) or anyone (@onAnyX@).
@@ -255,6 +265,7 @@ parseHandlerName :: T.Text -> Maybe (Prefix, EventId)
 parseHandlerName "durationCallback" = Just (POwn, EvDurationCallback)
 parseHandlerName "basePowerCallback" = Just (POwn, EvBasePowerCallback)
 parseHandlerName "damageCallback" = Just (POwn, EvDamageCallback)
+parseHandlerName "priorityChargeCallback" = Just (POwn, EvPriorityChargeCallback)
 parseHandlerName n = case T.stripPrefix "on" n of
   Nothing -> Nothing
   Just rest -> case [(p, e) | p <- [minBound .. maxBound], e <- [minBound .. maxBound], prefixName p <> eventName e == rest] of
@@ -266,7 +277,7 @@ parseHandlerName n = case T.stripPrefix "on" n of
 
 -- | The conditions the engine supports: the statuses of slice 1 and the flinch volatile. The index
 -- ('fromEnum') is the id used in the state and in the @Dex@ condition table.
-data CondId = CBrn | CPar | CPsn | CTox | CFrz | CFlinch | CProtosynthesis | CQuarkDrive | CUnburden | CRoost
+data CondId = CBrn | CPar | CPsn | CTox | CFrz | CFlinch | CProtosynthesis | CQuarkDrive | CUnburden | CRoost | CChillyReception
   deriving (Eq, Show, Enum, Bounded)
 
 -- | The key of the condition in @conditions.json@ (data/conditions.ts).
@@ -282,6 +293,7 @@ condName c = case c of
   CQuarkDrive -> "quarkdrive"
   CUnburden -> "unburden"
   CRoost -> "roost"
+  CChillyReception -> "chillyreception"
 
 -- | What kind of effect holds a handler. Showdown's other kinds (slot conditions, the move itself) join when their
 -- holders exist in the state. A move is one for @onEffect@ events.
@@ -568,6 +580,12 @@ data NativeId
   -- ^ auroraveil @onTry@: fails unless the weather is snow.
   | NAuroraVeilDamage
   -- ^ auroraveil @condition.onAnyModifyDamage@.
+  | NTeleportTry
+  -- ^ teleport @onTry@: fails when the side cannot switch.
+  | NPartingShotHit
+  -- ^ partingshot @onHit@: drops the target's Attack and Special Attack; when neither drops, the move loses its @selfSwitch@.
+  | NChillyReceptionCharge
+  -- ^ chillyreception @priorityChargeCallback@: the user takes the move's volatile.
   deriving (Eq, Show)
 
 -- | The body of each handler the engine implements (written by hand: Showdown's handlers are code). A condition
@@ -601,6 +619,8 @@ nativeBody c POwn e = BNative <$> case (c, e) of
   -- roost: onStart logs (LATENT: it returns false for a Terastallized Pokemon; Tera is not modelled), onType removes Flying
   (CRoost, EvStart) -> Just NRoostStart
   (CRoost, EvType) -> Just NRoostType
+  -- chillyreception (data/moves.ts 2413-2420): onBeforeMove only logs `-prepare`
+  (CChillyReception, EvBeforeMove) -> Just NLogOnly
   (_, EvModifyAtk) | paradox c -> Just NParadoxAtk
   (_, EvModifyDef) | paradox c -> Just NParadoxDef
   (_, EvModifySpA) | paradox c -> Just NParadoxSpA

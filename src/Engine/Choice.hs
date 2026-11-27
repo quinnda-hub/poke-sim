@@ -78,7 +78,7 @@ request b = case bResult b of
   where
     flagged p = sLeft (sideOf p b) > 0 && switchPending (sideOf p b)
     switchPending s = case slotMon s 0 of
-      Just m -> monSwitchFlag m
+      Just m -> monSwitchFlag m /= NoSwitch
       Nothing -> False
 
 -- | Whether the active Pokemon has no usable move and must use Struggle (@getMoves@ returns no move when every
