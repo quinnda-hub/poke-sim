@@ -450,14 +450,19 @@ checkStep dx b b' (c1, c2) = (mappend (stallSeen <> seen8d <> pressureSeen) <$>)
     chose p = if p == P1 then c1 else c2
     -- slice 8e: Pressure. A move slot loses PP only by a use of its move (1), and a foe's Pressure adds 1 (battle-actions.ts 540-551): no
     -- slot loses more than 2 in a step (a Pokemon moves once; a second Pressure holder cannot exist in singles), none gains PP, and a slot
-    -- that loses 2 has a Pressure holder on the other side
+    -- that loses 2 has a Pressure holder on the other side. The Pokemon that used the move was in play at the start of the step (a switch-in
+    -- or a drag during it has no queued move, and a switch request ends the step), and it used one move: only one of its slots lost PP.
     ppDrops = [ (p, msPP ms - msPP ms')
               | p <- [P1, P2]
               , (m0, m1) <- zip (SV.toList (sMons (sideOf p b))) (SV.toList (sMons (sideOf p b')))
               , (ms, ms') <- zip (SV.toList (monMoves m0)) (SV.toList (monMoves m1)) ]
+    ppDropsOfMon = [ (p, [msPP ms - msPP ms' | (ms, ms') <- zip (SV.toList (monMoves m0)) (SV.toList (monMoves m1)), msPP ms /= msPP ms'], monActive m0)
+                   | p <- [P1, P2], (m0, m1) <- zip (SV.toList (sMons (sideOf p b))) (SV.toList (sMons (sideOf p b'))) ]
     foeHasPressure p = any (\m -> abilityIs "pressure" m) (SV.toList (sMons (sideOf (otherP p) b)))
     pressureOk = case [(p, d) | (p, d) <- ppDrops, d < 0 || d > 2 || (d == 2 && not (foeHasPressure p))] of
-      [] -> Right ()
+      [] -> case [p | (p, ds, wasActive) <- ppDropsOfMon, not (null ds), not wasActive || length ds > 1] of
+        [] -> Right ()
+        p : _ -> Left (show p ++ ": a Pokemon that was not in play at the start of the step, or that used one move, lost PP in more than one slot or at all")
       (p, d) : _ -> Left (show p ++ ": a move slot lost " ++ show d ++ " PP in one step (more than 2, a gain, or 2 with no Pressure holder on the other side)")
     pressureSeen = mempty {seenPressure = length [() | (_, 2) <- ppDrops], seenTypeChange = length [() | p <- [P1, P2], sHasActive (sideOf p b'), let m = activeMon p b', abilityIs "libero" m || abilityIs "protean" m, esA (monAbilityState m) == 1]}
     -- slice 7a: the stall volatiles after the step (the protect volatiles themselves end with the turn, so only stall shows)
