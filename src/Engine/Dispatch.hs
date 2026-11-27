@@ -281,8 +281,8 @@ effectiveTerrain b = if fTerrain (bField b) == noCond then Nothing else Just (fT
 
 -- | @pokemon.useItem(source, sourceEffect)@ (pokemon.ts 1833-1871) as far as the supported items reach. A fainted or
 -- inactive Pokemon, or one with no item, cannot; nor one an item tells to eat a different item than it holds.
--- @runEvent('UseItem')@ (no handler) can refuse it. Then the item's @boosts@ go through @battle.boost@ (source the
--- Pokemon, effect the item), @singleEvent('Use')@ runs (no handler), the item and its state are cleared, and
+-- @runEvent('UseItem')@ (Eject Pack's @onUseItem@) can refuse it. Then the item's @boosts@ go through @battle.boost@ (source the
+-- Pokemon, effect the item), @singleEvent('Use')@ runs (Eject Pack), the item and its state are cleared, and
 -- @runEvent('AfterUseItem')@ runs (Unburden). Returns whether the item was used.
 -- LATENT: gems (an item that works at 0 HP), @lastItem@ (Recycle), @usedItemThisTurn@ and @usedItemThisBattle@ are not
 -- in the state: nothing supported reads them and the snapshot does not record them. @red card@'s log differs, and no
@@ -305,8 +305,12 @@ useItem dx a sourceEffect = do
           else do
             -- `if (item.boosts) this.battle.boost(item.boosts, this, source, item)`
             let boosts = maybe [] cnItemBoosts (effectOf dx itemKey)
-            unless (null boosts) (void (boostMon a boosts))
-            -- singleEvent('Use', item, itemState, ...): no item has an onUse; then the item and its state go
+            -- (the event's target is the source Pokemon; no supported AfterBoost listener reads it, and the active move matters only
+            -- when it is Parting Shot, which never runs while an item is used)
+            unless (null boosts) (void (boostMon dx (Just a) Nothing a boosts))
+            -- singleEvent('Use', item, itemState, this, source, sourceEffect) (Eject Pack's onUse sets the switch flag), then the item and its
+            -- state go. Its result is not read
+            void (singleEventFx dx EvUse itemKey (OwnMon a) Nothing Nothing sourceEffect RNone)
             modify' (modifyMon a (\x -> x {monItem = noItem, monItemState = noEffectState}))
             void (runEvent dx EvAfterUseItem a Nothing Nothing (RText (itemId dx (monItem m))))
             pure True
@@ -1324,7 +1328,7 @@ runNative dx n c relay = do
           | src /= holder, monHp m > 0, not (mvStatus mv)
           , canSwitch b (playerOf holder) > 0
           , not (monForceSwitchFlag m)
-          , not (any anySwitchForced [P1, P2]) -> do
+          , not (switchForcedAny b) -> do
               -- `target.switchFlag = true; if (target.useItem()) source.switchFlag = false; else target.switchFlag = false`
               modify' (modifyMon holder (\x -> x {monSwitchFlag = SwitchForced}))
               used <- useItem dx holder (Just (cKey c))
@@ -1332,10 +1336,32 @@ runNative dx n c relay = do
                 then modify' (modifyMon src (\x -> x {monSwitchFlag = NoSwitch}))
                 else modify' (modifyMon holder (\x -> x {monSwitchFlag = NoSwitch}))
               keep
-          where
-            -- `for (const pokemon of this.getAllActive()) if (pokemon.switchFlag === true) return` (unfainted active Pokemon)
-            anySwitchForced p = sHasActive (sideOf p b) && let a = monOf b (activeActor p b) in not (monFainted a) && monSwitchFlag a == SwitchForced
         _ -> keep
+    -- ejectpack.onAfterBoost(boost, pokemon) (items.ts 1722-1730): `if (this.effectState.eject || this.activeMove?.id === 'partingshot')
+    -- return;` then any negative stage of the capped table sets `eject`. The active move is the event's move argument ('boostMon')
+    NEjectPackAfterBoost
+      | RBoosts caps <- relay, not (ejectSet m), maybe True ((/= "partingshot") . mvId) (cMove c), any ((< 0) . snd) caps -> do
+          setEject 1
+          keep
+      | otherwise -> keep
+    -- ejectpack.onAnySwitchIn, onAnyAfterMove and onResidual (items.ts 1733-1755): `if (!this.effectState.eject) return;
+    -- this.effectState.target.useItem(); delete this.effectState.eject;`. The holder is the Pokemon the state belongs to; the item's state
+    -- is gone when useItem used it up, and the deletion then has nothing to act on
+    NEjectPackTrigger -> do
+      when (ejectSet m) $ do
+        void (useItem dx holder (Just (cKey c)))
+        setEject (-1)
+      keep
+    -- ejectpack.onUseItem(item, pokemon) (items.ts 1756-1763): false when the side cannot switch or any active Pokemon has
+    -- `switchFlag === true` (a second Eject Pack triggered by the same move, an Eject Button). LATENT: the commanding and commanded
+    -- volatiles (Tatsugiri, Dondozo) are not supported.
+    NEjectPackUseItem -> do
+      b <- get
+      if canSwitch b (playerOf holder) == 0 || switchForcedAny b then returning stop else keep
+    -- ejectpack.onUse(pokemon): `pokemon.switchFlag = true`
+    NEjectPackUse -> modify' (modifyMon holder (\x -> x {monSwitchFlag = SwitchForced})) >> keep
+    -- ejectpack.onEnd(): `delete this.effectState.eject` (on switch-out and faint)
+    NEjectPackEnd -> setEject (-1) >> keep
     -- redcard.onAfterMoveSecondary(target, source, move) (items.ts 5170-5188)
     NRedCardAfterMoveSecondary -> do
       b <- get
@@ -1428,7 +1454,13 @@ runNative dx n c relay = do
     -- this.boost({spe: -1}, pokemon, foe.active[0], stickyweb)
     NStickyWebSwitchIn
       | not (isGrounded dx m) || boots -> keep
-      | otherwise -> void (boostMon holder [(BSpe, -1)]) >> keep
+      -- (the source is the foe's active Pokemon; no move is in use: the switch-in comes after the action tail's clearActiveMove or
+      -- runPursuitActivation's, docs/handlers.md "6d: Eject Pack")
+      | otherwise -> do
+          b <- get
+          let Actor hp' _ = holder
+          void (boostMon dx (Just (activeActor (other hp') b)) Nothing holder [(BSpe, -1)])
+          keep
     -- reflect, lightscreen durationCallback(target, source, effect): `source?.hasItem('lightclay')` -> 8, else 5
     NLightClayDuration -> do
       b <- get
@@ -1697,9 +1729,13 @@ runNative dx n c relay = do
       | spId (speciesData dx (monSpecies m)) == "ogerpontealtera", monTerastallized m
       , esA (monAbilityState m) /= 1 -> do
           modify' (modifyMon holder (\x -> x {monAbilityState = (monAbilityState x) {esA = 1}}))
-          void (boostMon holder [(BSpe, 1)]) >> keep
+          void (boostMon dx Nothing Nothing holder [(BSpe, 1)]) >> keep
       | otherwise -> keep
   where
+    -- the `eject` key of the holder's item state ('esA': 1 set, -1 absent)
+    ejectSet mm = esA (monItemState mm) == 1
+    -- a no-op when the state is gone (the item was used up or lost)
+    setEject v = modify' (\bb -> maybe bb (\st -> setOwnerState (cOwner c) (cKey c) st {esA = v} bb) (ownerState bb (cOwner c) (cKey c)))
     duration d = pure (Res (Replace (RInt d)) (cMod c))
     -- the weather this handler belongs to is the effective weather as the Pokemon sees it
     ownWeather b a = let EffectKey _ ci = cKey c in effectiveWeatherOf b a == Just ci
@@ -1911,7 +1947,7 @@ moveOwnHit dx user target mv = case moveSpec mv POwn EvHit >>= hsBody of
   -- LATENT: Mirror Armor is not a supported ability, so `!target.hasAbility('mirrorarmor')` always holds; and no supported ability
   -- changes the drop (Clear Body, White Smoke, Hyper Cutter, Contrary, Defiant, Competitive), so a drop fails only at -6 on both.
   Just (BNative NPartingShotHit) -> do
-    boosted <- boostMon target [(BAtk, -1), (BSpa, -1)]
+    boosted <- boostMon dx (Just user) (Just mv) target [(BAtk, -1), (BSpa, -1)]
     pure (HitOk, if boosted then mv else mv {mvSelfSwitch = False})
   _ -> (\r -> (r, mv)) <$> moveOwnHitResult dx user target mv
 
@@ -1950,7 +1986,7 @@ moveOwnHitResult dx user target mv = case moveSpec mv POwn EvHit >>= hsBody of
         | bsAtk (monBoosts t) == -6 -> pure HitFail
         | otherwise -> do
             let atk = boostedStat (stAtk (monStats t)) (bsAtk (monBoosts t))
-            boosted <- boostMon target [(BAtk, -1)]
+            boosted <- boostMon dx (Just user) (Just mv) target [(BAtk, -1)]
             healed <- battleHeal user atk
             pure (if healed || boosted then HitOk else HitFail)
       -- painsplit.onHit(target, pokemon): `averagehp = Math.floor((target.hp + pokemon.hp) / 2) || 1`, then
@@ -1969,7 +2005,7 @@ moveOwnHitResult dx user target mv = case moveSpec mv POwn EvHit >>= hsBody of
       -- LATENT: Substitute (`!target.volatiles['substitute'] || move.infiltrates` gates the drop), Safeguard, Mist and G-Max Steelsurge
       -- are not modelled: the removals act only on the conditions the state can hold.
       NDefogHit -> do
-        boosted <- boostMon target [(BEvasion, -1)]
+        boosted <- boostMon dx (Just user) (Just mv) target [(BEvasion, -1)]
         let tp = playerOf target
             up = playerOf user
         onTarget <- forM (defogTargetOnly ++ hazards) $ \name -> do
@@ -1984,7 +2020,7 @@ moveOwnHitResult dx user target mv = case moveSpec mv POwn EvHit >>= hsBody of
       NTidyUpHit -> do
         let up = playerOf target
         removed <- forM [up, other up] $ \p -> or <$> mapM (removeNamedSide dx p) hazards
-        boosted <- boostMon target [(BAtk, 1), (BSpe, 1)]
+        boosted <- boostMon dx (Just user) (Just mv) target [(BAtk, 1), (BSpe, 1)]
         pure (if boosted || or removed then HitOk else HitFail)
       -- trick, switcheroo .onHit(target, source, move): `yourItem = target.takeItem(source)`, `myItem = source.takeItem()` (both
       -- always run, in that order, whatever the first returned). A refusal (`false`), or no item on either side, puts the
@@ -2059,6 +2095,11 @@ movePriorityCharge dx user mv = case moveSpec mv POwn EvPriorityChargeCallback >
 -- | @battle.canSwitch(side)@ (battle.ts 1580): the number of 'switchCandidates'.
 canSwitch :: Battle -> Player -> Int
 canSwitch b p = length (switchCandidates b p)
+
+-- | `for (const active of this.getAllActive()) if (active.switchFlag === true)`: an unfainted active Pokemon with the flag of a faint or an
+-- item (not a pivot's move id). Eject Button and Eject Pack's @onUseItem@ test it.
+switchForcedAny :: Battle -> Bool
+switchForcedAny b = or [monSwitchFlag a == SwitchForced | p <- [P1, P2], sHasActive (sideOf p b), let a = monOf b (activeActor p b), not (monFainted a)]
 
 -- | @possibleSwitches(side)@ (battle.ts 1589-1602): the origs of the unfainted Pokemon in the back slots that are not already
 -- queued to switch in, in slot order (the order @getRandomSwitchable@'s @sample@ indexes).
@@ -2232,24 +2273,30 @@ updateSpeedAll dx = do
 clampStage :: Int -> Int
 clampStage = max (-6) . min 6
 
--- | @battle.boost@ (battle.ts) of one target: each stage moves by its change clamped to [-6, 6]
--- (@getCappedBoost@). Returns whether any stage changed. It fails for a target with no HP or off the field,
--- and when the foe side has no Pokemon left. The order of the stats is unobservable (independent stages;
--- the boost events have no handlers).
--- LATENT: @battle.boost@ also sets @target.statsRaisedThisTurn@ / @statsLoweredThisTurn@ on success (battle.ts 2101); they
--- are not in the state. Lash Out (which reads @statsLoweredThisTurn@) and Eject Pack (@AfterBoost@) need them.
+-- | @battle.boost@ (battle.ts 2037-2110) of one target: the changes are capped to [-6, 6] (@getCappedBoost@, pokemon.ts 1231), each stage
+-- moves by its capped change, and @runEvent('AfterBoost', target, source, effect, boost)@ runs with the capped table (a stat at its limit is
+-- absent: a drop at -6 is no drop). Returns whether any stage changed. It fails for a target with no HP or off the field, and when the foe
+-- side has no Pokemon left, before the event. The order of the stats is unobservable (independent stages).
+-- @source@ is the event's source Pokemon and @active@ Showdown's @activeMove@: the move whose hit or effect boosts, or 'Nothing' where
+-- none is in use (a switch-in: Sticky Web, Embody Aspect, a seed). Only Eject Pack's @AfterBoost@ listens, and it reads only whether the
+-- active move is Parting Shot; the move travels as the event's move argument.
+-- LATENT: @ChangeBoost@, @TryBoost@ and @AfterEachBoost@ have no supported listener and are not run; @battle.boost@ also sets
+-- @target.statsRaisedThisTurn@ / @statsLoweredThisTurn@ on success (battle.ts 2101); they are not in the state (Lash Out reads
+-- @statsLoweredThisTurn@).
 {-# INLINABLE boostMon #-}
-boostMon :: Monad m => Actor -> [(BoostStat, Int)] -> Eng m Bool
-boostMon a@(Actor p _) changes = do
+boostMon :: MonadChance m => Dex -> Maybe Actor -> Maybe MoveData -> Actor -> [(BoostStat, Int)] -> Eng m Bool
+boostMon dx source active a@(Actor p _) changes = do
   b <- get
   let m = monOf b a
   if monHp m <= 0 || not (monActive m) || sLeft (sideOf (other p) b) == 0
     then pure False
     else do
-      let step' bs (s, d) = setBoostOf s (clampStage (boostOf s bs + d)) bs
-          new = foldl step' (monBoosts m) changes
+      let cur = monBoosts m
+          capped = [(s, clampStage (boostOf s cur + d) - boostOf s cur) | (s, d) <- changes, d /= 0]
+          new = foldl (\bs (s, d) -> setBoostOf s (boostOf s bs + d) bs) cur capped
       modify' (modifyMon a (\x -> x {monBoosts = new}))
-      pure (new /= monBoosts m)
+      void (runEvent dx EvAfterBoost a source active (RBoosts capped))
+      pure (new /= cur)
 
 -- | @singleEvent('End', pokemon.getAbility(), pokemon.abilityState, pokemon)@ and the same for the item: run when a
 -- Pokemon switches out (battle-actions.ts 142-143) and when it faints (battle.ts 2605-2606), before @clearVolatile@.

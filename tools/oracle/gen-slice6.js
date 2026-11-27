@@ -70,6 +70,23 @@
 //   cdrag     Roar, Whirlwind, Dragon Tail or Circle Throw drags out a damaged or statused Regenerator or Natural Cure holder
 // Each of csw, cpivot and cplain also takes the Tera variant of a move on some seeds.
 //
+// Slice 6d lets in Eject Pack (`onAfterBoost` sets `eject` on a capped negative stage, unless Parting Shot is the active move; `onAnySwitchIn`
+// at priority -4, `onAnyAfterMove` and `onResidual` use the item and delete `eject`; `onUseItem` refuses when the side cannot switch or any
+// active Pokemon has `switchFlag === true`). A 6d share of the seeds (its own stream) replaces the 6a, 6b or 6c kind the seed would have had;
+// the plain random battles also get packs and drop moves on their sets. Each is one of:
+//   eself      the holder's own self-drop move (Close Combat, Draco Meteor ...), also on its Tera turn: it switches after AfterMove
+//   efoe       a foe's secondary drop (always, or by chance), Defog's evasion drop or Strength Sap's attack drop into the holder
+//   estick     Sticky Web on the holder's side, then a holder switches in: by a choice, by its own U-turn, by a drag, to replace a faint
+//   epshot     Parting Shot into the holder (no eject), then a real drop (eject)
+//   emin6      the holder at -6 Attack and Special Attack by Parting Shot: a drop of those stats is no drop, another stat's is
+//   epair      mirrored leads that both hold packs and tie on speed (the AfterMove and Residual sorts draw): self-drops on both sides, Sticky
+//              Web and a simultaneous switch, or a double KO whose two replacements come in together (the second pack is refused)
+//   eko        a KO on the holder: no HP, no drop
+//   enotarget  the holder's side has no one to bring in: eject is set and cleared, the pack kept
+//   ecard      the holder's self-drop against an Eject Button (its flag refuses the pack) or a Red Card (the attacker is dragged out)
+//   eback      the holder's self-drop into a Red Card, then a Roar: dragged out for its partner and back in, pack spent, no flag
+//   epivot     a fast U-turn user and a slow holder with a self-drop: two requests in one turn
+//
 // Usage:
 //   node gen-slice6.js <outDir> <count> <poolFile> [firstSeed=1]
 //
@@ -224,6 +241,188 @@ function assign(scenario0, pool, seed) {
 			if (b < 9) setItem(s, card);
 		});
 		if (!kind6c) rng = rnd;
+	}
+	// ---- 6d: Eject Pack (a stream of its own; a seed with no 6d kind keeps its scenario, bar the sprinkle in the plain random battles)
+	let kind6d = null;
+	const rnd6d = mulberry32(seed * 2654435761 + 1013904223);
+	const accurate = (id) => { const a = dex.moves.get(id).accuracy; return a === true || a === 100; };
+	const negBoosts = (b) => !!b && Object.values(b).some(x => x < 0);
+	const secDrops = (id) => { const m = dex.moves.get(id); return (m.secondaries || (m.secondary ? [m.secondary] : [])).filter(s => negBoosts(s.boosts)); };
+	const SELF_DROPS = pool.moves.filter(id => { const m = dex.moves.get(id); return m.category !== 'Status' && (negBoosts(m.self && m.self.boosts) || negBoosts(m.selfBoost && m.selfBoost.boosts)); });
+	const FOE_DROPS = pool.moves.filter(id => secDrops(id).length && dex.moves.get(id).category !== 'Status');
+	const FOE_DROPS_100 = FOE_DROPS.filter(id => secDrops(id).some(s => s.chance === 100) && accurate(id));
+	const dropsStat = (id, stats) => secDrops(id).some(s => s.chance === 100 && stats.some(k => s.boosts[k] < 0));
+	if (pool.items.includes('ejectpack') && SELF_DROPS.length && FOE_DROPS_100.length && has('stickyweb') && has('defog') && has('strengthsap')) {
+		rng = rnd6d;
+		const kinds6d = [
+			['eself', 3], ['efoe', 4], ['estick', 6], ['epshot', 2], ['emin6', 2], ['epair', 3], ['eko', 2], ['enotarget', 2], ['ecard', 3], ['epivot', 2], ['eback', 2],
+		];
+		const roll6d = int(100);
+		let acc6d = 0;
+		for (const [k, w] of kinds6d) { acc6d += w; if (roll6d < acc6d) { kind6d = k; break; } }
+		if (kind6d) { kind6b = null; kind6c = null; }
+		else if (kind === 'random' && !kind6b && !kind6c) {
+			// the plain random battles: Eject Pack and moves that drop stats (a scripted battle needs its holders as built)
+			for (const side of [0, 1]) for (const s of scenario.teams[side]) {
+				if (int(100) < 14) setItem(s, 'ejectpack');
+				if (int(100) < 14) put(s, pick(SELF_DROPS));
+				if (int(100) < 18) put(s, pick(FOE_DROPS));
+				if (int(100) < 6) put(s, pick(['defog', 'strengthsap', 'partingshot']));
+			}
+		}
+		rng = rnd;
+	}
+	if (kind6d) {
+		rng = rnd6d;
+		const aIdx = int(2), bIdx = 1 - aIdx; // A: the side the case is about (usually the Eject Pack holder), B: the other
+		const A = lead(aIdx), B = lead(bIdx);
+		const duo = (a, b) => { const pair = [null, null]; pair[aIdx] = a; pair[bIdx] = b; return pair; };
+		const teamOf = (an, bn) => { const pair = [null, null]; pair[aIdx] = `team ${[1, 2, 3, 4, 5, 6].slice(0, an).join('')}`; pair[bIdx] = `team ${[1, 2, 3, 4, 5, 6].slice(0, bn).join('')}`; return pair; };
+		const full = () => teamOf(6, 6);
+		const typesOf = (set) => dex.species.get(set.species).types;
+		const canHit = (id, set) => dex.getImmunity(dex.moves.get(id).type, typesOf(set));
+		const pickFor = (ids, set) => { const ok = ids.filter(id => canHit(id, set)); return ok.length ? pick(ok) : pick(ids); };
+		const selfDrop = (set) => { const acc = SELF_DROPS.filter(accurate); return pickFor(acc.length ? acc : SELF_DROPS, set); };
+		const plain = pool.moves.filter(id => { const m = dex.moves.get(id); return m.basePower >= 40 && accurate(id) && m.category !== 'Status' && !PIVOTS.includes(id) && !FORCERS.includes(id); });
+		const grounded = pool.species.filter(id => id !== 'shedinja' && !dex.species.get(id).types.includes('Flying'));
+		const teraStep = (mv) => (int(100) < 30 ? `${mv} terastallize` : mv);
+		const clearBoots = (side) => { for (const s of scenario.teams[side]) if (s.item === 'Heavy-Duty Boots') s.item = ''; };
+		const shrinkTo = (side, n) => { scenario.teams[side] = scenario.teams[side].slice(0, n); };
+		const holder = (s) => { s.ability = 'No Ability'; setItem(s, 'ejectpack'); };
+		const moves = (s, ...ids) => { s.moves = [...new Set([...ids, 'recover', 'toxic', 'swordsdance'])].slice(0, 4); };
+		steady(A); steady(B);
+		A.ability = 'No Ability'; B.ability = 'No Ability';
+		clearBoots(0); clearBoots(1);
+		if (kind6d === 'eself') {
+			// the holder's own self-drop move (Close Combat, Draco Meteor ...): AfterMove after the hit loop and the self boost; the holder
+			// switches at once, also on the turn it terastallizes
+			holder(A); B.item = '';
+			A.level = 30; B.level = 100;
+			moves(A, selfDrop(B)); moves(B);
+			scenario.choices = [full(), duo(teraStep('move 1'), 'move 1'), duo('switch 2', null)];
+		} else if (kind6d === 'efoe') {
+			// a foe's move drops the holder: a secondary (always, or by chance), Defog's evasion, Strength Sap's attack
+			holder(B); A.item = '';
+			A.level = 30; B.level = 100;
+			const v = int(100);
+			let atk, sure = true;
+			if (v < 55) atk = pickFor(FOE_DROPS_100, B);
+			else if (v < 70) atk = 'defog';
+			else if (v < 85) atk = 'strengthsap';
+			else { atk = pickFor(FOE_DROPS.filter(id => !FOE_DROPS_100.includes(id)), B); sure = false; }
+			moves(A, atk); moves(B);
+			const choices = [full(), duo('move 1', teraStep('move 1'))];
+			if (sure) choices.push(duo(null, 'switch 2'));
+			scenario.choices = choices;
+		} else if (kind6d === 'estick') {
+			// Sticky Web on the holder's side, then a Pokemon with Eject Pack switches in: by a choice, by its own U-turn, by a drag, or to
+			// replace a faint. onAnySwitchIn (priority -4) uses the pack at once, in the same SwitchIn event
+			const variant = int(4);
+			holder(B); A.item = '';
+			scenario.teams[bIdx].forEach((s, i) => { if (i > 0) { s.species = speciesName(pick(grounded)); s.level = 100; holder(s); } });
+			A.level = 100; B.level = 100;
+			B.species = variant === 3 ? 'Shedinja' : speciesName(pick(grounded));
+			const second = variant === 2 ? pick(FORCERS) : variant === 3 ? pickFor(plain, B) : 'recover';
+			moves(A, 'stickyweb', second);
+			moves(B, 'recover', variant === 1 ? 'uturn' : 'toxic');
+			const web = duo('move 1', 'move 1');
+			if (variant === 0) scenario.choices = [full(), web, duo('move 2', 'switch 2')];
+			else if (variant === 1) scenario.choices = [full(), web, duo('move 2', 'move 2'), duo(null, 'switch 2')];
+			else if (variant === 2) scenario.choices = [full(), web, duo('move 2', 'move 1')];
+			else scenario.choices = [full(), web, duo('move 2', 'move 1'), duo(null, 'switch 2')];
+		} else if (kind6d === 'epshot') {
+			// Parting Shot's drops never set eject; the next real drop does
+			holder(B); A.item = '';
+			B.level = 100;
+			const drop = pickFor(FOE_DROPS_100, B);
+			for (const s of scenario.teams[aIdx]) { s.ability = 'No Ability'; s.level = 30; if (s !== A) s.item = ''; moves(s, 'partingshot', drop); }
+			moves(B);
+			scenario.choices = [full(), duo('move 1', 'move 1'), duo('switch 2', null), duo('move 2', 'move 1')];
+		} else if (kind6d === 'emin6') {
+			// the holder at -6 (Parting Shot six times, no eject): a drop that stat cannot make is not a drop; another stat's drop is
+			holder(B); A.item = '';
+			B.level = 100;
+			const down = pool.moves.filter(id => dropsStat(id, ['atk', 'spa']) && accurate(id) && canHit(id, B));
+			const slow = pool.moves.filter(id => dropsStat(id, ['spe']) && accurate(id) && canHit(id, B));
+			const d1 = down.length ? pick(down) : pick(FOE_DROPS_100), d2 = slow.length ? pick(slow) : pick(FOE_DROPS_100);
+			for (const s of scenario.teams[aIdx]) { s.ability = 'No Ability'; s.level = 30; s.item = ''; s.moves = ['partingshot', d1, d2, 'recover']; }
+			moves(B);
+			const choices = [full()];
+			for (let i = 0; i < 6; i++) choices.push(duo('move 1', 'move 1'), duo('switch 2', null));
+			choices.push(duo('move 2', 'move 1'), duo('move 3', 'move 1'), duo(null, 'switch 2'));
+			scenario.choices = choices;
+		} else if (kind6d === 'epair') {
+			// both leads hold Eject Pack and tie on speed (mirrored sets): the AfterMove and Residual sorts draw; either a self-drop on both
+			// sides, or Sticky Web on both and both switching in at once (the second pack finds the first one's switch flag)
+			const variant = int(3); // 0 self-drops, 1 Sticky Web and a simultaneous switch, 2 a double KO and two replacements at once
+			const web = variant !== 0;
+			const mirror = scenario.teams[aIdx];
+			mirror.forEach((s, i) => {
+				s.ability = 'No Ability'; s.level = web ? 100 : 60; s.item = 'Eject Pack';
+				if (web) { s.species = speciesName(pick(grounded)); s.moves = ['stickyweb', 'recover', 'toxic', 'swordsdance']; }
+			});
+			if (!web) { const atk = selfDrop(mirror[0]); mirror.forEach(s => moves(s, atk)); }
+			scenario.teams[bIdx] = JSON.parse(JSON.stringify(mirror));
+			if (variant === 2) {
+				// two Shedinja leads set Sticky Web on each other's side; then A strikes B (a Rocky Helmet holder) with a contact move: B
+				// faints, the helmet faints A, and both replacements (grounded, holding Eject Pack) come in in one SwitchIn event, each into
+				// Sticky Web: the first pack to run flags its holder, the second one is refused and loses `eject`
+				const contact = pool.moves.filter(id => { const m = dex.moves.get(id); return m.basePower >= 40 && accurate(id) && m.category !== 'Status' && m.flags.contact && !PIVOTS.includes(id); });
+				for (const side of [aIdx, bIdx]) { const lead0 = scenario.teams[side][0]; lead0.species = 'Shedinja'; lead0.item = ''; lead0.level = 100; }
+				scenario.teams[bIdx][0].item = 'Rocky Helmet';
+				const strike = pickFor(contact, scenario.teams[bIdx][0]);
+				scenario.teams[aIdx][0].moves = ['stickyweb', strike, 'recover', 'toxic'];
+				scenario.teams[bIdx][0].moves = ['stickyweb', 'recover', 'toxic', 'swordsdance'];
+				scenario.choices = [full(), duo('move 1', 'move 1'), duo('move 2', 'move 2'), duo('switch 2', 'switch 2')];
+			} else scenario.choices = web ? [full(), duo('move 1', 'move 1'), duo('switch 2', 'switch 2')] : [full(), duo('move 1', 'move 1')];
+		} else if (kind6d === 'eko') {
+			// a KO on the holder: no HP, no drop, no use
+			holder(B); B.species = 'Shedinja'; B.level = 100; A.item = ''; A.level = 100;
+			moves(A, pickFor(FOE_DROPS_100, B)); moves(B);
+			scenario.choices = [full(), duo('move 1', 'move 1'), duo(null, 'switch 2')];
+		} else if (kind6d === 'enotarget') {
+			// the holder's side has no one to bring in: the pack is never used, and eject is cleared each time (a foe's drop, or the
+			// holder's own)
+			const own = int(2) === 0;
+			A.level = 30; B.level = 100;
+			if (own) {
+				holder(A); B.item = ''; shrinkTo(aIdx, 1);
+				moves(A, selfDrop(B)); moves(B);
+			} else {
+				holder(B); A.item = ''; shrinkTo(bIdx, 1);
+				moves(A, pickFor(FOE_DROPS_100, B)); moves(B);
+			}
+			scenario.choices = [teamOf(scenario.teams[aIdx].length, scenario.teams[bIdx].length), duo('move 1', 'move 1'), duo('move 1', 'move 1')];
+		} else if (kind6d === 'ecard') {
+			// the holder's self-drop against an Eject Button (the button's flag stops the pack) or a Red Card (the attacker is dragged out and
+			// the pack is spent)
+			holder(A); A.level = 30; B.level = 100;
+			const card = pick(['ejectbutton', 'redcard']);
+			setItem(B, card);
+			moves(A, selfDrop(B)); moves(B);
+			scenario.choices = [full(), duo(teraStep('move 1'), 'move 1')];
+			if (card === 'ejectbutton') scenario.choices.push(duo(null, 'switch 2'));
+		} else if (kind6d === 'eback') {
+			// the holder (a side of two) uses a self-drop into a Red Card: the pack is spent and the Red Card drags the holder out for its
+			// partner; the foe's Roar or Whirlwind (priority -6) then drags the partner out, and the only one left to bring in is the holder,
+			// active again with no pack and no flag
+			holder(A); A.level = 30; B.level = 100;
+			setItem(B, 'redcard');
+			shrinkTo(aIdx, 2);
+			const partner = scenario.teams[aIdx][1];
+			partner.item = ''; partner.ability = 'No Ability'; partner.level = 100;
+			moves(A, selfDrop(B)); moves(B, pick(STATUS_FORCERS));
+			scenario.choices = [teamOf(2, 6), duo('move 1', 'move 1')];
+		} else {
+			// epivot: a fast U-turn user and a slow pack holder with a self-drop: two requests in one turn
+			holder(B); A.item = ''; B.level = 30; A.level = 100;
+			A.species = speciesName(pick(bySpeed.slice(-third)));
+			B.species = speciesName(pick(bySpeed.slice(0, third)));
+			moves(A, 'uturn'); moves(B, selfDrop(A));
+			scenario.choices = [full(), duo('move 1', 'move 1'), duo('switch 2', null)];
+		}
+		rng = rnd;
+		kind = 'd6';
 	}
 	if (kind6b && !kind6c) {
 		const fsd = int(2); // the side that forces
@@ -494,7 +693,7 @@ function assign(scenario0, pool, seed) {
 		rng = rnd;
 		kind = 'b6';
 	}
-	if (kind === 'b6') {
+	if (kind === 'b6' || kind === 'd6') {
 		// built above
 	} else if (kind === 'hazards') {
 		// the seed picks (move, hazard): 6 x 4 = 24 combinations
@@ -706,6 +905,14 @@ function newTally() {
 		redUsed: 0, redIntoPivot: z(DAMAGING), redIntoPlain: 0, redDraggedAttacker: 0, redNoTarget: 0, redHolderKO: 0, redSourceKO: 0,
 		redForceFlag: z(DAMAGING_FORCERS), redStatusMoveIgnored: 0, redTeraHolder: 0,
 		bothItemsSameTurn: 0,
+		// 6d: Eject Pack. eject set (by what dropped the holder), the use (by the event that ran it), and what stopped it
+		ejectSetBy: z(['self', 'secondary', 'defog', 'strengthsap', 'stickyweb']),
+		ejectUsedAt: z(['AfterMove', 'SwitchIn', 'Residual']),
+		ejectUsedStickyWebAfter: z(['choice', 'pivot', 'drag', 'faint']),
+		ejectNotUsed: z(['noTarget', 'secondPack', 'afterButton']),
+		ejectUsedAfterRedCard: 0, ejectHolderDraggedBack: 0, ejectUsedWithPivotSameTurn: 0, ejectUsedTera: 0,
+		ejectPartingShotIgnored: 0, ejectAtMinus6NotDrop: 0, ejectAtMinus6ThenDrop: 0, ejectHolderKO: 0,
+		ejectPackTieAfterMove: 0, ejectPackTieResidual: 0,
 		// structurally zero
 		// - ncCuredStatus.slp: the engine accepts no move that puts a Pokemon to sleep (Spore, Sleep Powder, Hypnosis ... are not in the
 		//   pool), so Natural Cure never meets a sleeping holder
@@ -731,13 +938,16 @@ function newTally() {
 		// - copyvolatile, shedtail (Baton Pass, Shed Tail: banned in gen9ou), revivalblessing, a commanding Tatsugiri
 		partingShotBlockedByAbility: 0, roughSkinFaintedUser: 0, batonPassOrShedTail: 0, revivalBlessing: 0, commandedUser: 0,
 		dragOutDeclined: 0, dragFlaggedTargetNoHp: 0, ejectBlockedBySwitchFlag: 0,
+		// - ejectUsedAt.Residual: eject is set by a boost, and the next AfterMove or SwitchIn event of the same action uses (or refuses) the
+		//   pack, so none is left for the Residual; the handler is still collected and sorted there (ejectPackTieResidual)
 	};
 }
 
 const PATHS = ['choice', 'pivot', 'eject', 'redcard', 'drag'];
 const NC_STATUSES = ['brn', 'par', 'psn', 'tox', 'slp', 'frz'];
 const STRUCTURAL_ZERO = ['selfSwitchNoTarget.teleport', 'flaggedUserFainted.other', 'midTurnRequestBothSides', 'cancelActionRemovedSomething', 'partingShotBlockedByAbility', 'roughSkinFaintedUser', 'batonPassOrShedTail',
-	'revivalBlessing', 'commandedUser', 'dragOutDeclined', 'dragFlaggedTargetNoHp', 'ncCuredStatus.slp', 'ejectBlockedBySwitchFlag'];
+	'revivalBlessing', 'commandedUser', 'dragOutDeclined', 'dragFlaggedTargetNoHp', 'ncCuredStatus.slp', 'ejectBlockedBySwitchFlag',
+	'ejectUsedAt.Residual'];
 
 function install() {
 	if (Battle.prototype.__slice6Instrumented) return;
@@ -1144,6 +1354,89 @@ function install() {
 			}
 		}
 		return r;
+	};
+
+	// 6d: Eject Pack. The wrappers read the state before and after and call the original with every argument.
+	const swKind = new WeakMap(); // Pokemon -> how it came in: choice, pivot, drag, faint
+	const packUsedTurn = new WeakMap(); // Pokemon -> the turn it used its Eject Pack
+	const switchIn6d = BattleActions.prototype.switchIn;
+	BattleActions.prototype.switchIn = function (pokemon, pos, sourceEffect, ...rest) {
+		const old = pokemon.side.active[pos];
+		const kind = rest[0] === true ? 'drag' : (sourceEffect && sourceEffect.selfSwitch === true) ? 'pivot' : (old && !old.hp) ? 'faint' : 'choice';
+		if (t() && kind === 'drag' && packUsedTurn.get(pokemon) === this.battle.turn) t().ejectHolderDraggedBack++;
+		swKind.set(pokemon, kind); // before the call: a drag runs the SwitchIn event inside it
+		return switchIn6d.call(this, pokemon, pos, sourceEffect, ...rest);
+	};
+	const boost6d = Battle.prototype.boost;
+	Battle.prototype.boost = function (boosts, target, source, effect, ...rest) {
+		const c = t();
+		const tgt = target || (this.event && this.event.target);
+		const watched = c && tgt && tgt.item === 'ejectpack';
+		if (!watched) return boost6d.call(this, boosts, target, source, effect, ...rest);
+		const eff = effect || (this.event && this.effect);
+		const was = !!tgt.itemState.eject;
+		const wantsDrop = Object.values(boosts).some(x => x < 0);
+		const before = Object.assign({}, tgt.boosts);
+		const hadHp = !!tgt.hp, active = tgt.isActive;
+		const partingShot = this.activeMove && this.activeMove.id === 'partingshot';
+		const r = boost6d.call(this, boosts, target, source, effect, ...rest);
+		const now = !!(tgt.item === 'ejectpack' && tgt.itemState.eject);
+		if (wantsDrop && !hadHp) c.ejectHolderKO++;
+		if (!was && now) {
+			const src = source || (this.event && this.event.source);
+			if (eff && eff.id === 'stickyweb') c.ejectSetBy.stickyweb++;
+			else if (eff && eff.id === 'defog') c.ejectSetBy.defog++;
+			else if (eff && eff.id === 'strengthsap') c.ejectSetBy.strengthsap++;
+			else if (src === tgt) c.ejectSetBy.self++;
+			else c.ejectSetBy.secondary++;
+			if (Object.values(before).some(v => v === -6)) c.ejectAtMinus6ThenDrop++;
+		} else if (!was && !now && wantsDrop && hadHp && active) {
+			if (partingShot) c.ejectPartingShotIgnored++;
+			else if (Object.entries(boosts).filter(([, v]) => v < 0).every(([k]) => before[k] === -6)) c.ejectAtMinus6NotDrop++;
+		}
+		return r;
+	};
+	const useItem6d = Pokemon.prototype.useItem;
+	Pokemon.prototype.useItem = function (...args) {
+		const c = t();
+		if (!(c && this.item === 'ejectpack' && this.hp && this.isActive)) return useItem6d.call(this, ...args);
+		const battle = this.battle;
+		const evId = battle.event && battle.event.id;
+		const noTarget = !battle.canSwitch(this.side);
+		const flagged = battle.getAllActive().find(p => p.switchFlag === true);
+		const tera = !!this.terastallized;
+		const r = useItem6d.call(this, ...args);
+		if (r) {
+			if (c.ejectUsedAt[evId] !== undefined) c.ejectUsedAt[evId]++;
+			packUsedTurn.set(this, battle.turn);
+			if (evId === 'SwitchIn') c.ejectUsedStickyWebAfter[swKind.get(this) || 'choice']++;
+			if (this.forceSwitchFlag) c.ejectUsedAfterRedCard++;
+			if (battle.__flagged && battle.__flagged.turn === battle.turn) c.ejectUsedWithPivotSameTurn++;
+			if (tera) c.ejectUsedTera++;
+		} else if (noTarget) c.ejectNotUsed.noTarget++;
+		else if (flagged) {
+			if (flagged.lastItem === 'ejectpack') c.ejectNotUsed.secondPack++;
+			else if (flagged.lastItem === 'ejectbutton') c.ejectNotUsed.afterButton++;
+		}
+		return r;
+	};
+	const runEvent6d = Battle.prototype.runEvent;
+	Battle.prototype.runEvent = function (eventid, ...rest) {
+		const c = t();
+		if (c && eventid === 'AfterMove') {
+			const act = this.getAllActive();
+			if (act.length === 2 && act.every(p => p.item === 'ejectpack') && act[0].speed === act[1].speed) c.ejectPackTieAfterMove++;
+		}
+		return runEvent6d.call(this, eventid, ...rest);
+	};
+	const fieldEvent6d = Battle.prototype.fieldEvent;
+	Battle.prototype.fieldEvent = function (eventid, ...rest) {
+		const c = t();
+		if (c && eventid === 'Residual') {
+			const act = this.getAllActive();
+			if (act.length === 2 && act.every(p => p.item === 'ejectpack') && act[0].speed === act[1].speed) c.ejectPackTieResidual++;
+		}
+		return fieldEvent6d.call(this, eventid, ...rest);
 	};
 
 	// the requests

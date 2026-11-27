@@ -230,6 +230,12 @@ Last updated 2026-11-25.
   `clearVolatile` does, and Life Orb skips its recoil for an attacker that
   Red Card forces out. Slice 6 is re-recorded at 2,000 battles. Parity
   checks 8,500 traces, 688,609 decision points and 1,295,923 draws.
+- **Slice 6d: Eject Pack.** Three new event points at Showdown's positions:
+  `AfterBoost` (in `boostMon`, now the full `battle.boost` with the capped
+  table), the item's `Use` (in `useItem`) and `AfterMove` (after `useMove`).
+  The pack's `eject` flag is the item state's `esA`. Step 3 is done. Slice 6
+  is re-recorded at 2,500 battles. Parity checks 9,000 traces, 734,495
+  decision points and 1,377,962 draws.
 - **Test tiers.** The fast tier (`POKESIM_TIER=fast`) replays every 10th trace
   and runs the hedgehog properties at 100 tests each, in about 10 s. The long
   tier, which gates merges into main, replays everything and runs the
@@ -342,6 +348,25 @@ The handler order is unchanged. The parity test cannot see two reorderings
 of it (status and volatiles on one Pokémon, and the two sides' conditions),
 because no supported pair of those effects ties in sort order.
 
+**First workstation numbers** (2026-11-27, `banana`, Core Ultra 7 265K, one
+P-core pinned, at `e7dd587`, slice 6c with the handler change). The three
+rounds per set agree within 1%, where the laptop varies by up to 30%, so
+compare builds here from now on.
+
+| Teams | Engine steps/s | Engine battles/s | Showdown steps/s | Multiple |
+|---|---|---|---|---|
+| slice 3 | 78,100-78,600 | 1,014-1,020 | 3,804 | about 21x |
+| slice 5 | 82,100-82,300 | 1,106-1,108 | 3,490 | about 24x |
+
+That clears the 50,000 target on the machine it is defined for. GC takes
+3.5% of the time. `perf stat` counts 11.1-11.9 M user instructions per
+battle (150-155 k per decision step, including start-up), at 2.2
+instructions per cycle. pikapro, a Rust engine with the same parity
+contract, publishes 1.58 M per gen9ou battle, about 7x fewer (see
+`local/research/pikapro/REPORT.md`). Showdown gains more from the faster
+core than the engine does, so the multiple over it is lower than the
+laptop's 30x.
+
 At slice 5b the engine was about 10-12 times faster per step than Showdown;
 it is now about 30 times faster. Showdown builds a battle in
 about 0.9 ms, so its time goes into the turns, at about 1 ms per decision
@@ -397,7 +422,7 @@ Gen 9 OU battles simulated sooner, and each makes the later ones cheaper.
 2. **Terastallization.** Done 2026-11-26 (slices 5a and 5b). Before it, no
    real OU battle could be simulated. It changed `getTypes`, STAB and the
    request, and added the Tera choice to `legalChoices`.
-3. **Moves that switch mid-turn.** U-turn (0.73 of usage), Flip Turn,
+3. **Moves that switch mid-turn.** Done 2026-11-27 (slices 6a-6d). U-turn (0.73 of usage), Flip Turn,
    Volt Switch, Chilly Reception, and the forced switches of Roar, Whirlwind
    and Dragon Tail. They need a switch request inside the turn, which is a
    change to the turn loop (lead-owned).
@@ -459,6 +484,7 @@ Gen 9 OU battles simulated sooner, and each makes the later ones cheaper.
    | 2026-11-26 | Slice 6a | Ahead: first of step 3's three phases done the same day |
    | 2026-11-26 | Slice 6b | Ahead: two of step 3's three phases done the same day |
    | 2026-11-26 | Slice 6c | Ahead: step 3 all but Eject Pack (6d) |
+   | 2026-11-27 | Slice 6d | Ahead: step 3 done, about 2-4 days before the steps 1-4 milestone window |
 
 6. **Per-player view.** What each side can observe, as a first-class value.
 7. **Showdown seed compatibility.** Implement Showdown's own generators so a
@@ -507,7 +533,7 @@ Alongside:
 - **Scenario generation from rules.** For each rule, generate battles that
   exercise it with each random outcome forced both ways, and report coverage
   per rule.
-- **Trace size.** 8,500 battles take about 5.1 GB. The long tier takes about
+- **Trace size.** 9,000 battles take about 5.5 GB. The long tier takes about
   190 s (most of the growth is the slice 6 property playouts) since parity checks traces on several threads (it was 325 s on one,
   and grows with every set). About 60% of a trace's time is decoding its
   JSON, so delta snapshots or a compact cache are the next step before the

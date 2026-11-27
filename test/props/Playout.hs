@@ -57,7 +57,9 @@ genTeamsWith dx pivotHeavy = (,) <$> genTeam <*> genTeam
     species = supportedSpecies dx
     moves = supportedMoves dx
     pivots = [m | m <- ["uturn", "flipturn", "voltswitch", "teleport", "partingshot", "chillyreception"], m `elem` moves]
-    dragKit = [m | m <- ["roar", "whirlwind", "dragontail", "circlethrow", "stealthrock", "spikes", "toxicspikes", "toxic", "willowisp", "thunderwave", "spore"], m `elem` moves]
+    -- (slice 6d: Sticky Web and the moves that drop a stat, for Eject Pack: self-drops, secondary drops, Defog and Strength Sap)
+    dragKit = [m | m <- ["roar", "whirlwind", "dragontail", "circlethrow", "stealthrock", "spikes", "toxicspikes", "toxic", "willowisp", "thunderwave", "spore"
+                        , "stickyweb", "closecombat", "dracometeor", "overheat", "leafstorm", "moonblast", "snarl", "icywind", "defog", "strengthsap"], m `elem` moves]
     pickSpecies
       | pivotHeavy && "shedinja" `elem` species = Gen.frequency [(3, pure "shedinja"), (7, Gen.element species)]
       | otherwise = Gen.element species
@@ -67,10 +69,10 @@ genTeamsWith dx pivotHeavy = (,) <$> genTeam <*> genTeam
       | otherwise = Gen.element moves
     -- Rocky Helmet, and the two items that switch their holder out or force the attacker out (slice 6c)
     pickItem
-      | pivotHeavy && not (null switchItems) = Gen.frequency [(3, Gen.element switchItems), (2, Gen.element ("rockyhelmet" : switchItems)), (3, Gen.element items)]
+      | pivotHeavy && not (null switchItems) = Gen.frequency [(4, Gen.element switchItems), (2, Gen.element ("rockyhelmet" : switchItems)), (2, Gen.element items)]
       | pivotHeavy && "rockyhelmet" `elem` items = Gen.frequency [(2, pure "rockyhelmet"), (3, Gen.element items)]
       | otherwise = Gen.element items
-    switchItems = [i | i <- ["ejectbutton", "redcard"], i `elem` items]
+    switchItems = [i | i <- ["ejectbutton", "redcard", "ejectpack"], i `elem` items]
     -- Regenerator and Natural Cure act at every switch-out
     pickAbility
       | pivotHeavy && not (null switchAbilities) = Gen.frequency [(3, Gen.element switchAbilities), (3, Gen.element abilities)]
@@ -128,14 +130,18 @@ data Seen = Seen
   -- ^ an Eject Button used up
   , seenRedCard :: !Int
   -- ^ a Red Card used up
+  , seenPack :: !Int
+  -- ^ an Eject Pack used up
+  , seenPackIn :: !Int
+  -- ^ an Eject Pack used up by a Pokemon in the step that switched it in (Sticky Web)
   }
   deriving (Eq, Show)
 
 instance Semigroup Seen where
-  Seen a b c d e <> Seen a' b' c' d' e' = Seen (a + a') (b + b') (c + c') (d + d') (e + e')
+  Seen a b c d e f g <> Seen a' b' c' d' e' f' g' = Seen (a + a') (b + b') (c + c') (d + d') (e + e') (f + f') (g + g')
 
 instance Monoid Seen where
-  mempty = Seen 0 0 0 0 0
+  mempty = Seen 0 0 0 0 0 0 0
 
 -- | Play with random legal choices, checking every state on the way, until the battle ends (or the cap).
 --
@@ -213,14 +219,25 @@ checkStep dx b b' (c1, c2) = mapM_ one [(p, i) | (p, side) <- [(P1, bP1), (P2, b
         if cure && monStatus m1 /= StatusNone then Left (who ++ "Natural Cure holder switched out with the status " ++ show (monStatus m1)) else Right ()
         let ejected = not stealing && wasOn && itemIs "ejectbutton" m0 && monItem m1 == noItem
             carded = not stealing && not forcing && wasOn && itemIs "redcard" m0 && monItem m1 == noItem
+            -- an Eject Pack that is gone (slice 6d) was used because its holder dropped a stage, and the use flagged the holder: it is
+            -- still in the active slot with the flag, or it was benched by the switch (a Red Card drag clears the flag) or fainted
+            packed = not stealing && monHp m0 > 0 && itemIs "ejectpack" m0 && monItem m1 == noItem
+            -- (a Red Card on the foe drags the holder out in the action tail, which clears the flag, and a Roar or the like later in the
+            -- same turn can drag it back in: the pack is gone, and the holder is active and unflagged, as in Showdown, where a switch-out
+            -- clears both flags. That needs a forcing move and a Red Card in play)
+            draggedBack = forcing && any (itemIs "redcard") inPlay
+            packedStillIn = monActive m1 && monHp m1 > 0 && monSwitchFlag m1 /= SwitchForced && not draggedBack
         if ejected && not ((monActive m1 && monSwitchFlag m1 == SwitchForced && monHp m1 > 0) || monFainted m1)
           then Left (who ++ "Eject Button used up, but its holder is neither flagged to switch nor fainted") else Right ()
         if carded && foeAfter then Left (who ++ "Red Card used up, but the attacker was not forced out") else Right ()
+        if packed && packedStillIn then Left (who ++ "Eject Pack used up, but its holder is neither flagged to switch, nor benched, nor fainted") else Right ()
         pure mempty
           { seenRegen = fromEnum (regen && monHp m0 < monMaxHp m0)
           , seenCure = fromEnum (cure && monStatus m0 /= StatusNone)
           , seenEject = fromEnum ejected
           , seenRedCard = fromEnum carded
+          , seenPack = fromEnum packed
+          , seenPackIn = fromEnum (packed && not (monActive m0))
           }
       _ -> Right mempty
     isSwitch c = case c of Just (Switch _) -> True; _ -> False
@@ -440,6 +457,10 @@ checkBattle dx b = do
       if length ids == length (nub ids) then Right () else bad "a volatile twice"
       -- a Pokemon with no item has a default item state (useItem clears the state with the item)
       if monItem m == noItem && monItemState m /= noEffectState then bad "no item but an item state" else Right ()
+      -- Eject Pack (slice 6d): its `eject` (the item state's esA, 1 when set) is set by a drop and cleared by the next AfterMove, SwitchIn
+      -- or Residual event of the same action, used or not, and by the item's End on switch-out and faint. So no Pokemon, on the field or
+      -- off it, has it set at a decision point
+      if monItem m /= noItem && itemId dx (monItem m) == "ejectpack" && esA (monItemState m) /= -1 then bad "an Eject Pack with eject set at a decision point" else Right ()
       if monStatus m == StatusTox && (stage < 0 || stage > 15) then bad ("badly poisoned with stage " ++ show stage) else Right ()
       if monStatus m /= StatusTox && stage /= -1 && not (monFainted m && stage >= 0 && stage <= 15)
         then bad ("stage " ++ show stage ++ " with status " ++ show (monStatus m) ++ " on a live Pokemon") else Right ()

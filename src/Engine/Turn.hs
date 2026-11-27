@@ -545,6 +545,12 @@ runMove fmt dx user@(Actor p _) slot = do
       when proceed $ do
         void deductPP
         useMove fmt dx user target mv
+        -- runMove (battle-actions.ts 366-368), after useMove: `singleEvent('AfterMove', move, null, pokemon, target, move)` (no supported
+        -- move has an onAfterMove) then `runEvent('AfterMove', pokemon, target, move)`: Eject Pack's onAnyAfterMove. The move is the
+        -- one chosen: Showdown passes the ActiveMove after useMove's changes, which no handler of AfterMove reads.
+        -- A move stopped before useMove (BeforeMove, the PP check) returns earlier and reaches neither.
+        void (singleMoveEvent dx EvAfterMove user (Just target) mv)
+        void (runEvent dx EvAfterMove user (Just target) (Just mv) RNone)
         -- resolveFaints(); checkWin()
         resolveFaints dx False True
         void (checkWin Nothing)
@@ -624,7 +630,7 @@ useMoveWith fmt dx user target mv = case mrTarget rule of
               -- once accuracy passed. A user with no HP gets nothing.
               -- LATENT: a first hit that fails (a move TryHit that returns false, as Low Kick's against a Dynamaxed target) would
               -- make `moveResult` false and skip the boost; no supported selfBoost move has one.
-              unless (null (mrSelfBoost rule)) (void (boostMon user (mrSelfBoost rule)))
+              unless (null (mrSelfBoost rule)) (void (boostMon dx (Just user) (Just mv) user (mrSelfBoost rule)))
               -- useMoveInner: the move succeeded (`moveResult`), the user is queued to faint if it has no HP, then
               -- runEvent('AfterMoveSecondarySelf', pokemon, target, move): Life Orb's recoil. A status move
               -- raises it too, but no supported handler acts on one.
@@ -713,9 +719,9 @@ statusMove dx user tgt mv0 = do
           modify' (healMon tgt (roundDiv (monMaxHp tm * n) d))
           -- selfDrops (battle-actions.ts 1157, 1383-1395), after runMoveEffects of the same hit and only when it did not
           -- fail: `moveHit(source, source, move, moveData.self, ..., true)` adds roost's volatile (no draw)
-          forM_ (mrSelf (mvRule mv0)) (applyEffect dx tgt)
+          forM_ (mrSelf (mvRule mv0)) (applyEffect dx user mv0 tgt)
           pure (True, mv0)
-    [EBoost bs] -> (\r -> (r, mv0)) <$> boostMon tgt bs
+    [EBoost bs] -> (\r -> (r, mv0)) <$> boostMon dx (Just user) (Just mv0) tgt bs
     -- the move's own onHit (singleEvent('Hit'), battle-actions.ts 1338): its result decides whether the hit did
     -- something. A heal that fails with NOT_FAIL still counts as a hit (see 'HitResult'), a false return fails the move
     -- (the move in use comes back: Parting Shot's body deletes its selfSwitch)
@@ -822,15 +828,15 @@ hitEffects dx user target mv = do
   -- to the user. move.selfDropped stops a repeat only for a single hit (`if (!move.multihit)`), so a
   -- multi-hit move draws every hit.
   forM_ (mrSelf rule) $ \e -> case e of
-    EBoost bs -> roll 0 100 >> void (boostMon user bs)
+    EBoost bs -> roll 0 100 >> void (boostMon dx (Just user) (Just mv) user bs)
     _ -> pure ()
   -- secondaries: for each, random(100); below the chance it hits the target (moveHit with isSecondary), then
   -- its `self` effects (selfDrops with isSecondary draws nothing)
   forM_ (mrSecondaries rule) $ \sec -> do
     r <- roll 0 100
     when (r < secChance sec) $ do
-      forM_ (secTarget sec) (applyEffect dx target)
-      forM_ (secSelf sec) (applyEffect dx user)
+      forM_ (secTarget sec) (applyEffect dx user mv target)
+      forM_ (secSelf sec) (applyEffect dx user mv user)
   -- spreadMoveHit step 6 (battle-actions.ts 1165): after the secondaries, before DamagingHit
   forceSwitchStep dx user target mv
   -- runEvent('DamagingHit') (after the secondaries, per hit): frz.onDamagingHit cures a frozen target hit by
@@ -854,10 +860,10 @@ forceSwitchStep dx user target mv = when (mrForceSwitch (mvRule mv)) $ do
     r <- runEvent dx EvDragOut target (Just user) (Just mv) RNone
     when (relayTruthy r) (modify' (modifyMon target (\m -> m {monForceSwitchFlag = True})))
 
--- | One effect of a secondary on a Pokemon (@moveHit@ with @isSecondary@ -> @runMoveEffects@).
-applyEffect :: MonadChance m => Dex -> Actor -> Effect -> Eng m ()
-applyEffect dx a e = case e of
-  EBoost bs -> void (boostMon a bs)
+-- | One effect of a secondary on a Pokemon (@moveHit@ with @isSecondary@ -> @runMoveEffects@), of the move @mv@ used by @user@.
+applyEffect :: MonadChance m => Dex -> Actor -> MoveData -> Actor -> Effect -> Eng m ()
+applyEffect dx user mv a e = case e of
+  EBoost bs -> void (boostMon dx (Just user) (Just mv) a bs)
   EStatus st -> void (trySetStatus dx a st)
   -- addVolatile('flinch'): needs HP (no affectsFainted), fails if it is already there; no immunity, no
   -- TryAddVolatile handler, duration 1
