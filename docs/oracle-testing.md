@@ -80,8 +80,8 @@ back to `local/showdown`.
 ### Recording traces
 
 ```sh
-node tools/oracle/gen-slice0.js local/traces/slice0 500
-node tools/oracle/gen-slice0.js local/traces/slice0 300 1 gen9ou struggle
+node tools/oracle/gen-slice0.js local/record/slice0 500
+node tools/oracle/gen-slice0.js local/record/slice0 300 1 gen9ou struggle
 ```
 
 The generator has two profiles, because random battles alone never reach some
@@ -96,7 +96,7 @@ Slice 1 takes its pool from the engine instead of computing one:
 
 ```sh
 cabal run -v0 engine-pool > local/traces/slice1-pool.json
-node tools/oracle/gen-slice1.js local/traces/slice1 600 local/traces/slice1-pool.json
+node tools/oracle/gen-slice1.js local/record/slice1 600 local/traces/slice1-pool.json
 ```
 
 `engine-pool` prints the moves and species the engine accepts. Only the
@@ -116,31 +116,31 @@ Slice 2 adds abilities and items, drawn from the pool, to the same teams:
 
 ```sh
 cabal run -v0 engine-pool > local/traces/slice2-pool.json
-node tools/oracle/gen-slice2.js local/traces/slice2 600 local/traces/slice2-pool.json
-node tools/oracle/gen-slice2.js local/traces/slice2 300 local/traces/slice2-pool.json 1 struggle
+node tools/oracle/gen-slice2.js local/record/slice2 600 local/traces/slice2-pool.json
+node tools/oracle/gen-slice2.js local/record/slice2 300 local/traces/slice2-pool.json 1 struggle
 ```
 
 Slice 3 (field state) records from the same kind of pool:
 
 ```sh
 cabal run -v0 engine-pool > local/traces/slice3-pool.json
-node tools/oracle/gen-slice3.js local/traces/slice3 1500 local/traces/slice3-pool.json
+node tools/oracle/gen-slice3.js local/record/slice3 1500 local/traces/slice3-pool.json
 ```
 
 Slice 4 (a move's own handlers) records the same way:
 
 ```sh
 cabal run -v0 engine-pool > local/traces/slice4-pool.json
-node tools/oracle/gen-slice4.js local/traces/slice4 1500 local/traces/slice4-pool.json
+node tools/oracle/gen-slice4.js local/record/slice4 1500 local/traces/slice4-pool.json
 ```
 
 Slice 5 (Terastallization) records with Tera choices offered:
 
 ```sh
 cabal run -v0 engine-pool > local/traces/slice5-pool.json
-node tools/oracle/gen-slice5.js local/traces/slice5 1200 local/traces/slice5-pool.json
+node tools/oracle/gen-slice5.js local/record/slice5 1200 local/traces/slice5-pool.json
 cabal run -v0 engine-pool > local/traces/slice6-pool.json
-node tools/oracle/gen-slice6.js local/traces/slice6 2500 local/traces/slice6-pool.json
+node tools/oracle/gen-slice6.js local/record/slice6 2500 local/traces/slice6-pool.json
 ```
 
 Slice 7 (volatile conditions) has one set per phase. Each of 7a to 7e was
@@ -153,9 +153,9 @@ for x in a b c e; do
   node tools/oracle/gen-slice7$x.js local/traces/slice7$x 1000 local/traces/slice7$x-pool.json
 done
 cabal run -v0 engine-pool > local/traces/slice7d-pool.json
-node tools/oracle/gen-slice7d.js local/traces/slice7d 600 local/traces/slice7d-pool.json
+node tools/oracle/gen-slice7d.js local/record/slice7d 600 local/traces/slice7d-pool.json
 cabal run -v0 engine-pool > local/traces/slice7f-pool.json
-node tools/oracle/gen-slice7f.js local/traces/slice7f 2000 local/traces/slice7f-pool.json
+node tools/oracle/gen-slice7f.js local/record/slice7f 2000 local/traces/slice7f-pool.json
 ```
 
 Its teams put the moves with handler code where their bodies branch: weights
@@ -275,9 +275,9 @@ of a v1 trace and nothing else.
   extension, so the fast tier checks the same traces either way.
 
 ```sh
-cabal run -v0 trace-pack -- pack local/traces/slice7f local/traces-v2/slice7f --jobs 6
-cabal run -v0 trace-pack -- unpack local/traces-v2/slice7f/slice7f-1000.trace          # JSON on stdout
-cabal run -v0 trace-pack -- unpack local/traces-v2/slice7f/slice7f-1000.trace out.json
+cabal run -v0 trace-pack -- pack local/record/slice7f local/traces/slice7f --jobs 6
+cabal run -v0 trace-pack -- unpack local/traces/slice7f/slice7f-1000.trace          # JSON on stdout
+cabal run -v0 trace-pack -- unpack local/traces/slice7f/slice7f-1000.trace out.json
 ```
 
 `pack` copies every other file of the set (`*-moves.json` and the rest) unchanged,
@@ -314,8 +314,10 @@ the pool checks always cover every set. `long`, the default when the variable
 is unset, replays every trace. The summary line names the tier and the sampled
 and total counts for each set.
 
-The test reads trace sets from `$POKESIM_TRACES`, defaulting to `local/traces`
-(`local/traces-v2` for the packed corpus; see "Trace format v2").
+The test reads trace sets from `$POKESIM_TRACES`, defaulting to `local/traces`,
+the packed corpus. Generators write JSON to `local/record/<set>`, which the test
+also reads (`POKESIM_TRACES=local/record`) until the set is packed; see "Trace
+format v2".
 Each subdirectory is one set, such as `slice0` or `slice1`. Plain files there,
 such as the pool file, are ignored. It fails if there are no sets or a set has
 no traces.

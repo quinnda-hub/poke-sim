@@ -560,11 +560,10 @@ Alongside:
 - **Scenario generation from rules.** For each rule, generate battles that
   exercise it with each random outcome forced both ways, and report coverage
   per rule.
-- **Trace size.** 15,600 battles take about 11 GB. The long tier takes about
-  77 s on banana (8 threads; 190 s on the laptop at 9,000 battles) (most of the growth is the slice 6 property playouts) since parity checks traces on several threads (it was 325 s on one,
-  and grows with every set). About 60% of a trace's time is decoding its
-  JSON, so delta snapshots or a compact cache are the next step before the
-  catalog work.
+- **Trace size.** Done 2026-11-27: trace format v2 (`docs/oracle-testing.md`).
+  The 15,600 battles went from 11 GB of JSON to 163 MB packed, and the long
+  tier on banana from 77 s to 31 s. On one thread, slice 7f's parity run went
+  from 54 s to 19 s; what remains is mostly the engine.
 - **Benchmark tracking.** Record throughput at each slice so slowdowns are
   measured when they appear.
 - **Retire the legacy simulator.** Done 2026-11-27: `src/Pokemon/`,
