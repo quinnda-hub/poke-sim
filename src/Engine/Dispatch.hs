@@ -1,6 +1,7 @@
 {-# OPTIONS_GHC -fexpose-all-unfoldings #-}
 -- Unfoldings are exposed so that "Engine.Turn" can specialise every engine function to the concrete chance monads
 -- ('Engine.Chance.Sample', 'Engine.Chance.Replay'); without them each call here passes a Monad dictionary.
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE OverloadedStrings #-}
 -- | The event dispatcher (docs/handlers.md section 4), after Showdown's @sim/battle.ts@: @runEvent@,
 -- @singleEvent@, @fieldEvent@ and @eachEvent@, with the handler collection (@findEventHandlers@), the sort keys
@@ -624,19 +625,28 @@ getAllActive includeFainted b =
 -- dex table gives it the handler @(POwn, EvSwitchIn)@ ('Engine.Dex.effectFor'), so it is collected here and sorted with
 -- the holder's speed and its ability state's @effectOrder@ (the weather setters).
 pokemonHandlers :: Dex -> Battle -> Bool -> Prefix -> EventId -> Actor -> [Handler]
-pokemonHandlers dx b byDuration pfx ev a =
-  statusPart ++ volatilePart ++ one (EffectKey EffAbility (monAbility m)) (monAbilityState m) ++ itemPart
+pokemonHandlers dx b byDuration pfx ev a = pokemonHandlersOnto dx b byDuration pfx ev a []
+
+-- | 'pokemonHandlers' with the handlers after these ones given: the list is built back to front, so nothing is
+-- allocated for an effect without an entry for the prefix and event ('hasEntry'). Same list, same order: the status,
+-- the volatiles, the ability, the item, then @rest@.
+pokemonHandlersOnto :: Dex -> Battle -> Bool -> Prefix -> EventId -> Actor -> [Handler] -> [Handler]
+pokemonHandlersOnto dx b byDuration pfx ev a rest =
+  let !m = monOf b a
+      !a0 = if monItem m == noItem then rest else one rest (EffectKey EffItem (monItem m)) (monItemState m)
+      !a1 = one a0 (EffectKey EffAbility (monAbility m)) (monAbilityState m)
+      !a2 = SV.foldr' (\(Volatile i st) acc -> one acc (EffectKey EffVolatile i) st) a1 (monVolatiles m)
+   in case statusCond (monStatus m) of
+        Just c -> one a2 (EffectKey EffStatus (fromEnum c)) (monStatusState m)
+        Nothing -> a2
   where
-    m = monOf b a
-    statusPart = case statusCond (monStatus m) of
-      Just c -> one (EffectKey EffStatus (fromEnum c)) (monStatusState m)
-      Nothing -> []
-    volatilePart = concat [one (EffectKey EffVolatile i) st | Volatile i st <- SV.toList (monVolatiles m)]
-    itemPart = if monItem m == noItem then [] else one (EffectKey EffItem (monItem m)) (monItemState m)
-    one key st = case effectOf dx key >>= \cn -> condSpec cn pfx ev of
-      Just spec | isJust (hsBody spec) || (byDuration && esDuration st /= 0) ->
-        [Handler key (OwnMon a) (Just a) spec (sortKey ev spec (monSpeedKey b ev a) st) (esDuration st) False (esOrder st) True]
-      _ -> []
+    one acc key st = case effectOf dx key of
+      Just cn
+        | hasEntry cn pfx ev
+        , Just spec <- condSpec cn pfx ev
+        , isJust (hsBody spec) || (byDuration && esDuration st /= 0) ->
+            Handler key (OwnMon a) (Just a) spec (sortKey ev spec (monSpeedKey b ev a) st) (esDuration st) False (esOrder st) True : acc
+      _ -> acc
 
 -- | @resolvePriority@ (battle.ts 957-1032): order, priority and subOrder from the spec, the speed given, and for
 -- @SwitchIn@ the state's @effectOrder@ (the callback names ending in @SwitchIn@ and @RedirectTarget@; @RedirectTarget@
@@ -676,37 +686,55 @@ collectParts b ev ownPfx how = case how of
   Custom a -> (POwn, monSpeedKey b ev a, Just a, False)
   Run pfx -> (pfx, 0, Nothing, True)
 
+-- | The prefix of 'collectParts' alone.
+collectPrefix :: Prefix -> Collect -> Prefix
+collectPrefix ownPfx how = case how of
+  Owned -> ownPfx
+  Custom _ -> POwn
+  Run pfx -> pfx
+
 -- | @findSideEventHandlers@ (battle.ts 1177): the side's conditions in insertion order. A condition with a duration
 -- is collected for @Residual@ even without a callback (@getKey = 'duration'@). The key is @resolvePriority@'s
 -- (957-1032): the side condition's subOrder (4 unless the export gives one), @effectOrder@ for @SwitchIn@.
 sideHandlers :: Dex -> Battle -> Bool -> Collect -> EventId -> Player -> [Handler]
-sideHandlers dx b byDuration how ev p =
-  [ Handler key (OwnSide p) holder spec (sortKey ev spec speed st) (esDuration st) False (esOrder st) end
-  | CondEntry i st <- SV.toList (sConds (sideOf p b))
-  , let key = EffectKey EffSideCond i
-  , Just cn <- [effectOf dx key]
-  , let (pfx, speed, holder, end) = collectParts b ev PSide how
-  , Just spec <- [condSpec cn pfx ev]
-  , isJust (hsBody spec) || (byDuration && esDuration st /= 0)
-  ]
+sideHandlers dx b byDuration how ev p = sideHandlersOnto dx b byDuration how ev p []
+
+-- | 'sideHandlers' with the handlers after these ones given (see 'pokemonHandlersOnto').
+sideHandlersOnto :: Dex -> Battle -> Bool -> Collect -> EventId -> Player -> [Handler] -> [Handler]
+sideHandlersOnto dx b byDuration how ev p rest = SV.foldr' step rest (sConds (sideOf p b))
+  where
+    step (CondEntry i st) acc =
+      let key = EffectKey EffSideCond i
+       in case effectOf dx key of
+            Just cn
+              | hasEntry cn (collectPrefix PSide how) ev
+              , (pfx, speed, holder, end) <- collectParts b ev PSide how
+              , Just spec <- condSpec cn pfx ev
+              , isJust (hsBody spec) || (byDuration && esDuration st /= 0) ->
+                  Handler key (OwnSide p) holder spec (sortKey ev spec speed st) (esDuration st) False (esOrder st) end : acc
+            _ -> acc
 
 -- | @findFieldEventHandlers@ (battle.ts 1150): the pseudo-weathers in insertion order, then the weather, then the
 -- terrain. Their states have no target, so their @effectOrder@ is 0.
 fieldHandlers :: Dex -> Battle -> Bool -> Collect -> EventId -> [Handler]
-fieldHandlers dx b byDuration how ev =
-  concat [one (EffectKey EffPseudoWeather i) st | CondEntry i st <- SV.toList (fPseudo f)]
-    ++ [h | fWeather f /= noCond, h <- one (EffectKey EffWeather (fWeather f)) (fWeatherState f)]
-    ++ [h | fTerrain f /= noCond, h <- one (EffectKey EffTerrain (fTerrain f)) (fTerrainState f)]
+fieldHandlers dx b byDuration how ev = fieldHandlersOnto dx b byDuration how ev []
+
+-- | 'fieldHandlers' with the handlers after these ones given (see 'pokemonHandlersOnto').
+fieldHandlersOnto :: Dex -> Battle -> Bool -> Collect -> EventId -> [Handler] -> [Handler]
+fieldHandlersOnto dx b byDuration how ev rest =
+  let !f = bField b
+      !t = if fTerrain f /= noCond then one rest (EffectKey EffTerrain (fTerrain f)) (fTerrainState f) else rest
+      !w = if fWeather f /= noCond then one t (EffectKey EffWeather (fWeather f)) (fWeatherState f) else t
+   in SV.foldr' (\(CondEntry i st) acc -> one acc (EffectKey EffPseudoWeather i) st) w (fPseudo f)
   where
-    f = bField b
-    one key st = case effectOf dx key of
-      Just cn ->
-        let (pfx, speed, holder, end) = collectParts b ev PField how
-         in case condSpec cn pfx ev of
-              Just spec | isJust (hsBody spec) || (byDuration && esDuration st /= 0) ->
-                [Handler key OwnField holder spec (sortKey ev spec speed st) (esDuration st) (esHasTarget st) (esOrder st) end]
-              _ -> []
-      Nothing -> []
+    one acc key st = case effectOf dx key of
+      Just cn
+        | hasEntry cn (collectPrefix PField how) ev
+        , (pfx, speed, holder, end) <- collectParts b ev PField how
+        , Just spec <- condSpec cn pfx ev
+        , isJust (hsBody spec) || (byDuration && esDuration st /= 0) ->
+            Handler key OwnField holder spec (sortKey ev spec speed st) (esDuration st) (esHasTarget st) (esOrder st) end : acc
+      _ -> acc
 
 -- | @findBattleEventHandlers@ (the format and its rules): none exist yet.
 battleHandlers :: Battle -> EventId -> [Handler]
@@ -719,32 +747,31 @@ battleHandlers _ _ = []
 -- active target (1070).
 findEventHandlers :: Dex -> Battle -> EventId -> Actor -> Maybe Actor -> [Handler]
 findEventHandlers dx b ev target source =
-  own ++ prefixedAroundTarget ++ sourceHandlers ++ sidePart ++ fieldHandlers dx b False (Run POwn) ev ++ battleHandlers b ev
-  where
-    active a = monActive (monOf b a)
-    bubbles = active target || maybe False active source
-    prefixed = eventPrefixed ev
-    own = if bubbles then pokemonHandlers dx b False POwn ev target else []
-    Actor tp _ = target
-    -- alliesAndSelf() and foes() are the active Pokemon with HP
-    side p = [a | sHasActive (sideOf p b), let a = activeActor p b, monHp (monOf b a) > 0]
-    prefixedAroundTarget
-      | bubbles && prefixed =
-          concat [pokemonHandlers dx b False PAlly ev a ++ pokemonHandlers dx b False PAny ev a | a <- side tp]
-            ++ concat [pokemonHandlers dx b False PFoe ev a ++ pokemonHandlers dx b False PAny ev a | a <- side (other tp)]
-      | otherwise = []
-    sourceHandlers = case source of
-      Just s | prefixed -> pokemonHandlers dx b False PSource ev s
-      _ -> []
-    -- for (const side of this.sides): `on` for the target's side, `onFoe` for the other (prefixed events), `onAny`
-    sidePart
-      | bubbles =
-          concat
-            [ (if p == tp then sideHandlers dx b False (Run POwn) ev p else if prefixed then sideHandlers dx b False (Run PFoe) ev p else [])
-                ++ (if prefixed then sideHandlers dx b False (Run PAny) ev p else [])
-            | p <- [P1, P2]
-            ]
-      | otherwise = []
+  let active a = monActive (monOf b a)
+      !bubbles = active target || maybe False active source
+      !prefixed = eventPrefixed ev
+      Actor tp _ = target
+      -- alliesAndSelf() and foes() are the active Pokemon with HP
+      side p = [a | sHasActive (sideOf p b), let a = activeActor p b, monHp (monOf b a) > 0]
+      -- the lists are built back to front, each part consing onto what follows it
+      !a0 = fieldHandlersOnto dx b False (Run POwn) ev (battleHandlers b ev)
+      -- for (const side of this.sides): `on` for the target's side, `onFoe` for the other (prefixed events), `onAny`
+      sideOne p acc =
+        let !x = if prefixed then sideHandlersOnto dx b False (Run PAny) ev p acc else acc
+         in if p == tp
+              then sideHandlersOnto dx b False (Run POwn) ev p x
+              else if prefixed then sideHandlersOnto dx b False (Run PFoe) ev p x else x
+      !a1 = if bubbles then sideOne P1 (sideOne P2 a0) else a0
+      !a2 = case source of
+        Just s | prefixed -> pokemonHandlersOnto dx b False PSource ev s a1
+        _ -> a1
+      !a3
+        | bubbles && prefixed =
+            foldr (\a acc -> pokemonHandlersOnto dx b False PAlly ev a (pokemonHandlersOnto dx b False PAny ev a acc))
+              (foldr (\a acc -> pokemonHandlersOnto dx b False PFoe ev a (pokemonHandlersOnto dx b False PAny ev a acc)) a2 (side (other tp)))
+              (side tp)
+        | otherwise = a2
+   in if bubbles then pokemonHandlersOnto dx b False POwn ev target a3 else a3
 
 -- | Whether 'findEventHandlers' can find anything: whether any effect it reads (those of the target, of the source and of
 -- the Pokemon in play, the side conditions of both sides and the field's conditions) has a handler for the event under

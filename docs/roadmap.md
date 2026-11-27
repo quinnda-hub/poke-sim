@@ -327,6 +327,21 @@ That clears the 12,000 floor; the 50,000 target is still ahead. The profile
 puts most of what is left in collecting event handlers (about 65% of the
 allocation) and in the engine monad's binds.
 
+After slice 6c, collecting handlers strictly, back to front, and skipping an
+effect with no entry for the event and prefix (a mask per prefix) cut the
+allocation per decision step by about 31%. Measured with the 6c build
+interleaved, on one core:
+
+| Teams | 6c steps/s | Now steps/s | 6c kB/step | Now kB/step | Ratio |
+|---|---|---|---|---|---|
+| slice 3 | 24,300-30,400 | 28,000-31,600 | 122-123 | 85 | 1.04-1.15 |
+| slice 5 | 26,300-26,600 | 29,000-29,700 | 123 | 84-85 | 1.10-1.12 |
+| slice 6 | 28,700-33,900 | 31,800-37,400 | 113-114 | 79-80 | 1.10-1.13 |
+
+The handler order is unchanged. The parity test cannot see two reorderings
+of it (status and volatiles on one Pokémon, and the two sides' conditions),
+because no supported pair of those effects ties in sort order.
+
 At slice 5b the engine was about 10-12 times faster per step than Showdown;
 it is now about 30 times faster. Showdown builds a battle in
 about 0.9 ms, so its time goes into the turns, at about 1 ms per decision
