@@ -8,7 +8,7 @@ module Main (main) where
 
 import Control.Exception (SomeException, evaluate, try)
 import Data.Aeson (Value (..), eitherDecodeFileStrict')
-import Data.Bits (shiftR, testBit)
+import Data.Bits (shiftR)
 import qualified Data.Aeson.Key as K
 import qualified Data.Aeson.KeyMap as KM
 import Control.Monad (foldM)
@@ -19,7 +19,6 @@ import Data.List (group, sort, sortOn, (\\))
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe)
 import qualified Data.Vector as V
-import qualified Data.Vector.Unboxed as U
 import qualified Data.Vector.Strict as SV
 import qualified Data.Text as T
 import Hedgehog
@@ -33,7 +32,7 @@ import System.Random.SplitMix (mkSMGen)
 
 import Engine
 import Engine.Chance (runSample, speedSortWith)
-import Engine.Dex (Condition (..), Dex (..), MoveData (..), SpeciesData (..), abilityId, dexCondLookup, itemId, supportedAbilities, supportedItems, supportedMoves, supportedSpecies)
+import Engine.Dex (Condition (..), Dex (..), EvMask (..), MoveData (..), SpeciesData (..), abilityId, evMaskHas, dexCondLookup, itemId, supportedAbilities, supportedItems, supportedMoves, supportedSpecies)
 import Engine.Dispatch (HitResult (..), addSideCondition, basePowerCallback, moveAfterHit, moveFieldHit, moveOwnHit, moveTry)
 import Engine.Effects (abilityBodies, fieldCondBodies, itemBodies, moveBodies)
 import Engine.Event (CondId (..), EventId (..), HandlerSpec (..), Prefix (..), condName, parseHandlerName)
@@ -91,7 +90,7 @@ main = do
             withTests 1 (moveBasePowerSortsLast dex))
         , ("speedSort: a sorted permutation, drawing exactly Showdown's shuffle ranges over each tie run in order",
             withTests (fromIntegral n) speedSortDraws)
-        , ("every effect's event mask, and its mask per prefix, is exactly the events its handler list names, and every event fits the 64-bit mask",
+        , ("every effect's event mask, and its mask per prefix, is exactly the events its handler list names, and every event fits the 128-bit mask",
             withTests 1 (eventMasksExact dex))
         , ("Court Change and Haze: the sides exchange the listed conditions with their states and nothing else changes; Haze clears the stages in play",
             withTests (fromIntegral n) (fieldMoves dex))
@@ -574,13 +573,13 @@ speedSortDraws = property $ do
 eventMasksExact :: Dex -> Property
 eventMasksExact dex = withTests 1 $ property $ do
   footnote ("EventId has " ++ show (fromEnum (maxBound :: EventId) + 1) ++ " constructors")
-  assert (fromEnum (maxBound :: EventId) < 64)
+  assert (fromEnum (maxBound :: EventId) < 128)
   let tables =
         [("condition", dxConditions dex), ("ability", dxAbilities dex), ("item", dxItems dex), ("field condition", dxFieldConds dex)]
       -- bit by bit against the handler list, independently of 'eventBits'
       checkMask what c = do
         let named = [e | (_, e, _) <- cnHandlers c]
-            wrong = [e | e <- [minBound .. maxBound :: EventId], testBit (cnEvents c) (fromEnum e) /= (e `elem` named)]
+            wrong = [e | e <- [minBound .. maxBound :: EventId], evMaskHas (cnEvents c) (fromEnum e) /= (e `elem` named)]
         footnote (what ++ " " ++ T.unpack (cnId c) ++ ": events whose bit is wrong: " ++ show wrong)
         wrong === []
         -- the per-prefix masks, bit by bit against the same list
@@ -588,13 +587,16 @@ eventMasksExact dex = withTests 1 $ property $ do
               [ (p, e)
               | p <- [minBound .. maxBound :: Prefix]
               , e <- [minBound .. maxBound :: EventId]
-              , testBit (cnEventsBy c U.! fromEnum p) (fromEnum e) /= any (\(p', e', _) -> p' == p && e' == e) (cnHandlers c)
+              , evMaskHas (cnEventsBy c V.! fromEnum p) (fromEnum e) /= any (\(p', e', _) -> p' == p && e' == e) (cnHandlers c)
               ]
         footnote (what ++ " " ++ T.unpack (cnId c) ++ ": (prefix, event) pairs whose bit is wrong: " ++ show wrongBy)
         wrongBy === []
-        U.length (cnEventsBy c) === fromEnum (maxBound :: Prefix) + 1
+        V.length (cnEventsBy c) === fromEnum (maxBound :: Prefix) + 1
         -- no bit beyond the last event
-        assert (cnEvents c `shiftR` (fromEnum (maxBound :: EventId) + 1) == 0)
+        let EvMask lo hi = cnEvents c
+        assert (hi `shiftR` max 0 (fromEnum (maxBound :: EventId) + 1 - 64) == 0)
+        assert (fromEnum (maxBound :: EventId) >= 63 || lo `shiftR` (fromEnum (maxBound :: EventId) + 1) == 0)
+        assert (fromEnum (maxBound :: EventId) + 1 > 64 || hi == 0)
   mapM_ (\(what, table) -> mapM_ (checkMask what) (V.toList table)) tables
   mapM_ (checkMask "move" . mvEffect) (V.toList (dxMoves dex))
 

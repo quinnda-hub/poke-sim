@@ -68,7 +68,6 @@ module Engine.Dispatch
 
 import Control.Monad (forM, forM_, unless, void, when)
 import Control.Monad.Trans.State.Strict (StateT, get, gets, modify')
-import Data.Bits (testBit)
 import Data.List (sortBy)
 import qualified Data.Map.Strict as M
 import qualified Data.Text as T
@@ -800,7 +799,7 @@ eventHeard :: Dex -> Battle -> EventId -> Actor -> Maybe Actor -> Bool
 eventHeard dx b ev target source = mon target || maybe False mon source || side P1 || side P2 || fieldPart
   where
     bit = fromEnum ev
-    has key = maybe False (\cn -> testBit (cnEvents cn) bit) (effectOf dx key)
+    has key = maybe False (\cn -> evMaskHas (cnEvents cn) bit) (effectOf dx key)
     mon a =
       let m = monOf b a
        in maybe False (has . EffectKey EffStatus . fromEnum) (statusCond (monStatus m))

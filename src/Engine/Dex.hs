@@ -12,6 +12,8 @@ module Engine.Dex
   , Condition (..)
   , conditionOf
   , condSpec
+  , EvMask (..)
+  , evMaskHas
   , eventBits
   , prefixBits
   , hasEntry
@@ -148,14 +150,31 @@ data Condition = Condition
   , cnId :: !T.Text
   , cnItemBoosts :: ![(BoostStat, Int)]
   -- ^ An item's @boosts@ (the seeds): the stages @useItem@ raises (pokemon.ts 1857).
-  , cnEvents :: !Word64
+  , cnEvents :: !EvMask
   -- ^ The events 'cnHandlers' has an entry for, under any prefix, as a bit set over 'fromEnum' of the 'EventId'
   -- ('eventBits'). Derived from 'cnHandlers'; it lets 'condSpec' and the dispatcher answer "no handler" with one bit test.
-  , cnEventsBy :: !(U.Vector Word64)
+  , cnEventsBy :: !(V.Vector EvMask)
   -- ^ 'cnEvents' per prefix: element @fromEnum p@ has bit @fromEnum e@ for every entry @(p, e, _)@ of 'cnHandlers'
   -- ('prefixBits'). 'condSpec' and the collectors test it before scanning the list.
   }
   deriving (Show)
+
+-- | A set of events, as two words: bit @i@ of the set is bit @i@ of the first word below 64, else bit @i - 64@ of the
+-- second. It holds 'fromEnum' of an 'EventId' up to 127 (a property checks the bound).
+data EvMask = EvMask !Word64 !Word64
+  deriving (Eq, Show)
+
+-- | Whether the mask has bit @i@.
+evMaskHas :: EvMask -> Int -> Bool
+evMaskHas (EvMask lo hi) i
+  | i < 64 = testBit lo i
+  | otherwise = testBit hi (i - 64)
+{-# INLINE evMaskHas #-}
+
+evMaskSet :: EvMask -> Int -> EvMask
+evMaskSet (EvMask lo hi) i
+  | i < 64 = EvMask (setBit lo i) hi
+  | otherwise = EvMask lo (setBit hi (i - 64))
 
 -- | The static tables.
 data Dex = Dex
@@ -255,7 +274,7 @@ supportedItems dx = "" : [cnId a | a <- V.toList (dxItems dx), cnSupported a]
 -- | The handler of a condition for a prefix and event (@on<Prefix><Event>@), if the engine has one.
 condSpec :: Condition -> Prefix -> EventId -> Maybe HandlerSpec
 condSpec cn p e
-  | not (testBit (U.unsafeIndex (cnEventsBy cn) (fromEnum p)) (fromEnum e)) = Nothing
+  | not (evMaskHas (V.unsafeIndex (cnEventsBy cn) (fromEnum p)) (fromEnum e)) = Nothing
   | otherwise = go (cnHandlers cn)
   where
     go [] = Nothing
@@ -264,18 +283,18 @@ condSpec cn p e
       | otherwise = go rest
 {-# INLINE condSpec #-}
 
--- | The 'cnEvents' of a handler list: bit @fromEnum e@ for every event @e@ with an entry. 'EventId' has fewer than 64
+-- | The 'cnEvents' of a handler list: bit @fromEnum e@ for every event @e@ with an entry. 'EventId' has fewer than 128
 -- constructors (a property checks it).
-eventBits :: [(Prefix, EventId, HandlerSpec)] -> Word64
-eventBits = foldl' (\w (_, e, _) -> setBit w (fromEnum e)) 0
+eventBits :: [(Prefix, EventId, HandlerSpec)] -> EvMask
+eventBits = foldl' (\w (_, e, _) -> evMaskSet w (fromEnum e)) (EvMask 0 0)
 
 -- | The 'cnEventsBy' of a handler list: one mask per 'Prefix', indexed by 'fromEnum'.
-prefixBits :: [(Prefix, EventId, HandlerSpec)] -> U.Vector Word64
-prefixBits hs = U.fromList [foldl' (\w (p', e, _) -> if p' == p then setBit w (fromEnum e) else w) 0 hs | p <- [minBound .. maxBound]]
+prefixBits :: [(Prefix, EventId, HandlerSpec)] -> V.Vector EvMask
+prefixBits hs = V.fromList [foldl' (\w (p', e, _) -> if p' == p then evMaskSet w (fromEnum e) else w) (EvMask 0 0) hs | p <- [minBound .. maxBound]]
 
 -- | Whether the condition has an entry for the prefix and event: 'condSpec' is 'Just' exactly then.
 hasEntry :: Condition -> Prefix -> EventId -> Bool
-hasEntry cn p e = testBit (U.unsafeIndex (cnEventsBy cn) (fromEnum p)) (fromEnum e)
+hasEntry cn p e = evMaskHas (V.unsafeIndex (cnEventsBy cn) (fromEnum p)) (fromEnum e)
 {-# INLINE hasEntry #-}
 
 -- | Showdown's effectiveness code of an attacking type against a defending type.
