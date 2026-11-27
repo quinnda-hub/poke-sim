@@ -434,10 +434,12 @@ checkStep dx b b' (c1, c2) = (mappend (stallSeen <> seen8d) <$>) $ mapM_ one [(p
     knownMoves m = [mvId (dxMoves dx V.! msMove ms) | ms <- SV.toList (monMoves m)]
     inPlay = [monOf b (activeActor p b) | p <- [P1, P2], sHasActive (sideOf p b)]
     removers = ["knockoff", "thief", "trick", "switcheroo"]
-    -- (slice 8d: Magician and Pickpocket take an item too; a holder on the bench can come in during the step, a pivot's replacement, so the
-    -- whole team counts)
+    -- (slice 8d: Magician and Pickpocket take an item too, but only a holder that was in play during the step: active at its start or at its
+    -- end, which includes one that came in during it (a pivot's replacement or a drag). A Pokemon that came in and left again inside one step
+    -- cannot be told from the two states, but a switch-in during a step ends it at the next request, and a drag leaves the dragged one in play.)
     stealing = any (any (`elem` removers) . knownMoves) inPlay
-      || or [abilityIs "magician" m || abilityIs "pickpocket" m | p <- [P1, P2], m <- SV.toList (sMons (sideOf p b))]
+      || or [ abilityIs "magician" m0 || abilityIs "pickpocket" m0 || abilityIs "magician" m1 || abilityIs "pickpocket" m1
+            | p <- [P1, P2], (m0, m1) <- zip (SV.toList (sMons (sideOf p b))) (SV.toList (sMons (sideOf p b'))), monActive m0 || monActive m1 ]
     -- (a later forced switch in the same step, a Roar after a Red Card, can bring the attacker back in)
     forcing = any (any (`elem` ["roar", "whirlwind", "dragontail", "circlethrow"]) . knownMoves) inPlay
     switchOuts = mconcat <$> mapM switchOut [(p, i) | p <- [P1, P2], i <- [0 .. SV.length (sMons (sideOf p b)) - 1]]
