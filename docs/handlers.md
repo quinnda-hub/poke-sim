@@ -1578,3 +1578,127 @@ The base also adds:
   ability's or item's `onStart` (battle.ts 1028-1036). Both sides are sorted
   together, at battle start too (battle.ts 2724-2751, battle-actions.ts
   228-251).
+
+### 8-base findings
+
+What the base built, and where it differs from the design above. The corpus
+replays with the same draws as main: the decisions were checked against
+Showdown at 0.11.11 (`c7fa6f1`).
+
+**The event mask.** `cnEvents` is an `EvMask !Word64 !Word64`, and `cnEventsBy`
+a boxed `Vector EvMask`, one per prefix. `evMaskHas` is the one test, by the
+word and the index within it. `EventId` has room for 128 events; the property
+checks the bound (`fromEnum maxBound < 128`) and that each mask is exactly the
+handler list's events.
+
+**The boost effect.** It travels as two of `runEvent`'s existing arguments, not
+in the relay value:
+- `boostMon dx source active cause target changes` takes the cause as a
+  `Maybe EffectKey`. `runEventEff` is `runEvent` with that cause, which a
+  handler reads as `cEffect` (the field `singleEvent` already used for
+  Booster Energy).
+- A move's boost is `moveCause`, `EffectKey EffMove 0`; the move itself is
+  `cMove`, as before (Eject Pack reads it as Showdown's `activeMove`, which is
+  not always the effect: a Weak Armor boost during a move has an Ability
+  effect and that move in use). An ability, item, side condition or other
+  condition passes its own key.
+- Showdown's null `effect` (`effect ||= this.effect`) is resolved by the
+  caller: Embody Aspect passes the ability, Sticky Web its side condition,
+  the seeds the item. **Intimidate passes the ability key**, so
+  `effect.name === 'Intimidate'` is `cEffect == Just (EffectKey EffAbility
+  intimidate)`.
+- `isSecondary` and `isSelf` are not passed. In `battle.boost` they only
+  choose log lines (the `-ability` line and which unchanged stats are
+  logged); no event receives them.
+- The relay of `ChangeBoost` and `TryBoost` is `RBoosts`: a handler returns
+  the table that replaces it. Any other result leaves no stat (`for...in` over
+  `false`). `AfterEachBoost`'s relay is the single stat as given, uncapped.
+- Showdown's detail kept: the capped table keeps a stat whose change the limit
+  cancelled, as 0 (`boostBy` returns 0 for it, so no `AfterEachBoost` and no
+  success); `boostBy` caps again against the stage as it stands, so a stat
+  moved by an earlier handler is capped afresh. The return value is whether
+  any stat changed.
+- `EffectKey EffMove` was already used for a move's `onEffect` handlers; the
+  new `EffRecoil` kind (below) is the only addition to `EffectKind`.
+
+**Damage.** `damageMon dx target source mv cause amount` is `spreadDamage` for
+one target, and the path of every damage that Showdown deals through `damage`:
+clamp to 1, the weather-immunity check for a Weather cause
+(`runStatusImmunity`, moved here from the sandstorm handler), `runEvent('Damage',
+..., true)`, the second clamp, `Pokemon.damage`. It returns `Nothing` where
+Showdown returns `false` or the event fails. The drain heal stays in the hit
+path, right after it. The causes, which handlers read as `cEffect`:
+
+| Site | Path | Effect |
+|---|---|---|
+| move hit (`hitTarget`) | `damageMon` | the move (`moveCause`, `cMove` set) |
+| brn, psn, tox residual | `damageMon` | the status |
+| Black Sludge, Stealth Rock, Spikes, sandstorm | `damageMon` | the item, side condition, weather |
+| Rocky Helmet, Spiky Shield | `damageMon` | the item, the volatile; source is the holder |
+| Life Orb | `damageMon` | the item; target and source are the user |
+| recoil (both hit paths) | `damageMon` | `EffRecoil`; target and source are the user |
+| Struggle recoil (both hit paths) | `applyDamage`, no event | `directDamage` |
+| Substitute's cost | `applyDamage`, no event | `directDamage` |
+| a hit on a Substitute | `Substitute.hp -=`, no event | (no damage call) |
+
+Struggle's recoil and the Substitute's cost are `directDamage`, which runs no
+`Damage` event; a hit on a Substitute is no `spreadDamage` at all. Recoil's
+effect is Showdown's `Recoil` condition (`effectType: 'Recoil'`), so it is
+`EffRecoil`; Magic Guard blocks it because it is not a Move. `mv` is the move
+only for a Move cause. Endure now tests `cEffect` for `EffMove` instead of
+`cMove`.
+- LATENT: `onEffect` (the `true` argument of `runEvent('Damage')`) also runs
+  the damaging effect's own `onDamage`. Only a move is looked up, and no move
+  has one. Sturdy and Focus Sash are holders, not effects.
+- LATENT: a hit whose `Damage` event fails deals nothing but is not failed
+  (`false` in the damage array); no supported handler returns false for a
+  Move. 8c reads this when Sturdy and Magic Guard arrive.
+- `pokemon.hurtThisTurn` and `source.lastDamage` are not in the state.
+
+**The move in use.** `bActiveMove :: Maybe MoveInUse` (user, `ignoreAbility`);
+`MoveData` has the six flags, all defaulted. `suppressingAbility` reads it,
+with the Ability Shield test (battle.ts 366-369), and is False until a phase
+sets `ignoreAbility`.
+- Set (`setActiveMove`): `runMove` before `BeforeMove` (battle-actions.ts 302),
+  `useMove` before `ModifyType` (492), `sideMove` (887).
+- Cleared (`clearActiveMove`): `runMove` after a `BeforeMove` stop (309) and
+  after the PP failure (341); every action tail after the phazing and before
+  the faints (battle.ts 2875); the residual action (2854); the pursuit
+  activation points (battle-actions.ts 65): a plain switch-out and a flagged
+  Pokemon's request.
+- **Restore: there is none in Gen 9.** The design says to restore after a
+  nested `useMove` (battle-actions.ts 363, 416). Line 416 sits inside `if
+  (this.battle.gen <= 4)`, so in Gen 9 the nested move stays active after it
+  returns, and `runMove` reads it (`if (this.battle.activeMove) move =
+  this.battle.activeMove`, 367, for `AfterMove`). Nothing nests today; Magic
+  Bounce (8f) must not restore either.
+- Showdown's `ActiveMove` is one object that `onModifyMove` mutates, but
+  `MoveInUse` is a copy of one flag, so `useMove` sets it again from the
+  changed move after the `ModifyMove` events: this is where Mold Breaker's
+  `ignoreAbility` reaches it. `trySpreadMoveHit`'s `notActive` set (654) has no
+  caller here.
+- The invariant `bActiveMove == Nothing` is in `checkBattle`; removing the
+  tail's `clearActiveMove` makes it fail at once.
+
+**`hasAbility`.** `Engine.Damage` now holds `ignoringAbility` (the not-in-play
+clause of pokemon.ts 879; the Gastro Acid, Neutralizing Gas and Ability Shield
+clauses stay LATENT for 8f), `suppressingAbility` and `hasAbility dx battle
+actor id`. The dispatcher's ability gates (`skipped`, `singleBodyFx`) now call
+`ignoringAbility` and `suppressingAbility`. The direct tests replaced:
+Protosynthesis and Quark Drive's `paradox` check, and the Sticky Hold check of
+`takeItem`. `isGrounded` and `isImmune` now take the battle and the actor
+instead of a `Mon`, so that Levitate, through `hasAbility` and
+`suppressingAbility`, can ground-check; its callers (terrain handlers, hazards,
+Terrain Pulse, Grassy Glide, Rising Voltage, the Ground-immunity step) were
+updated. The remaining `monAbility` reads are the dispatcher's own handler
+collection and state lookup, the ability's `End` and `Start` calls, and
+`clearVolatile`.
+
+**Surprises.**
+- The design's restore after a nested `useMove` does not exist in Gen 9 (above).
+- `isSecondary` and `isSelf` do not reach any event (above).
+- A move's damage event had been called without `onEffect`; since no move has
+  an `onDamage`, passing it changes nothing.
+- The dispatcher's ability gate had no `eventid !== 'End'` exception
+  (`runEvent` has one at battle.ts 884), unlike `singleEvent`'s; it is left
+  as it was, since `End` runs through `singleEvent`.
