@@ -1,3 +1,6 @@
+{-# OPTIONS_GHC -fexpose-all-unfoldings #-}
+-- Unfoldings are exposed so that "Engine.Turn" can specialise every engine function to the concrete chance monads
+-- ('Engine.Chance.Sample', 'Engine.Chance.Replay'); without them each call here passes a Monad dictionary.
 -- | The action queue (Showdown sim/battle-queue.ts and the sorting parts of battle.ts).
 --
 -- Actions carry Showdown's sort key (order, priority, speed, subOrder, effectOrder);

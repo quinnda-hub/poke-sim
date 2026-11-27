@@ -8,13 +8,14 @@ module Main (main) where
 
 import Control.Exception (SomeException, evaluate, try)
 import Data.Aeson (Value (..), eitherDecodeFileStrict')
+import Data.Bits (shiftR, testBit)
 import qualified Data.Aeson.Key as K
 import qualified Data.Aeson.KeyMap as KM
 import Control.Monad (foldM)
-import Control.Monad.Trans.State.Strict (evalStateT, runStateT)
+import Control.Monad.Trans.State.Strict (State, evalStateT, modify', runState, runStateT, state)
 import Data.Functor.Identity (runIdentity)
 import Data.Either (isLeft)
-import Data.List (sortOn, (\\))
+import Data.List (group, sort, sortOn, (\\))
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe)
 import qualified Data.Vector as V
@@ -30,7 +31,7 @@ import System.FilePath ((</>))
 import System.Random.SplitMix (mkSMGen)
 
 import Engine
-import Engine.Chance (runSample)
+import Engine.Chance (runSample, speedSortWith)
 import Engine.Dex (Condition (..), Dex (..), MoveData (..), SpeciesData (..), abilityId, dexCondLookup, itemId, supportedAbilities, supportedItems, supportedMoves, supportedSpecies)
 import Engine.Dispatch (HitResult (..), addSideCondition, basePowerCallback, moveAfterHit, moveFieldHit, moveOwnHit)
 import Engine.Effects (abilityBodies, fieldCondBodies, itemBodies, moveBodies)
@@ -81,6 +82,10 @@ main = do
             withTests 1 (damageFields dex))
         , ("a move's own BasePower handler sorts after every other BasePower handler, so it never ties with one",
             withTests 1 (moveBasePowerSortsLast dex))
+        , ("speedSort: a sorted permutation, drawing exactly Showdown's shuffle ranges over each tie run in order",
+            withTests (fromIntegral n) speedSortDraws)
+        , ("every effect's event mask is exactly the events its handler list names, and every event fits the 64-bit mask",
+            withTests 1 (eventMasksExact dex))
         , ("Court Change and Haze: the sides exchange the listed conditions with their states and nothing else changes; Haze clears the stages in play",
             withTests (fromIntegral n) (fieldMoves dex))
         , ("Knock Off, Thief and Trick: an item removal never creates an item, a refusal keeps it, and a swap hands each item over whole",
@@ -438,6 +443,67 @@ moveEventsOnlyOfMoves dex = withTests 1 $ property $ do
 -- the event: an effect is supported only when every handler the export lists for it has a body, so no ability, item, field
 -- condition or other volatile may have one, and no move of its own. If one does, the types become a function of more state
 -- than the volatile and this fails.
+-- | A 'MonadChance' that answers from a supplied list of numbers (each reduced into the requested range) and records
+-- the ranges asked for.
+newtype Tape a = Tape (State ([Int], [(Int, Int)]) a)
+
+instance Functor Tape where
+  fmap f (Tape m) = Tape (fmap f m)
+
+instance Applicative Tape where
+  pure = Tape . pure
+  Tape f <*> Tape a = Tape (f <*> a)
+
+instance Monad Tape where
+  Tape m >>= f = Tape (m >>= \a -> let Tape r = f a in r)
+
+instance MonadChance Tape where
+  roll lo hi = Tape $ do
+    modify' (\(seeds, seen) -> (seeds, (lo, hi) : seen))
+    state (\(seeds, seen) -> case seeds of
+      (x : xs) -> (lo + x `mod` (hi - lo), (xs, seen))
+      [] -> (lo, ([], seen)))
+
+runTape :: [Int] -> Tape a -> (a, [(Int, Int)])
+runTape seeds (Tape m) = case runState m (seeds, []) of (a, (_, seen)) -> (a, reverse seen)
+
+-- | Showdown's @speedSort@ (battle.ts) on a list with ties: selection sort, then @prng.shuffle(list, start, end)@ over
+-- each run of equal elements, which draws @random(s, end)@ for @s = start .. end-2@ (prng.ts @shuffle@). So, whatever
+-- the draws are: the output is a permutation of the input, sorted under the comparator, and the ranges asked for are
+-- exactly those of the tie runs of the sorted keys, in order.
+speedSortDraws :: Property
+speedSortDraws = property $ do
+  keys <- forAll (Gen.list (Range.linear 0 12) (Gen.int (Range.linear 0 4)))
+  seeds <- forAll (Gen.list (Range.singleton 80) (Gen.int (Range.linear 0 1000)))
+  let items = zip keys [0 :: Int ..]
+      cmp (a, _) (b, _) = compare a b
+      runs = map length (group (sort keys))
+      expected = concat [[(s + i, s + k) | i <- [0 .. k - 2]] | (s, k) <- zip (scanl (+) 0 runs) runs, k > 1]
+      (out, ranges) = runTape seeds (speedSortWith cmp items)
+  sort out === sort items
+  let ks = map fst out
+  ks === sort ks
+  ranges === expected
+
+-- | 'cnEvents' is what 'condSpec' and the dispatcher's empty-event skip test before reading 'cnHandlers': it must name
+-- exactly the events the list has an entry for, and every 'EventId' must have a bit.
+eventMasksExact :: Dex -> Property
+eventMasksExact dex = withTests 1 $ property $ do
+  footnote ("EventId has " ++ show (fromEnum (maxBound :: EventId) + 1) ++ " constructors")
+  assert (fromEnum (maxBound :: EventId) < 64)
+  let tables =
+        [("condition", dxConditions dex), ("ability", dxAbilities dex), ("item", dxItems dex), ("field condition", dxFieldConds dex)]
+      -- bit by bit against the handler list, independently of 'eventBits'
+      checkMask what c = do
+        let named = [e | (_, e, _) <- cnHandlers c]
+            wrong = [e | e <- [minBound .. maxBound :: EventId], testBit (cnEvents c) (fromEnum e) /= (e `elem` named)]
+        footnote (what ++ " " ++ T.unpack (cnId c) ++ ": events whose bit is wrong: " ++ show wrong)
+        wrong === []
+        -- no bit beyond the last event
+        assert (cnEvents c `shiftR` (fromEnum (maxBound :: EventId) + 1) == 0)
+  mapM_ (\(what, table) -> mapM_ (checkMask what) (V.toList table)) tables
+  mapM_ (checkMask "move" . mvEffect) (V.toList (dxMoves dex))
+
 onlyRoostListensToType :: Dex -> Property
 onlyRoostListensToType dex = withTests 1 $ property $ do
   let typeListeners cn = [(p, e) | (p, e, spec) <- cnHandlers cn, e == EvType, Just _ <- [hsBody spec]]

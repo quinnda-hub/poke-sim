@@ -218,7 +218,7 @@ Last updated 2026-11-25.
   battles. Parity checks 7,500 traces, 594,043 decision points and
   1,147,453 draws.
 - **Test tiers.** The fast tier (`POKESIM_TIER=fast`) replays every 10th trace
-  and runs the hedgehog properties at 100 tests each, in about 35 s. The long
+  and runs the hedgehog properties at 100 tests each, in about 10 s. The long
   tier, which gates merges into main, replays everything and runs the
   properties at 2000 tests each.
 
@@ -300,7 +300,22 @@ On 2026-11-26, after slice 5b (Terastallization done), the same method gave:
 | slice 3 | 11,200-11,400 | 1,080 | 147-149 | 13.8 |
 | slice 5 | 11,400-11,800 | 860 | 150-156 | 11.2 |
 
-The engine is about 10-12 times faster per step. Showdown builds a battle in
+After slice 6a, specialising the engine to its two chance monads and skipping
+events no effect in play listens to (no change to draws or state) gave, on
+the same core with the 6a build interleaved:
+
+| Teams | 6a steps/s | Now steps/s | 6a battles/s | Now battles/s |
+|---|---|---|---|---|
+| slice 3 | 10,900 | 31,400-31,700 | 143 | 408-411 |
+| slice 5 | 10,300-11,400 | 27,600-32,200 | 136-150 | 371-434 |
+| slice 6 | 9,700-9,900 | 27,600-28,800 | 93-94 | 269-281 |
+
+That clears the 12,000 floor; the 50,000 target is still ahead. The profile
+puts most of what is left in collecting event handlers (about 65% of the
+allocation) and in the engine monad's binds.
+
+At slice 5b the engine was about 10-12 times faster per step than Showdown;
+it is now about 30 times faster. Showdown builds a battle in
 about 0.9 ms, so its time goes into the turns, at about 1 ms per decision
 step: it runs its full event system, logging and request building on every
 turn.
@@ -462,10 +477,11 @@ Alongside:
 - **Scenario generation from rules.** For each rule, generate battles that
   exercise it with each random outcome forced both ways, and report coverage
   per rule.
-- **Trace size.** 7,500 battles take about 4.5 GB. The long tier now takes about 325 s,
-  growing with every set: delta snapshots and a faster replay are due before
-  the catalog work. Snapshots should become
-  deltas.
+- **Trace size.** 7,500 battles take about 4.5 GB. The long tier takes about
+  120 s since parity checks traces on several threads (it was 325 s on one,
+  and grows with every set). About 60% of a trace's time is decoding its
+  JSON, so delta snapshots or a compact cache are the next step before the
+  catalog work.
 - **Benchmark tracking.** Record throughput at each slice so slowdowns are
   measured when they appear.
 - **Retire the legacy simulator** once the new core covers what it does.

@@ -203,7 +203,7 @@ test-suite parity
     type:             exitcode-stdio-1.0
     hs-source-dirs:   test/parity
     main-is:          Main.hs
-    ghc-options:      -O1
+    ghc-options:      -O1 -threaded -rtsopts "-with-rtsopts=-A128m"
     build-depends:
         base ^>=4.17.2.1,
         poke-sim,

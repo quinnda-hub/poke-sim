@@ -1,12 +1,15 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 -- | Parity test: replay recorded Pokemon Showdown battles (traces) through the engine and require the
 -- same random draws (count, ranges, order) and the same state at every decision point.
 --
 -- Environment: @POKESIM_TRACES@ (default @local/traces@, a directory of trace-set directories), @POKESIM_DEX@ (default @data/gen9@).
 module Main (main) where
 
-import Control.Exception (SomeException, evaluate, try)
-import Control.Monad (filterM, forM, forM_, when)
+import Control.Concurrent (forkIO, getNumCapabilities, setNumCapabilities)
+import Control.Concurrent.MVar (MVar, modifyMVar, newEmptyMVar, newMVar, putMVar, takeMVar)
+import Control.Exception (SomeException, evaluate, throwIO, try)
+import Control.Monad (filterM, forM, forM_, replicateM, replicateM_, when)
 import Data.Aeson (Value (..), eitherDecodeFileStrict')
 import qualified Data.Aeson.Key as K
 import qualified Data.Aeson.KeyMap as KM
@@ -21,6 +24,7 @@ import qualified Data.Vector as V
 import qualified Data.Vector.Strict as SV
 import qualified Data.Vector.Unboxed as U
 import System.Directory (doesDirectoryExist, doesFileExist, listDirectory)
+import GHC.Conc (getNumProcessors)
 import System.Environment (lookupEnv)
 import System.Exit (exitFailure)
 import System.FilePath (takeDirectory, takeFileName, (</>))
@@ -74,7 +78,7 @@ main = do
   checkPool "ability" (supportedAbilities dex) [(set, as) | (set, _, _, as, _) <- lists]
   checkPool "item" (supportedItems dex) [(set, is) | (set, _, _, _, is) <- lists]
   counts <- newIORef []
-  results <- fmap concat $ forM sets $ \set -> do
+  work <- fmap concat $ forM sets $ \set -> do
     names <- listDirectory (root </> set)
     let files = sort [root </> set </> n | n <- names, isTraceName n]
     when (null files) $ do
@@ -83,14 +87,18 @@ main = do
     -- fast tier: the traces at index i with i mod 10 == 0 of the sorted list; long: all of them
     let sampled = if tier == "fast" then [f | (i, f) <- zip [0 :: Int ..] files, i `mod` 10 == 0] else files
     modifyIORef' counts ((set, (length sampled, length files)) :)
-    forM sampled $ \f -> do
-      (r, used) <- runFile dex f
-      case r of
-        Left e -> do
-          hPutStrLn stderr (render f e)
-          hFlush stderr
-        Right _ -> pure ()
-      pure (set, r, used)
+    pure [(set, f) | f <- sampled]
+  -- Traces are independent, so they are checked on several threads (POKESIM_JOBS; see 'parityJobs');
+  -- the results, and any failure messages, come back in the same order as a sequential run.
+  jobs <- parityJobs
+  putStrLn ("parity: checking traces on " ++ show jobs ++ " thread(s)")
+  results <- inOrder jobs (\(_, f) -> runFile dex f) work $ \(set, f) (r, used) -> do
+    case r of
+      Left e -> do
+        hPutStrLn stderr (render f e)
+        hFlush stderr
+      Right _ -> pure ()
+    pure (set, r, used)
   -- Long tier: every move, species, ability and item the engine accepts must appear in some trace's teams, not only in a
   -- pool list. This is a check over the whole corpus, so the fast tier, which reads a sample, cannot make it.
   coverageOk <- if tier == "fast"
@@ -183,6 +191,40 @@ checkPool what actual sets = do
     when (not (null untested)) $
       hPutStrLn stderr ("parity: the engine accepts " ++ what ++ "s no trace set lists (untested): " ++ show untested)
     exitFailure
+
+-- | The number of threads to check traces on: @POKESIM_JOBS@, or half the processors (at least 1, at most 8). Each
+-- thread holds one decoded trace (about 7 MB) at a time and has its own 128 MB allocation area (@-A128m@, set in the
+-- cabal file: the default 4 MB spends half the run in the collector).
+parityJobs :: IO Int
+parityJobs = do
+  procs <- getNumProcessors
+  env <- lookupEnv "POKESIM_JOBS"
+  n <- case env of
+    Nothing -> pure (max 1 (min 8 (procs `div` 2)))
+    Just t | not (null t), all isDigit t, read t > (0 :: Int) -> pure (read t)
+    Just t -> hPutStrLn stderr ("parity: POKESIM_JOBS must be a positive number, got " ++ show t) >> exitFailure
+  caps <- getNumCapabilities
+  when (caps < n) (setNumCapabilities n)
+  pure n
+
+-- | Run @act@ over the items on @n@ threads, and hand each result to @done@ in the items' order as soon as it and
+-- every earlier one are ready. An exception in @act@ is rethrown here, at that item's turn, as a sequential run would.
+inOrder :: forall a b c. Int -> (a -> IO b) -> [a] -> (a -> b -> IO c) -> IO [c]
+inOrder n act xs done
+  | n <= 1 = mapM (\x -> act x >>= done x) xs
+  | otherwise = do
+      slots <- replicateM (length xs) (newEmptyMVar :: IO (MVar (Either SomeException b)))
+      queue <- newMVar (zip xs slots)
+      let worker = do
+            next <- modifyMVar queue (\q -> pure (case q of [] -> ([], Nothing); j : js -> (js, Just j)))
+            case next of
+              Nothing -> pure ()
+              Just (x, slot) -> do
+                r <- try (act x)
+                putMVar slot r
+                worker
+      replicateM_ n (forkIO worker)
+      mapM (\(x, slot) -> takeMVar slot >>= either throwIO (done x)) (zip xs slots)
 
 -- | The ids a trace's teams use (as ids, whatever the trace's spelling), for the coverage check.
 -- The fields are strict, and 'runFile' forces every element, so that a trace's decoded JSON is freed once the
