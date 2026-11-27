@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 // Showdown throughput baseline, mirroring bench/Main.hs: random playouts with uniformly random legal choices, one core,
-// teams from the first 20 trace files (sorted by name) of a trace set, counted in battles and decision steps per CPU
+// teams from the first 20 trace files (sorted by name) of a trace set, or from its teams.json when it has one, counted in battles and decision steps per CPU
 // second. A decision step is one decision point at which at least one side chooses (the engine's `step`).
 //
 // Usage: node tools/bench/showdown-bench.js <repoRoot> <traceDir> [seconds=5] [warmupSeconds=2]
@@ -50,10 +50,18 @@ function legalChoices(request) {
 	return out;
 }
 
-const names = fs.readdirSync(traceDir).filter(n => n.endsWith('.json') && !n.endsWith('-moves.json'))
-	.map(n => path.join(traceDir, n)).sort().slice(0, 20);
-if (!names.length) throw new Error(`no trace files in ${traceDir}`);
-const matchups = names.map(f => JSON.parse(fs.readFileSync(f, 'utf8')).teams);
+// A set packed by trace-pack has teams.json (an array of {trace, teams}, in name order): its first 20 entries are the
+// same matchups as the first 20 trace files.
+const packed = path.join(traceDir, 'teams.json');
+let matchups;
+if (fs.existsSync(packed)) {
+	matchups = JSON.parse(fs.readFileSync(packed, 'utf8')).slice(0, 20).map(e => e.teams);
+} else {
+	const names = fs.readdirSync(traceDir).filter(n => n.endsWith('.json') && !n.endsWith('-moves.json'))
+		.map(n => path.join(traceDir, n)).sort().slice(0, 20);
+	matchups = names.map(f => JSON.parse(fs.readFileSync(f, 'utf8')).teams);
+}
+if (!matchups.length) throw new Error(`no trace files in ${traceDir}`);
 
 const policy = mulberry32(20240601);
 let battleIndex = 0;

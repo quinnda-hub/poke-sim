@@ -50,24 +50,40 @@ cabal build all
 To run the parity test, first set up the pinned Showdown checkout (the steps
 are in [docs/oracle-testing.md](docs/oracle-testing.md)), then:
 
+Generators write JSON to `local/record/<set>`. The pool files and the packed
+sets the test reads live in `local/traces`.
+
 ```sh
-node tools/oracle/gen-slice0.js local/traces/slice0 500
-node tools/oracle/gen-slice0.js local/traces/slice0 300 1 gen9ou struggle
+mkdir -p local/record local/traces
+node tools/oracle/gen-slice0.js local/record/slice0 500
+node tools/oracle/gen-slice0.js local/record/slice0 300 1 gen9ou struggle
 cabal run -v0 engine-pool > local/traces/slice1-pool.json
-node tools/oracle/gen-slice1.js local/traces/slice1 600 local/traces/slice1-pool.json
+node tools/oracle/gen-slice1.js local/record/slice1 600 local/traces/slice1-pool.json
 cabal run -v0 engine-pool > local/traces/slice2-pool.json
-node tools/oracle/gen-slice2.js local/traces/slice2 600 local/traces/slice2-pool.json
-node tools/oracle/gen-slice2.js local/traces/slice2 300 local/traces/slice2-pool.json 1 struggle
+node tools/oracle/gen-slice2.js local/record/slice2 600 local/traces/slice2-pool.json
+node tools/oracle/gen-slice2.js local/record/slice2 300 local/traces/slice2-pool.json 1 struggle
 cabal run -v0 engine-pool > local/traces/slice3-pool.json
-node tools/oracle/gen-slice3.js local/traces/slice3 1500 local/traces/slice3-pool.json
+node tools/oracle/gen-slice3.js local/record/slice3 1500 local/traces/slice3-pool.json
 cabal run -v0 engine-pool > local/traces/slice4-pool.json
-node tools/oracle/gen-slice4.js local/traces/slice4 1500 local/traces/slice4-pool.json
+node tools/oracle/gen-slice4.js local/record/slice4 1500 local/traces/slice4-pool.json
 cabal run -v0 engine-pool > local/traces/slice5-pool.json
-node tools/oracle/gen-slice5.js local/traces/slice5 1200 local/traces/slice5-pool.json
+node tools/oracle/gen-slice5.js local/record/slice5 1200 local/traces/slice5-pool.json
 cabal run -v0 engine-pool > local/traces/slice6-pool.json
-node tools/oracle/gen-slice6.js local/traces/slice6 2500 local/traces/slice6-pool.json
+node tools/oracle/gen-slice6.js local/record/slice6 2500 local/traces/slice6-pool.json
+for x in a b c d e f; do
+  n=1000; [ $x = d ] && n=600; [ $x = f ] && n=2000
+  cabal run -v0 engine-pool > local/traces/slice7$x-pool.json
+  node tools/oracle/gen-slice7$x.js local/record/slice7$x $n local/traces/slice7$x-pool.json
+done
+for d in local/record/*/; do
+  cabal run -v0 trace-pack -- pack "$d" "local/traces/$(basename "$d")" --jobs 4
+done
 cabal test parity --test-show-details=direct
 ```
+
+The parity test also reads a JSON set directly
+(`POKESIM_TRACES=local/record`). After packing, `local/record` can be
+deleted.
 
 ## Layout
 

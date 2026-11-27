@@ -79,9 +79,14 @@ back to `local/showdown`.
 
 ### Recording traces
 
+Generators write JSON to `local/record/<set>`. The pool files and the packed
+sets live in `local/traces`, so create both first. After a set passes, pack it
+(see "Trace format v2").
+
 ```sh
-node tools/oracle/gen-slice0.js local/traces/slice0 500
-node tools/oracle/gen-slice0.js local/traces/slice0 300 1 gen9ou struggle
+mkdir -p local/record local/traces
+node tools/oracle/gen-slice0.js local/record/slice0 500
+node tools/oracle/gen-slice0.js local/record/slice0 300 1 gen9ou struggle
 ```
 
 The generator has two profiles, because random battles alone never reach some
@@ -96,7 +101,7 @@ Slice 1 takes its pool from the engine instead of computing one:
 
 ```sh
 cabal run -v0 engine-pool > local/traces/slice1-pool.json
-node tools/oracle/gen-slice1.js local/traces/slice1 600 local/traces/slice1-pool.json
+node tools/oracle/gen-slice1.js local/record/slice1 600 local/traces/slice1-pool.json
 ```
 
 `engine-pool` prints the moves and species the engine accepts. Only the
@@ -116,31 +121,31 @@ Slice 2 adds abilities and items, drawn from the pool, to the same teams:
 
 ```sh
 cabal run -v0 engine-pool > local/traces/slice2-pool.json
-node tools/oracle/gen-slice2.js local/traces/slice2 600 local/traces/slice2-pool.json
-node tools/oracle/gen-slice2.js local/traces/slice2 300 local/traces/slice2-pool.json 1 struggle
+node tools/oracle/gen-slice2.js local/record/slice2 600 local/traces/slice2-pool.json
+node tools/oracle/gen-slice2.js local/record/slice2 300 local/traces/slice2-pool.json 1 struggle
 ```
 
 Slice 3 (field state) records from the same kind of pool:
 
 ```sh
 cabal run -v0 engine-pool > local/traces/slice3-pool.json
-node tools/oracle/gen-slice3.js local/traces/slice3 1500 local/traces/slice3-pool.json
+node tools/oracle/gen-slice3.js local/record/slice3 1500 local/traces/slice3-pool.json
 ```
 
 Slice 4 (a move's own handlers) records the same way:
 
 ```sh
 cabal run -v0 engine-pool > local/traces/slice4-pool.json
-node tools/oracle/gen-slice4.js local/traces/slice4 1500 local/traces/slice4-pool.json
+node tools/oracle/gen-slice4.js local/record/slice4 1500 local/traces/slice4-pool.json
 ```
 
 Slice 5 (Terastallization) records with Tera choices offered:
 
 ```sh
 cabal run -v0 engine-pool > local/traces/slice5-pool.json
-node tools/oracle/gen-slice5.js local/traces/slice5 1200 local/traces/slice5-pool.json
+node tools/oracle/gen-slice5.js local/record/slice5 1200 local/traces/slice5-pool.json
 cabal run -v0 engine-pool > local/traces/slice6-pool.json
-node tools/oracle/gen-slice6.js local/traces/slice6 2500 local/traces/slice6-pool.json
+node tools/oracle/gen-slice6.js local/record/slice6 2500 local/traces/slice6-pool.json
 ```
 
 Slice 7 (volatile conditions) has one set per phase. Each of 7a to 7e was
@@ -153,9 +158,9 @@ for x in a b c e; do
   node tools/oracle/gen-slice7$x.js local/traces/slice7$x 1000 local/traces/slice7$x-pool.json
 done
 cabal run -v0 engine-pool > local/traces/slice7d-pool.json
-node tools/oracle/gen-slice7d.js local/traces/slice7d 600 local/traces/slice7d-pool.json
+node tools/oracle/gen-slice7d.js local/record/slice7d 600 local/traces/slice7d-pool.json
 cabal run -v0 engine-pool > local/traces/slice7f-pool.json
-node tools/oracle/gen-slice7f.js local/traces/slice7f 2000 local/traces/slice7f-pool.json
+node tools/oracle/gen-slice7f.js local/record/slice7f 2000 local/traces/slice7f-pool.json
 ```
 
 Its teams put the moves with handler code where their bodies branch: weights
@@ -240,6 +245,52 @@ Pokémon inside `state.sides[i].pokemon` are listed in Showdown's current slot
 order, which is the order `switch N` indexes. Showdown reorders slots when a
 Pokémon switches in. `orig` is the index into the original team.
 
+### Trace format v2
+
+`record.js` and the generators still write v1 JSON. Format v2 is a compact binary
+encoding of the same trace, for the parity test to read: decoding the JSON was
+35% of its run and comparing aeson values another 48%. A v2 file,
+`<name>.trace` beside the name of the JSON it came from, encodes every field
+of a v1 trace and nothing else.
+
+- **A typed model.** `test/trace/Trace.hs` (the internal library `trace`) holds
+  `Trace`, `Step` and `Snap`, which mirror `snapshot` in `record.js` field by
+  field, with exactly two sides. `fromV1 :: Value -> Either String Trace`
+  rejects any deviation from the schema (a missing or extra key, a wrong type,
+  not exactly two sides, a draw that is not three integers with lo < hi) with the
+  path of the offending value. `toV1` rebuilds the JSON.
+- **The lossless law.** `toV1 <$> fromV1 v == Right v` for every trace, by aeson
+  `Value` equality, so nulls and absent keys (`winner: null`,
+  `weatherDuration: null`, a `tera` key present or absent) come back as
+  recorded. `trace-pack pack` enforces it: for each trace it runs `fromV1` and
+  `encodeV2`, then requires `decodeV2 bytes == Right t` and `toV1 t == v`, and
+  writes the file only if both hold. A trace that fails stops the run with its
+  name and the reason, and nothing is written for it.
+- **The file.** The magic `PSTR`, a format version byte (2), then a
+  zlib-compressed body: a per-file string table (each distinct string once), then
+  the trace with strings as table indices and integers as zigzag varints. Each
+  snapshot is a delta against the previous one (the snapshot before step 0 is
+  empty, and `final` follows the last step): a Pokémon equal to the same side's
+  Pokémon with the same `orig` in the previous snapshot is a back-reference, and
+  otherwise is written in full. The field, side conditions and the rest are
+  always written in full. Teams are kept as JSON.
+- **The parity test reads either.** A set directory holds `*.json` or `*.trace`
+  traces; a set with both fails loudly. Both load into `Trace` and go through
+  the same comparison (`test/parity/Compare.hs`). Sampling is by name without the
+  extension, so the fast tier checks the same traces either way.
+
+```sh
+cabal run -v0 trace-pack -- pack local/record/slice7f local/traces/slice7f --jobs 6
+cabal run -v0 trace-pack -- unpack local/traces/slice7f/slice7f-1000.trace          # JSON on stdout
+cabal run -v0 trace-pack -- unpack local/traces/slice7f/slice7f-1000.trace out.json
+```
+
+`pack` copies every other file of the set (`*-moves.json` and the rest) unchanged,
+never modifies the source set, and writes `teams.json` in the destination: an
+array of `{"trace": name, "teams": teams}` in name order. Both benchmarks read
+it when it is there, and otherwise the teams of the first 20 traces. `unpack`
+writes the v1 JSON back, for reading a trace with `jq`.
+
 ### Exporting data
 
 ```sh
@@ -268,15 +319,19 @@ the pool checks always cover every set. `long`, the default when the variable
 is unset, replays every trace. The summary line names the tier and the sampled
 and total counts for each set.
 
-The test reads trace sets from `$POKESIM_TRACES`, defaulting to `local/traces`.
+The test reads trace sets from `$POKESIM_TRACES`, defaulting to `local/traces`,
+the packed corpus. Generators write JSON to `local/record/<set>`, which the test
+also reads (`POKESIM_TRACES=local/record`) until the set is packed; see "Trace
+format v2".
 Each subdirectory is one set, such as `slice0` or `slice1`. Plain files there,
 such as the pool file, are ignored. It fails if there are no sets or a set has
 no traces.
 
 Besides replaying each trace, it checks that:
 
-- every draw is three integers with a non-empty range;
-- the trace is version 1, format `gen9ou`, with two sides in every snapshot;
+- every draw is three integers with a non-empty range, and every snapshot has
+  two sides (both enforced when the trace loads);
+- the trace is version 1, format `gen9ou`;
 - every snapshot field the engine does not model holds its default value, so a
   trace that uses a mechanic outside the current slice fails loudly;
 - each set's `<set>-moves.json` and `<set>-species.json`, written by its
@@ -288,7 +343,8 @@ Besides replaying each trace, it checks that:
 ## Debugging a divergence
 
 1. Read the failure: it names the trace, the step, the first differing field
-   and the draw index.
+   and the draw index. For a packed trace, `trace-pack unpack FILE.trace` writes
+   the v1 JSON to read with `jq`.
 2. A range mismatch means the engine made a draw Showdown did not, or skipped
    one. A state mismatch with matching draws means the arithmetic or the
    bookkeeping differs.
