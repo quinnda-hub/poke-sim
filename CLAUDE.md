@@ -12,13 +12,20 @@ correct, fast simulator first, and no bot work until it exists.
 - Fast tests, for normal development:
   `POKESIM_TIER=fast cabal test --test-show-details=direct`. It replays every
   10th trace of each set, checks the trace pools in full, and runs the
-  hedgehog properties at 100 tests each, in about 10 s.
+  hedgehog properties at 100 tests each.
 - Long tests, before a PR merges into main: `cabal test --test-show-details=direct`.
-  It replays every trace and runs the properties at 2000 tests each, in about
-  190 s. With `POKESIM_TIER` unset the tier is long, so the default is never the
+  It replays every trace and runs the properties at 2000 tests each. With
+  `POKESIM_TIER` unset the tier is long, so the default is never the
   weaker run. Parity checks traces on several threads, by default half the
   processors and at most 8; set `POKESIM_JOBS` to change that (each thread
   takes about 150 MB).
+- Test timings, wall clock after a build, at 9,000 traces (measured 2026-11-27).
+  Check `hostname` before you compare a run against them:
+
+  | Machine | CPU | Parity threads | Fast | Long |
+  | --- | --- | --- | --- | --- |
+  | `banana` (workstation) | Core Ultra 7 265K, pinned to P-cores 0-7 under `nice` | 8 | about 7 s | about 62 s |
+  | `blueberry` (laptop) | i7-10710U, 12 threads | 6 | about 10 s | about 190 s |
 - Parity test only: `cabal test parity --test-show-details=direct`. It honours
   `POKESIM_TIER`.
 - Benchmark: `cabal bench` (teams from `POKESIM_TRACES`, default
