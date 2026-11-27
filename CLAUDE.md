@@ -25,7 +25,7 @@ correct, fast simulator first, and no bot work until it exists.
 
   | Machine | CPU | Traces | Parity threads | Fast | Long |
   | --- | --- | --- | --- | --- | --- |
-  | `banana` (workstation) | Core Ultra 7 265K, pinned to P-cores 0-7 under `nice` | 23,800 packed | 4 (measured beside another job) | about 10 s | about 100 s |
+  | `banana` (workstation) | Core Ultra 7 265K, pinned to P-cores 0-7 under `nice` | 23,800 packed | 8 | 10 to 18 s (the coverage checks stop when decided) | about 50 s |
   | `blueberry` (laptop) | i7-10710U, 12 threads | 9,000 JSON (before trace format v2) | 6 | about 10 s | about 190 s |
 - Parity test only: `cabal test parity --test-show-details=direct`. It honours
   `POKESIM_TIER`.
