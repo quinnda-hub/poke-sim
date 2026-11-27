@@ -397,13 +397,13 @@ moveBodies name = case name of
   "painsplit" -> Just [(POwn, EvHit, BNative NPainSplitHit)]
   -- Slice 4c. rapidspin (14699), mortalspin (12324): onAfterHit removes Leech Seed and the user's hazards and trapping;
   -- onAfterSubDamage does the same only while the user has HP, where a hit landed on a Substitute
-  "rapidspin" -> Just [(POwn, EvAfterHit, BNative NHazardSweepAfterHit), (POwn, EvAfterSubDamage, BNative NInertAfterSubDamage)]
-  "mortalspin" -> Just [(POwn, EvAfterHit, BNative NHazardSweepAfterHit), (POwn, EvAfterSubDamage, BNative NInertAfterSubDamage)]
+  "rapidspin" -> Just [(POwn, EvAfterHit, BNative NHazardSweepAfterHit), (POwn, EvAfterSubDamage, BNative NAfterSubDamage)]
+  "mortalspin" -> Just [(POwn, EvAfterHit, BNative NHazardSweepAfterHit), (POwn, EvAfterSubDamage, BNative NAfterSubDamage)]
   -- icespinner (9422): onAfterHit clears the terrain
-  "icespinner" -> Just [(POwn, EvAfterHit, BNative NIceSpinnerAfterHit), (POwn, EvAfterSubDamage, BNative NInertAfterSubDamage)]
+  "icespinner" -> Just [(POwn, EvAfterHit, BNative NIceSpinnerAfterHit), (POwn, EvAfterSubDamage, BNative NAfterSubDamage)]
   -- ceaselessedge (2223), stoneaxe (18076): onAfterHit sets Spikes / Stealth Rock on the foe's side
-  "ceaselessedge" -> Just [(POwn, EvAfterHit, BNative NCeaselessEdgeAfterHit), (POwn, EvAfterSubDamage, BNative NInertAfterSubDamage)]
-  "stoneaxe" -> Just [(POwn, EvAfterHit, BNative NStoneAxeAfterHit), (POwn, EvAfterSubDamage, BNative NInertAfterSubDamage)]
+  "ceaselessedge" -> Just [(POwn, EvAfterHit, BNative NCeaselessEdgeAfterHit), (POwn, EvAfterSubDamage, BNative NAfterSubDamage)]
+  "stoneaxe" -> Just [(POwn, EvAfterHit, BNative NStoneAxeAfterHit), (POwn, EvAfterSubDamage, BNative NAfterSubDamage)]
   -- defog (3450), tidyup (19632), clearsmog (2557): onHit
   "defog" -> Just [(POwn, EvHit, BNative NDefogHit)]
   "tidyup" -> Just [(POwn, EvHit, BNative NTidyUpHit)]
@@ -442,6 +442,8 @@ moveBodies name = case name of
   -- slice 7d. suckerpunch (18403), thunderclap (19504): onTry reads queue.willMove(target)
   "suckerpunch" -> Just [(POwn, EvTry, BNative NSuckerPunchTry)]
   "thunderclap" -> Just [(POwn, EvTry, BNative NSuckerPunchTry)]
+  -- slice 7b. substitute (18311): onTryHit fails it, onHit pays the quarter (its volatile is added just before, runMoveEffects)
+  "substitute" -> Just [(POwn, EvTryHit, BNative NSubstituteTryHit), (POwn, EvHit, BNative NSubstituteHit)]
   _ -> Nothing
   where
     -- slice 7a: the handlers the four moves share

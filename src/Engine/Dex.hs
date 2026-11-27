@@ -445,6 +445,7 @@ conditionFor conditionsV abilitiesV movesV c = do
       -- slice 7c
       CEncore -> Just "encore"
       CTaunt -> Just "taunt"
+      CSubstitute -> Just "substitute" -- slice 7b
       _ -> Nothing
 
 -- | A move's field condition by key, if the engine runs it ('Engine.Rule.CondLookup').

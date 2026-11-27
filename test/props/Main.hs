@@ -58,12 +58,18 @@ main = do
   conditionsJson <- eitherDecodeFileStrict' (dexDir </> "conditions.json") >>= either die pure
   abilitiesJson <- eitherDecodeFileStrict' (dexDir </> "abilities.json") >>= either die pure
   let n = if tier == ("fast" :: String) then 100 else 2000 :: Int
-  putStrLn ("props: tier " ++ tier ++ ", " ++ show n ++ " tests per property")
+      -- the properties with `cover` thresholds on rare events (a few percent of playouts): 100 cases leave a threshold short by chance
+      -- often enough to fail a run, so the fast tier runs these for more cases (slice 7). The long tier runs them at n.
+      nCover = if tier == ("fast" :: String) then 400 else n
+  putStrLn ("props: tier " ++ tier ++ ", " ++ show n ++ " tests per property (" ++ show nCover ++ " for the playouts with coverage thresholds)")
   H.defaultMain
     [ checkSequential $ Group "engine"
         [ ("random playouts keep the decision-point and state invariants", withTests (fromIntegral n) (playouts dex))
         , ("random playouts over teams heavy in self-switch moves, Rocky Helmet, Shedinja, Regenerator, Natural Cure, Eject Button, Red Card and Eject Pack keep the invariants, switch flags and mid-turn requests included",
-            withTests (fromIntegral n) (pivotPlayouts dex))
+            withTests (fromIntegral nCover) (pivotPlayouts dex))
+        -- slice 7b
+        , ("Substitute: a successful use costs exactly a quarter of the maximum HP and leaves a substitute of that size; a failed one changes nothing",
+            withTests (fromIntegral nCover) (substituteCost dex))
         , ("bad input is rejected without draws", withTests (fromIntegral n) (badInput dex))
         , ("every move translates to Right or Left and supported moves are executable",
             withTests 1 (translation dex movesJson))
@@ -151,9 +157,54 @@ pivotPlayouts dex = property $ do
       -- slice 7c
       cover 10 "a move request came with an active Pokemon encored" (seenEncore seen > 0)
       cover 10 "a move request came with an active Pokemon taunted" (seenTaunt seen > 0)
+      -- slice 7b: a Pokemon that had no Substitute has one after the step, and a substitute that was hit stays or breaks
+      cover 10 "a Substitute was made" (seenSub seen > 0)
+      cover 2 "a Substitute was hit" (seenSubHit seen > 0)
       case request b of
         Finished _ -> success
         Awaiting {} -> footnote "playout ended without a result" >> failure
+
+-- | ESCAPE HATCH: substitute (slice 7b). A Pokemon that uses Substitute with the foe switching (so that nothing else hits it) loses
+-- exactly @floor(maxhp / 4)@ and has a substitute with that HP, or, when the move fails (it has one already, its HP is at most a quarter
+-- of the maximum, or its maximum is 1), nothing changes. The rest of the turn must not touch its HP: no status, no weather or terrain at
+-- the end of the step (set by the replacement's ability), no residual-healing or residual-damage item, and it stays in play.
+substituteCost :: Dex -> Property
+substituteCost dex = property $ do
+  (t1, t2) <- forAll (genPivotTeams dex)
+  seed <- forAll (Gen.word64 Range.linearBounded)
+  k <- forAll (Gen.int (Range.linear 0 40))
+  let reached = fst (runSample (mkSMGen seed) (startBattle dex t1 t2 >>= advanceWhile dex k (const True)))
+  b <- evalEither reached
+  case request b of
+    Awaiting MoveRequest True True -> do
+      p <- forAll (Gen.element [P1, P2])
+      let foe = if p == P1 then P2 else P1
+          m = monOf b (activeActor p b)
+          moveId j = [mvId (dxMoves dex V.! msMove ms) | Just ms <- [monMoves m SV.!? (j - 1)]]
+          -- (a Move choice is Struggle, not the move in that slot, when every move is disabled or out of PP, as for a Substitute user that
+          -- is Taunted (slice 7c): Struggle's recoil is a quarter of the maximum HP too, so only a slot that is usable counts)
+          usable j = maybe False (\ms -> not (msDisabled ms) && msPP ms > 0) (monMoves m SV.!? (j - 1))
+          subChoices = [c | c@(Move j) <- legalChoices b p, moveId j == ["substitute"], usable j]
+          switches = [c | c@(Switch _) <- legalChoices b foe]
+          residualItem = itemId dex (monItem m) `elem` ["leftovers", "blacksludge", "flameorb", "toxicorb"]
+          hasSub x = any (\(Volatile i _) -> i == fromEnum CSubstitute) (SV.toList (monVolatiles x))
+      case (subChoices, switches) of
+        (c : _, sw : _) | monStatus m == StatusNone, not residualItem -> do
+          let cs = if p == P1 then (Just c, Just sw) else (Just sw, Just c)
+          b' <- evalEither (either (Left . show) Right (fst (runSample (mkSMGen seed) (step dex b cs))))
+          let m' = monOf b' (activeActor p b')
+              -- (a weather or terrain that was up before the step and ended at its Residual still hurt or healed the user there:
+              -- Grassy Terrain's heal, a sandstorm's chip: so none may be up before the step either)
+              fieldQuiet = all (\x -> fWeather (bField x) == noCond && fTerrain (bField x) == noCond) [b, b']
+              q = monMaxHp m `quot` 4
+              works = not (hasSub m) && 4 * monHp m > monMaxHp m && monMaxHp m /= 1
+              subHp = [esA st | Volatile i st <- SV.toList (monVolatiles m'), i == fromEnum CSubstitute]
+          cover 1 "a Substitute was tried in isolation" True
+          if fieldQuiet && monActive m' && monHp m' > 0
+            then if works then (monHp m' === monHp m - q) >> (subHp === [q]) else (monHp m' === monHp m) >> (hasSub m' === hasSub m)
+            else success
+        _ -> success
+    _ -> success
 
 data BadKind = Illegal | Missing | Unexpected
   deriving (Eq, Show, Enum, Bounded)
@@ -373,6 +424,7 @@ conditionsSupported dex conditionsV abilitiesV movesV = withTests 1 $ property $
         -- slice 7c
         CEncore -> lookupKey "condition" (lookupKey "encore" movesV)
         CTaunt -> lookupKey "condition" (lookupKey "taunt" movesV)
+        CSubstitute -> lookupKey "condition" (lookupKey "substitute" movesV) -- slice 7b
         _ -> lookupKey (condName c) conditionsV
       abilityCondition name = lookupKey "condition" (lookupKey name abilitiesV)
       lookupKey k v = case v of

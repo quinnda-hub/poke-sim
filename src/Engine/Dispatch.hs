@@ -27,6 +27,11 @@ module Engine.Dispatch
   , moveTryImmunity
   , moveTryHit
   , moveAfterHit
+  -- slice 7b
+  , moveStatusTryHit
+  , moveAfterSubDamage
+  , monSubstituteHp
+  , removeVolatile
   , moveFieldHit
   , basePowerCallback
   , damageCallback
@@ -1308,14 +1313,30 @@ runNative dx n c relay = do
     -- roost.onStart(target): `if (target.terastallized) { ...; return false }`, else only a message
     NRoostStart -> if monTerastallized m then returning stop else keep
     NRoostType -> keep
+    -- slice 7b: substitute's move bodies are run by 'moveStatusTryHit' and 'moveOwnHit'
+    NSubstituteTryHit -> keep
+    NSubstituteHit -> keep
+    -- substitute.condition.onStart(target, source, effect): `this.effectState.hp = Math.floor(target.maxhp / 4)` (the state's 'esA'); the
+    -- partiallytrapped clause is LATENT: no trapping move is supported.
+    NSubstituteStart -> do
+      modify' (modifyMon holder (\x -> x {monVolatiles = SV.map (\v@(Volatile j st) -> if j == fromEnum CSubstitute then Volatile j st {esA = monMaxHp x `quot` 4} else v) (monVolatiles x)}))
+      keep
+    -- ESCAPE HATCH: substitute. condition.onTryPrimaryHit(target, source, move) (data/moves.ts 18348-18381), the test:
+    -- `if (target === source || move.flags['bypasssub'] || move.infiltrates) return;` (infiltrates: LATENT, no supported effect sets it).
+    -- Otherwise the damage is worked out where getDamage lives ('Engine.Turn.hitSubstitute'): a damaging move's hit goes to the
+    -- Substitute (HIT_SUBSTITUTE, 0: RInt 0), a move with no base power finds `getDamage` undefined and fails (`-fail`, null: RBool False).
+    NSubstituteTryPrimaryHit -> case (cMove c, cSource c) of
+      (Just mv, Just src)
+        | src /= holder, not (mrBypassSub (mvRule mv)) -> returning (Replace (if mvStatus mv then RBool False else RInt 0))
+      _ -> keep
     -- slice 4c: the moves' own bodies are run by 'moveAfterHit', 'moveOwnHit', 'moveFieldHit', 'moveTryHit', 'moveTry' and
     -- 'singleMoveEvent', each at its own call site
     NHazardSweepAfterHit -> keep
     NIceSpinnerAfterHit -> keep
     NCeaselessEdgeAfterHit -> keep
     NStoneAxeAfterHit -> keep
-    -- LATENT: Showdown runs onAfterSubDamage where a hit lands on a Substitute; Substitute is not supported, so this never runs
-    NInertAfterSubDamage -> keep
+    -- the move's own onAfterSubDamage: run by 'moveAfterSubDamage'
+    NAfterSubDamage -> keep
     NDefogHit -> keep
     NTidyUpHit -> keep
     NClearSmogHit -> keep
@@ -2092,6 +2113,13 @@ moveOwnHit dx user target mv = case moveSpec mv POwn EvHit >>= hsBody of
   Just (BNative NPartingShotHit) -> do
     boosted <- boostMon dx (Just user) (Just mv) target [(BAtk, -1), (BSpa, -1)]
     pure (HitOk, if boosted then mv else mv {mvSelfSwitch = False})
+  -- ESCAPE HATCH: substitute (slice 7b). `volatileStatus: 'substitute'` is added by runMoveEffects (1316) before the move's onHit ('statusMove',
+  -- [EOwnVolatile, EOwnHit]): the volatile's onStart sets the hp. Then substitute.onHit(target): `this.directDamage(target.maxhp / 4)`: floor,
+  -- at least 1, with no Damage event (battle.ts 2216-2240: directDamage never runs spreadDamage). onTryHit has kept a user at or under a quarter
+  -- of its HP (and a Shedinja) out of here.
+  Just (BNative NSubstituteHit) -> do
+    modify' (\b -> let t = monOf b target in applyDamage target (max 1 (monMaxHp t `quot` 4)) b)
+    pure (HitOk, mv)
   _ -> (\r -> (r, mv)) <$> moveOwnHitResult dx user target mv
 
 -- | The result of a move's @onHit@ body, for every body that changes nothing in the move in use.
@@ -2145,10 +2173,12 @@ moveOwnHitResult dx user target mv = case moveSpec mv POwn EvHit >>= hsBody of
       -- Substitute), then the target's side loses its screens, Safeguard, Mist and hazards (only a hazard counts as a success),
       -- then the user's side its hazards, then `this.field.clearTerrain()`; the result is `success`, so the move fails only when
       -- nothing happened (Clear Terrain never counts)
-      -- LATENT: Substitute (`!target.volatiles['substitute'] || move.infiltrates` gates the drop), Safeguard, Mist and G-Max Steelsurge
-      -- are not modelled: the removals act only on the conditions the state can hold.
+      -- LATENT: Safeguard, Mist and G-Max Steelsurge (and `move.infiltrates`) are not modelled: the removals act only on the
+      -- conditions the state can hold.
       NDefogHit -> do
-        boosted <- boostMon dx (Just user) (Just mv) target [(BEvasion, -1)]
+        -- `if (!target.volatiles['substitute'] || move.infiltrates) success = !!this.boost({ evasion: -1 })` (slice 7b; infiltrates: LATENT)
+        behindSub <- gets (\bb -> isJust (monSubstituteHp (monOf bb target)))
+        boosted <- if behindSub then pure False else boostMon dx (Just user) (Just mv) target [(BEvasion, -1)]
         let tp = playerOf target
             up = playerOf user
         onTarget <- forM (defogTargetOnly ++ hazards) $ \name -> do
@@ -2157,14 +2187,16 @@ moveOwnHitResult dx user target mv = case moveSpec mv POwn EvHit >>= hsBody of
         onUser <- mapM (removeNamedSide dx up) hazards
         clearTerrain dx
         pure (if boosted || or onTarget || or onUser then HitOk else HitFail)
-      -- tidyup.onHit(pokemon): every active Substitute goes (LATENT: not modelled), then the hazards of the user's side and of the
-      -- foe's (`[pokemon.side, ...foeSidesWithConditions()]`), then `!!this.boost({atk: 1, spe: 1}, pokemon, pokemon, null, false,
-      -- true) || success`
+      -- tidyup.onHit(pokemon): every active Substitute goes (`removeVolatile('substitute')`: a Pokemon with HP; a success), then the
+      -- hazards of the user's side and of the foe's (`[pokemon.side, ...foeSidesWithConditions()]`), then `!!this.boost({atk: 1,
+      -- spe: 1}, pokemon, pokemon, null, false, true) || success`
       NTidyUpHit -> do
+        subs <- gets (\bb -> [a | a <- getAllActive False bb, isJust (monSubstituteHp (monOf bb a))])
+        forM_ subs (\a -> modify' (modifyMon a (removeVolatile (fromEnum CSubstitute))))
         let up = playerOf target
         removed <- forM [up, other up] $ \p -> or <$> mapM (removeNamedSide dx p) hazards
         boosted <- boostMon dx (Just user) (Just mv) target [(BAtk, 1), (BSpe, 1)]
-        pure (if boosted || or removed then HitOk else HitFail)
+        pure (if boosted || or removed || not (null subs) then HitOk else HitFail)
       -- trick, switcheroo .onHit(target, source, move): `yourItem = target.takeItem(source)`, `myItem = source.takeItem()` (both
       -- always run, in that order, whatever the first returned). A refusal (`false`), or no item on either side, puts the
       -- items back (`target.item = yourItem.id`, a plain assignment) and fails the move. Then each item's own TakeItem is
@@ -2306,7 +2338,8 @@ moveTryImmunity dx target mv = case moveSpec mv POwn EvTryImmunity >>= hsBody of
 -- each @spreadMoveHit@. Brick Break, Psychic Fangs and Raging Bull shatter the target's screens here, before the damage is
 -- worked out, and so before the hit steps that follow (`will shatter screens through sub, before you hit`). The others (Low Kick's
 -- Dynamax check) change nothing here.
--- LATENT: the comment says "through sub": Substitute is not modelled, so the removal never has to act past one.
+-- The comment says "through sub": this event runs before the Substitute's @TryPrimaryHit@ (slice 7b), so the screens go even when the
+-- hit lands on a Substitute.
 moveTryHit :: MonadChance m => Dex -> Actor -> Actor -> MoveData -> Eng m ()
 moveTryHit dx user target mv = do
   void (singleMoveEvent dx EvTryHit target (Just user) mv)
@@ -2314,6 +2347,33 @@ moveTryHit dx user target mv = do
     Just (BNative NScreenBreakTryHit) ->
       forM_ ["reflect", "lightscreen", "auroraveil"] (void . removeNamedSide dx (playerOf target))
     _ -> pure ()
+
+-- | The HP of the target's Substitute (the state's 'esA'), if it has one: @target.volatiles['substitute'].hp@.
+monSubstituteHp :: Mon -> Maybe Int
+monSubstituteHp m = esA <$> effectState m (EffectKey EffVolatile (fromEnum CSubstitute))
+
+-- | @singleEvent('TryHit', moveData, {}, target, pokemon, move)@ (battle-actions.ts 1102) of a status move's hit: the move's own
+-- @onTryHit@, whose falsy result ends the move (`return [[false], targets]`). Substitute's (data/moves.ts 18321-18330): a user with a
+-- Substitute already, or with `hp <= maxhp / 4` (exact: `4 * hp <= maxhp`), or a maximum of 1 (Shedinja), fails (NOT_FAIL, and `-fail`).
+moveStatusTryHit :: Monad m => Dex -> Actor -> MoveData -> Eng m Bool
+moveStatusTryHit _ user mv = case moveSpec mv POwn EvTryHit >>= hsBody of
+  Just (BNative NSubstituteTryHit) ->
+    gets (\b -> let m = monOf b user in not (isJust (monSubstituteHp m)) && 4 * monHp m > monMaxHp m && monMaxHp m /= 1)
+  _ -> pure True
+
+-- | @singleEvent('AfterSubDamage', move, null, target, source, move, damage)@ then @runEvent('AfterSubDamage', target, source, move,
+-- damage)@ (data/moves.ts 18375-18376), where a hit landed on a Substitute. The move's own @onAfterSubDamage@ of Rapid Spin, Mortal
+-- Spin, Ice Spinner, Ceaseless Edge and Stone Axe is its @onAfterHit@ behind a guard on the user's HP (`source.hp`, each time), so the
+-- bodies are the same ('moveAfterHit'). No supported item or ability listens to the event (Air Balloon does not exist here); it runs for
+-- its sort, which draws nothing.
+moveAfterSubDamage :: MonadChance m => Dex -> Actor -> Actor -> MoveData -> Int -> Eng m ()
+moveAfterSubDamage dx user target mv dmg = do
+  case moveSpec mv POwn EvAfterSubDamage >>= hsBody of
+    Just (BNative NAfterSubDamage) -> do
+      alive <- gets (\b -> monHp (monOf b user) > 0)
+      when alive (moveAfterHit dx user target mv)
+    _ -> pure ()
+  void (runEvent dx EvAfterSubDamage target (Just user) (Just mv) (RInt dmg))
 
 -- | @singleEvent('AfterHit', moveData, {}, target, pokemon, move)@ (battle-actions.ts 1186) for one damaged target: the move's own
 -- @onAfterHit@, run after @DamagingHit@ and only while the user has HP (1184; the caller checks). Its event has the hit target as
