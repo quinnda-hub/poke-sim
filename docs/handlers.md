@@ -1926,7 +1926,7 @@ native handlers in `Engine.Effects` and `Engine.Dispatch`.
 
 **New events**, each at Showdown's call site:
 - `AfterSetStatus` (pokemon.ts 1768), run by `trySetStatusFx` after the status and its `Start` are in place. The relay is the status id.
-- `AfterFaint` (battle.ts 2654-2656), run by `resolveFaintsBy` after the win check and only if a faint was processed. The relay is the
+- `AfterFaint` (battle.ts 2654-2656), run by `resolveFaints` after the win check and only if a faint was processed. The relay is the
   length of the faint queue.
 - `ModifySecondaries` (battle-actions.ts 1401), run in `hitEffects` once per hit before the secondary draws. The relay is the secondary
   list, a new `Relay` constructor `RSecondaries`. Shield Dust keeps only the secondaries with a `self` effect, so it removes their draws.
@@ -1940,13 +1940,12 @@ native handlers in `Engine.Effects` and `Engine.Dispatch`.
   reads it. Berserk needs the total, and for a single hit it equals `getLastAttackedBy().damage`.
 - `Dex.effectFor` skips Berserk's `onTryEatItem`, as it does Natural Cure's `onCheckShow`: no berry is supported, so it has no caller.
 
-**Deviation: the faint queue has no source or effect.** Showdown keeps `{target, source, effect}` per entry, and `AfterFaint` gets the last
-entry's. `bFaintQueue` holds only the Pokemon, and changing it is a state change, so I did not. `resolveFaintsBy dx (Just user)` is called
-where a move resolves its own faints (after the hit loop, after a status move, at the end of `runMove`). A queued foe of the user then
-fainted of the move, so the event carries the user and `moveCause`. Every other call has no source. A first version read `bActiveMove`
-instead and was wrong: a Dragon Tail drags in a Pokemon that Spikes then faints, inside the move (battle.ts 2866-2873), and the faint is
-resolved while the move is still active (trace seed 182). If the lead wants the source stored with the entry, the three call sites and
-`resolveFaintsBy` are the only places to change.
+**The faint queue holds the source and effect (lead decision).** `bFaintQueue` is a vector of `FaintEntry {feTarget, feSource, feEffect}`,
+as Showdown's `{target, source, effect}` (battle.ts 137-142), pushed by `applyDamage target source effect` (`pokemon.faint(source, effect)`,
+pokemon.ts 1603) with Showdown's dedupe. `damageMon` passes its source and cause; the Struggle recoil passes the user and `EffRecoil`; the
+Substitute's cost the user and the move. `resolveFaints` runs `AfterFaint` with the last entry's target, source and effect, and the length
+of the queue. A first version inferred the source from `bActiveMove` and was wrong (seed 182: a Dragon Tail drags in a Pokemon that Spikes
+faints inside the move). `checkBattle` checks that the queue is empty at every decision point.
 
 **Surprises, from the Showdown source:**
 - Flame Body, Static and Toxic Chain draw `randomChance(3, 10)` for every qualifying hit, whatever the attacker's state. Only the

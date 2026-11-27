@@ -602,6 +602,8 @@ checkBattle dx b = do
   case bActiveMove b of
     Nothing -> Right ()
     Just mu -> Left ("a move in use at a decision point: " ++ show mu)
+  -- slice 8d: the faint queue is resolved by the action tail, so it is empty at every decision point
+  if SV.null (bFaintQueue b) then Right () else Left ("a faint queue at a decision point: " ++ show (bFaintQueue b))
   conditions
   choiceLocks
   disableRules

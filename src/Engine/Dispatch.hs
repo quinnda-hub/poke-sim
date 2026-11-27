@@ -63,8 +63,6 @@ module Engine.Dispatch
   , trySetStatusFx
   , clearStatus
   , resolveFaints
-  -- slice 8d
-  , resolveFaintsBy
   , endAbilityAndItem
   , checkWin
   , win
@@ -2562,7 +2560,7 @@ moveOwnHit dx user target mv = case moveSpec mv POwn EvHit >>= hsBody of
   -- at least 1, with no Damage event (battle.ts 2216-2240: directDamage never runs spreadDamage). onTryHit has kept a user at or under a quarter
   -- of its HP (and a Shedinja) out of here.
   Just (BNative NSubstituteHit) -> do
-    modify' (\b -> let t = monOf b target in applyDamage target (max 1 (monMaxHp t `quot` 4)) b)
+    modify' (\b -> let t = monOf b target in applyDamage target (Just user) moveCause (max 1 (monMaxHp t `quot` 4)) b)
     pure (HitOk, mv)
   _ -> (\r -> (r, mv)) <$> moveOwnHitResult dx user target mv
 
@@ -3090,16 +3088,17 @@ damageMon dx target source mv cause amount0 = do
                 Just v -> do
                   let requested = if v == 0 then 0 else max 1 v
                       dealt = min requested (monHp m)
-                  modify' (applyDamage target requested)
+                  modify' (applyDamage target source cause requested)
                   pure (Just dealt)
 
--- | @Pokemon.damage@ / @faint@: reduce HP and queue the faint when it reaches zero.
-applyDamage :: Actor -> Int -> Battle -> Battle
-applyDamage a d b
+-- | @Pokemon.damage(d, source, effect)@ / @faint(source, effect)@: reduce HP and queue the faint, with that source and effect, when it reaches zero
+-- (a Pokemon already fainted or queued is not queued again, pokemon.ts 1604).
+applyDamage :: Actor -> Maybe Actor -> Maybe EffectKey -> Int -> Battle -> Battle
+applyDamage a src eff d b
   | monHp m <= 0 || d <= 0 = b
   | monHp m - d <= 0 =
       (modifyMon a (\x -> x {monHp = 0, monSwitchFlag = NoSwitch, monFaintQueued = True}) b)
-        {bFaintQueue = if monFainted m || monFaintQueued m then bFaintQueue b else SV.snoc (bFaintQueue b) a}
+        {bFaintQueue = if monFainted m || monFaintQueued m then bFaintQueue b else SV.snoc (bFaintQueue b) (FaintEntry a src eff)}
   | otherwise = modifyMon a (\x -> x {monHp = monHp x - d}) b
   where
     m = monOf b a
@@ -3107,23 +3106,13 @@ applyDamage a d b
 -- | @battle.resolveFaints@ (battle.ts), gen 5+ path without events: faint everything in the faint
 -- queue, then optionally check for a winner. Arguments: @checkWinIfNoFaints@, @checkWin@.
 resolveFaints :: MonadChance m => Dex -> Bool -> Bool -> Eng m ()
-resolveFaints dx = resolveFaintsBy dx Nothing
-
--- | 'resolveFaints' for the faints that a move's own hits queued (slice 8d): the argument is the move's user. The faint queue holds only
--- the Pokemon, not the source and effect that Showdown keeps beside each (@faint(source, effect)@), which @AfterFaint@ carries
--- (battle.ts 2654-2656). So the caller that knows the cause says it: 'Engine.Turn' calls this where the move resolves its own faints
--- (@hitStepMoveHitLoop@ after the hit loop, a status move's @spreadMoveHit@, and the end of @runMove@), and every foe of the user that
--- is in the queue then fainted of that move's damage (the source is the user, the effect the move). Every other call (a hazard's or a
--- weather's damage inside @fieldEvent@, the action tail) has no source: its faint is not a move's, as Moxie reads it.
--- LATENT: Destiny Bond, and any damage a foe takes during the move from an effect other than the move (none is supported), would
--- need the source stored with the queue entry (a change of 'bFaintQueue').
-resolveFaintsBy :: MonadChance m => Dex -> Maybe Actor -> Bool -> Bool -> Eng m ()
-resolveFaintsBy dx mover checkWinIfNoFaints checkWin' = do
+resolveFaints dx checkWinIfNoFaints checkWin' = do
   b <- get
   when (bResult b == Ongoing) $
     case SV.toList (bFaintQueue b) of
       [] -> when checkWinIfNoFaints (void (checkWin Nothing))
-      q -> do
+      entries -> do
+        let q = map feTarget entries
         -- LATENT: faints queued while this loop runs (battle.ts ~2626, which forces checkWin) need a Faint
         -- event handler (Destiny Bond, ...); nothing queues a faint here.
         forM_ q $ \a@(Actor p _) -> do
@@ -3150,12 +3139,9 @@ resolveFaintsBy dx mover checkWinIfNoFaints checkWin' = do
           _ -> pure False
         -- slice 8d, battle.ts 2652-2656: `if (checkWin && this.checkWin(faintData)) return true; if (faintData && length)
         -- this.runEvent('AfterFaint', faintData.target, faintData.source, faintData.effect, length)`. `faintData` is the last entry of the
-        -- queue and `length` the queue's length when the loop began. Its source and effect are derived (see 'resolveFaintsBy').
-        unless ended $ forM_ (lastMaybe q) $ \lastFaint -> do
-          let (src, eff) = case mover of
-                Just user | playerOf user /= playerOf lastFaint -> (Just user, moveCause)
-                _ -> (Nothing, Nothing)
-          void (runEventEff dx eff EvAfterFaint lastFaint src Nothing (RInt (length q)))
+        -- queue and `length` the queue's length when the loop began.
+        unless ended $ forM_ (lastMaybe entries) $ \fd ->
+          void (runEventEff dx (feEffect fd) EvAfterFaint (feTarget fd) (feSource fd) Nothing (RInt (length entries)))
 
 lastMaybe :: [a] -> Maybe a
 lastMaybe xs = case reverse xs of (x : _) -> Just x; [] -> Nothing

@@ -594,7 +594,7 @@ runMove fmt dx user@(Actor p _) slot = do
           void (singleMoveEvent dx EvAfterMove user (Just target) mv)
           void (runEvent dx EvAfterMove user (Just target) (Just mv) RNone)
           -- resolveFaints(); checkWin()
-          resolveFaintsBy dx (Just user) False True -- (slice 8d: as the hit loop's)
+          resolveFaints dx False True
           void (checkWin Nothing)
 
 -- | The hit steps of @trySpreadMoveHit@ (battle-actions.ts): target check, type immunity, accuracy, then the
@@ -850,7 +850,7 @@ statusMoveHit dx user tgt mv0 = do
     eachEvent dx EvUpdate -- eachEvent('Update') after the hit
     -- resolveFaints({ checkWin: !pokemon.hp }); the user is alive
     userDown <- gets (\bb -> monHp (monOf bb user) <= 0)
-    resolveFaintsBy dx (Just user) False userDown -- (slice 8d: the user's move queued any foe's faint)
+    resolveFaints dx False userDown
     eachEvent dx EvUpdate -- second eachEvent('Update')
 
 -- | The end of @runMoveEffects@ (battle-actions.ts 1369-1372): `else if (move.selfSwitch && source.hp && (this.battle.canSwitch(source.side)
@@ -925,14 +925,14 @@ afterHits dx user target mv total lastSub = do
   b <- get
   let userDown = monHp (monOf b user) <= 0
   -- gen >= 5: resolveFaints({ checkWin: !pokemon.hp })
-  resolveFaintsBy dx (Just user) False userDown -- (slice 8d: the user's move queued any foe's faint)
+  resolveFaints dx False userDown
   -- applyRecoilDamage (after the loop, from move.totalDamage; battle-actions.ts ~1439)
   let um = monOf b user
   case (mvStruggleRecoil mv, mrRecoil rule) of
     -- struggleRecoil: round(baseMaxhp / 4), at least 1, as directDamage (battle-actions.ts 1449): no Damage event
     -- (slice 7b: `move.totalDamage || (move.struggleRecoil && damage.some((val, i) => val === 0 && !!targetsCopy[i]))`: a last hit on a
     -- Substitute leaves no target in targetsCopy, and its recoil was taken inside the hit ('hitSubstitute'))
-    (True, _) | not lastSub -> modify' (applyDamage user (max 1 (roundDiv (monMaxHp um) 4)))
+    (True, _) | not lastSub -> modify' (applyDamage user (Just user) (Just (EffectKey EffRecoil 0)) (max 1 (roundDiv (monMaxHp um) 4)))
     -- recoil: round(totalDamage * n / d), at least 1, as battle.damage(recoil, pokemon, pokemon, 'recoil'): the Damage event runs
     -- with the 'EffRecoil' effect (Magic Guard and Rock Head read it)
     (_, Just (n, d)) | total > 0 -> void (damageMon dx user (Just user) Nothing (Just (EffectKey EffRecoil 0)) (max 1 (roundDiv (total * n) d)))
@@ -1082,7 +1082,7 @@ hitSubstitute fmt dx user target mv = do
     else modify' (modifyMon target (\x -> x {monVolatiles = SV.map (\v@(Volatile j st) -> if j == fromEnum CSubstitute then Volatile j st {esA = left} else v) (monVolatiles x)}))
   -- `if (damage) this.actions.applyRecoilDamage(damage, move, source)`
   when (dealt > 0) $ case (mvStruggleRecoil mv, mrRecoil rule) of
-    (True, _) -> modify' (applyDamage user (max 1 (roundDiv (monMaxHp um) 4)))
+    (True, _) -> modify' (applyDamage user (Just user) (Just (EffectKey EffRecoil 0)) (max 1 (roundDiv (monMaxHp um) 4)))
     (_, Just (n, d)) -> void (damageMon dx user (Just user) Nothing (Just (EffectKey EffRecoil 0)) (max 1 (roundDiv (dealt * n) d)))
     _ -> pure ()
   -- `if (move.drain) this.heal(Math.ceil(damage * move.drain[0] / move.drain[1]), source, target, 'drain')`

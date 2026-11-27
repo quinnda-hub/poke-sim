@@ -32,6 +32,7 @@ module Engine.State
   , ActionKind (..)
   , Action (..)
   , MoveInUse (..)
+  , FaintEntry (..)
   , Battle (..)
   , takeEffectOrder
   , sideOf
@@ -49,6 +50,7 @@ module Engine.State
 import qualified Data.Vector.Strict as SV
 import qualified Data.Vector.Unboxed as U
 
+import Engine.Event (EffectKey)
 import Engine.Format (Format)
 import Engine.Rule (BoostStat (..))
 
@@ -354,6 +356,15 @@ data MoveInUse = MoveInUse
   }
   deriving (Eq, Show)
 
+-- | One entry of @battle.faintQueue@ (battle.ts 137-142): the Pokemon that fainted, and the source and effect that @faint(source, effect)@ was
+-- given (pokemon.ts 1603). @AfterFaint@ reads the last entry's.
+data FaintEntry = FaintEntry
+  { feTarget :: !Actor
+  , feSource :: !(Maybe Actor)
+  , feEffect :: !(Maybe EffectKey)
+  }
+  deriving (Eq, Show)
+
 data Battle = Battle
   { bFormat :: !Format
   , bTurn :: !Int
@@ -361,7 +372,8 @@ data Battle = Battle
   , bResult :: !Result
   , bMidTurn :: !Bool
   , bQueue :: !(SV.Vector Action)
-  , bFaintQueue :: !(SV.Vector Actor)
+  , bFaintQueue :: !(SV.Vector FaintEntry)
+  -- ^ @battle.faintQueue@: each entry is Showdown's @{target, source, effect}@, pushed by @pokemon.faint(source, effect)@ (slice 8d).
   , bActiveMove :: !(Maybe MoveInUse)
   -- ^ @battle.activeMove@ with @battle.activePokemon@: transient, 'Nothing' at every decision point (a property checks it).
   , bSpeedOrder :: !(U.Vector Int)
