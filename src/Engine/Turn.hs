@@ -677,7 +677,7 @@ useMoveWith fmt dx user target mv = case mrTarget rule of
         hits <- if mvAccuracy mv == neverMisses || (isToxic && hasTypeNamed dx "Poison" um) then pure True
           -- `if (!move.ignoreEvasion)` the target's evasion stage joins the accuracy stage (battle-actions.ts 785-788)
           else randomChance (stagedAccuracy fmt (mvAccuracy mv) (monBoosts um)
-                 (if mrIgnoreEvasion rule then (monBoosts tm) {bsEvasion = 0} else monBoosts tm)) 100
+                 (if mrIgnoreEvasion rule || mvIgnoreEvasion mv then (monBoosts tm) {bsEvasion = 0} else monBoosts tm)) 100
         when hits $
           if mrDamaging rule
             then do

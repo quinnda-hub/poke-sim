@@ -218,4 +218,6 @@ buildMon fmt dx s = do
     , monVolatiles = SV.empty
     , monLastMove = -1
     , monActiveTurns = 0
+    -- slice 8a
+    , monShieldBoost = False
     }

@@ -1725,7 +1725,53 @@ Lead review (2026-11-27):
 
 ### 8a findings
 
-(To be written by phase 8a.)
+Fourteen abilities, all as native handlers on events that already exist (no new event, rule kind or state beyond
+`monShieldBoost`). Set: `slice8a`, 1,000 battles (706 scripted, 256 of those cut short where a faint asked for a switch), generated
+by `tools/oracle/gen-slice8a.js`.
+
+- **The boost abilities.** A handler reads the boost's effect as `cEffect` and its source as `cSource`; each `this.boost(...)` it makes
+  passes the arguments Showdown fills from `this.event`.
+  - Intimidate passes its own ability key. Guard Dog and Inner Focus recognise it by `abilityId` (`effect.name === 'Intimidate'`).
+    A foe with a Substitute is skipped before `boost` runs (`-immune`). The foe is the opposing active Pokemon with HP (`side.foes()`).
+  - Defiant (`onAfterEachBoost`): acts only when the source is on the other side. A self-drop (source = target) and a drop with no
+    source do nothing. Its +2 is a self boost, so it runs the same events (Contrary flips it).
+  - Contrary (`onChangeBoost`) negates every entry. Clear Body, Big Pecks and Keen Eye delete negative entries (Big Pecks only Defense,
+    Keen Eye only accuracy) unless `source === target`. Inner Focus and Guard Dog act on an Attack drop whose effect is Intimidate.
+    Guard Dog then boosts Attack +1 (source = target, effect = Guard Dog, priority 2 so it runs first).
+  - Mirror Armor walks the table in order. A negative entry is deleted, and reflected at once onto the source if that Pokemon has HP
+    (effect = Mirror Armor, so a reflected drop is not bounced back). An entry for a stat at -6 is left in the table.
+    The reflected drop meets the source's own TryBoost (Clear Body), and its Defiant sees the Mirror Armor holder as the source.
+  - Weak Armor (Physical hit) boosts Defense -1 and Speed +2 in one call. Justified boosts Attack +1 with the attacker as source.
+    Gooey boosts the attacker's Speed -1 with the holder as source. All three pass the hit's move as the active move.
+  - Dauntless Shield sets `monShieldBoost` before it boosts. Speed Boost needs `monActiveTurns > 0`: the first residual after a switch-in
+    does nothing, the next boosts.
+- **Parting Shot with a Mirror Armor target.** `partingshot.onHit` keeps `selfSwitch` when `target.hasAbility('mirrorarmor')`. The slice 6a
+  LATENT said it always held. The first 150 traces found it (the engine ended the turn where Showdown asked for a switch). It now reads
+  `hasAbility`.
+- **Keen Eye's `ignoreEvasion`.** Its `onModifyMove` uses the base's move-edit channel: it returns `RMoveEdits (es ++ [MEIgnoreEvasion])`,
+  `es` being the edits so far, and `useMove` applies the result to the move in use. The accuracy step reads
+  `mrIgnoreEvasion rule || mvIgnoreEvasion mv`.
+- **Guard Dog's `onDragOut`** returns null. The call sites match Showdown: `forceSwitch` (battle-actions.ts 1418), `dragIn` (223, after
+  the `getRandomSwitchable` draw and the HP check) and Red Card (the attacker's ability). A falsy result sets no flag. Showdown fails a
+  Status move only for `false`, which null is not, so Roar against Guard Dog is silent. The engine never implemented that failure (LATENT in
+  `forceSwitchStep`), so nothing differs.
+- **A property changed.** The Red Card invariant of `checkStep` (slice 6c: the attacker is forced out) now excepts a Guard Dog attacker. The
+  card is still used up.
+- **Tests.**
+  - New property `statPlayouts` (pivot-heavy teams with a third of the sets on the 14 abilities and the stage-changing moves, from
+    `genStatTeams`): the invariants of `checkBattle` and `checkStep`, with covers that the abilities fire. It is a separate generator so that the
+    pivot teams' own shares do not thin out.
+  - New invariants in every playout: a set `monShieldBoost` implies Dauntless Shield as the set ability, and the flag is never reset.
+- **Traces.** The recorder's random policy sometimes picks a switch that Showdown lists and rejects ("can only switch in once": a mid-turn
+  request for a Pokemon that has just switched in, whose slot the same side chose for the turn). The generator records such a battle again
+  with the policy's next seed.
+- **Not covered.**
+  - No Dark multi-hit move is supported (Beat Up is not in the pool), so Justified against one is not tested.
+  - A Dark hit on a Substitute is not a hit for Justified (`DamagingHit` does not run). Substitute and Justified meet in random play only.
+  - `-6` and `+6` floors are reached in scripted play (Weak Armor, Mirror Armor, Contrary all have counts in the tally).
+  - Protective Pads (Gooey, `checkMoveMakesContact`) is not on the whitelist.
+- **Interactions left to later phases.** `LATENT(8b)`: Unaware. `LATENT(8f)`: Mold Breaker against the breakable abilities, including the drag-in
+  after Roar (the Roar is still the active move), and Magic Bounce against Parting Shot. Magic Bounce never meets Intimidate (an ability effect, not a move).
 
 ### 8b findings
 

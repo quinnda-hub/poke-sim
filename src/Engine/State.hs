@@ -258,7 +258,11 @@ data Mon = Mon
   -- and a faint). Encore reads it.
   , monActiveTurns :: !Int
   -- ^ @pokemon.activeTurns@ (pokemon.ts 264): 0 when the Pokemon switches in (battle-actions.ts 157), +1 at each @endTurn@ while it
-  -- is on the field and not fainted (battle.ts 1782). Taunt reads it.
+  -- is on the field and not fainted (battle.ts 1782). Taunt and Speed Boost read it.
+  -- slice 8a
+  , monShieldBoost :: !Bool
+  -- ^ @pokemon.shieldBoost@ (pokemon.ts 501-502, abilities.ts 855-856): Dauntless Shield has boosted this Pokemon. Set once and never reset,
+  -- not by a switch-out nor by a faint, so the ability fires once per battle per Pokemon.
   }
   deriving (Eq, Show)
 
