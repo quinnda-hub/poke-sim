@@ -373,6 +373,26 @@ about 0.9 ms, so its time goes into the turns, at about 1 ms per decision
 step: it runs its full event system, logging and request building on every
 turn.
 
+**Slice 7** (2026-11-27, `banana`, one P-core pinned, three interleaved
+rounds of 5 s per set; the rounds agree within 0.5%). Main at `3188c9f`
+(slice 6d) against the top of the slice 7 stack (`7d9c46e`):
+
+| Teams | Main steps/s | Slice 7 steps/s | Ratio |
+|---|---|---|---|
+| slice 5 | 80,600-80,800 | 77,200-77,500 | 0.96 |
+| slice 6 | 89,800-89,900 | 85,950-86,200 | 0.96 |
+| slice 7b | (cannot load) | 88,100-88,300 | |
+| slice 7f | (cannot load) | 76,400-76,700 | |
+
+The 4% on old teams is the new event points that Showdown runs on every
+move or hit:
+- `OverrideAction` on each move;
+- `PrepareHit` on each self-targeted move;
+- `TryPrimaryHit` and `Damage` on each hit.
+
+Slice 7f battles are longer (about 117 steps, against 86 on slice 6 teams),
+because Protect, Substitute and Encore stall.
+
 ## Known gaps in slice 0
 
 - **The 1000-turn tie is implemented but never exercised.** No recorded battle
@@ -426,12 +446,18 @@ Gen 9 OU battles simulated sooner, and each makes the later ones cheaper.
    Volt Switch, Chilly Reception, and the forced switches of Roar, Whirlwind
    and Dragon Tail. They need a switch request inside the turn, which is a
    change to the turn loop (lead-owned).
-4. **Volatile conditions.** Protect (its stall counter is a draw), Substitute,
-   Encore and Taunt, and Sucker Punch, which reads the target's queued action.
-   Substitute is the first escape hatch: a mechanic that resists the rule
-   vocabulary. The Choice items come with the `choicelock` volatile (Choice
-   Band, Specs and Scarf are not in the pool yet), and with them Knock Off,
-   Trick and Thief against a Choice item, which 4d could not record.
+4. **Volatile conditions.** Done 2026-11-27 (slices 7a-7f, built in parallel;
+   see handlers.md, "Volatile conditions (slice 7)").
+   - Protect, Spiky Shield, Baneful Bunker and Endure, with the stall
+     counter's draw.
+   - Substitute, the first escape hatch.
+   - Encore and Taunt.
+   - Sucker Punch and Thunderclap, which read the target's queued action.
+   - The Choice items with `choicelock`, with Knock Off, Trick, Switcheroo
+     and Thief against them.
+   7f's combined set of 2,000 battles crossed the five phases and found no
+   divergence. The event mask uses 59 of its 64 bits, so step 5 needs a wider
+   one.
 5. **Full support for the catalog.** Every move, ability, item and species
    legal in Gen 9 OU: abilities first (30% of their usage is supported),
    then the remaining items and moves. Transform, Illusion and the forme
@@ -485,6 +511,7 @@ Gen 9 OU battles simulated sooner, and each makes the later ones cheaper.
    | 2026-11-26 | Slice 6b | Ahead: two of step 3's three phases done the same day |
    | 2026-11-26 | Slice 6c | Ahead: step 3 all but Eject Pack (6d) |
    | 2026-11-27 | Slice 6d | Ahead: step 3 done, about 2-4 days before the steps 1-4 milestone window |
+   | 2026-11-27 | Slices 7a-7f | Ahead: step 4 done the same day, with five phases built in parallel, so steps 1-4 are done 2-4 days before their milestone window. Real OU teams still need step 5's abilities and items. |
 
 6. **Per-player view.** What each side can observe, as a first-class value.
 7. **Showdown seed compatibility.** Implement Showdown's own generators so a
@@ -533,8 +560,8 @@ Alongside:
 - **Scenario generation from rules.** For each rule, generate battles that
   exercise it with each random outcome forced both ways, and report coverage
   per rule.
-- **Trace size.** 9,000 battles take about 5.5 GB. The long tier takes about
-  190 s (most of the growth is the slice 6 property playouts) since parity checks traces on several threads (it was 325 s on one,
+- **Trace size.** 15,600 battles take about 11 GB. The long tier takes about
+  77 s on banana (8 threads; 190 s on the laptop at 9,000 battles) (most of the growth is the slice 6 property playouts) since parity checks traces on several threads (it was 325 s on one,
   and grows with every set). About 60% of a trace's time is decoding its
   JSON, so delta snapshots or a compact cache are the next step before the
   catalog work.

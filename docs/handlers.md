@@ -930,8 +930,8 @@ field.
 ## Volatile conditions (slice 7)
 
 Roadmap step 4, designed 2026-11-27. Five phases are built in parallel,
-each in its own worktree from `slice7-base`, then stacked in order 7a to 7e
-and followed by an integration phase, 7f. The whitelist decides the scope
+each in its own worktree from `slice7-base`, then stacked in the order they
+finished (7a, 7d, 7e, 7c, 7b) and followed by an integration phase, 7f. The whitelist decides the scope
 (`data/usage/gen9ou.json`, 2026-10):
 
 | Phase | Moves | Items | Usage weight |
@@ -974,7 +974,15 @@ the whitelist and stay rejected.
   `AfterSubDamage` (7b), `OverrideAction` (7c). Any other change to where
   sorts or draws happen goes to the lead first.
 - **Bodies.** Every step-4 body is native (`BNative`) unless an existing
-  rule kind already fits. No rule kind is added in step 4.
+  rule kind already fits. No rule kind is added in step 4. One move-rule
+  effect was added instead: `EOwnVolatile`, a move's top-level
+  `volatileStatus` that names its own id, added in `runMoveEffects`. Roost's
+  `ERoost` is the precedent. It has seven users (Protect, Spiky Shield,
+  Baneful Bunker, Endure, Substitute, Encore and Taunt), well past the three a
+  new kind needs, and it replaced the per-phase versions 7b and 7c first wrote.
+- **The event mask.** After step 4, 59 of the mask's 64 bits are used. Step 5
+  needs a wider mask (two words, or a bitset), and that is the lead's
+  decision.
 - **The escape hatch.** Substitute is the first one. Its `TryPrimaryHit`
   body and the `HIT_SUBSTITUTE` outcome in the hit path are hand-written
   and marked `-- ESCAPE HATCH: substitute`.
