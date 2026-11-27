@@ -79,7 +79,12 @@ back to `local/showdown`.
 
 ### Recording traces
 
+Generators write JSON to `local/record/<set>`. The pool files and the packed
+sets live in `local/traces`, so create both first. After a set passes, pack it
+(see "Trace format v2").
+
 ```sh
+mkdir -p local/record local/traces
 node tools/oracle/gen-slice0.js local/record/slice0 500
 node tools/oracle/gen-slice0.js local/record/slice0 300 1 gen9ou struggle
 ```
