@@ -1046,8 +1046,10 @@ damageAbilities dex = property $ do
           zeroTAtk m = m {monBoosts = (monBoosts m) {bsAtk = 0}}
           ignoredByTarget = modifyMon user zeroU (if mrOverrideOffensivePokemon rule then modifyMon target zeroTAtk base else base)
           ignoredByUser = modifyMon target zeroT base
-      dmg (with target "unaware" base) === dmg ignoredByTarget
-      dmg (with user "unaware" base) === dmg ignoredByUser
+      -- (a base-power callback may read the stages themselves, as Stored Power counts the user's positive ones; Unaware leaves those alone)
+      if moveSpec mv POwn EvBasePowerCallback == Nothing
+        then dmg (with target "unaware" base) === dmg ignoredByTarget >> dmg (with user "unaware" base) === dmg ignoredByUser
+        else success
       cover 5 "Unaware changed the damage of a hit against a boosted attacker" (dmg (with target "unaware" base) /= dmg base)
       cover 5 "Unaware changed the damage of a hit into a boosted target" (dmg (with user "unaware" base) /= dmg base)
   where

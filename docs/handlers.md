@@ -1822,6 +1822,7 @@ statuses and volatiles, get random stages and use a random damaging move with th
 - two Vessel of Ruin holders, or one attacking, change nothing (when the speeds differ: a tie draws);
 - Unaware on the target equals the damage with the user's Attack, Defense and Special Attack stages at 0 (and the target's Attack for Foul Play), and on
   the user equals the damage with the target's Defense and Special Defense at 0.
+  Moves with a base-power callback are left out of the Unaware equalities: Stored Power reads the stages itself, and Unaware does not zero those.
 
 `checkBattle` also checks `sTotalFainted`, a Supreme Overlord holder's count, and the `flashfire` volatile (no duration, held only by a holder of the
 ability). The pivot-heavy teams carry the thirteen abilities.
