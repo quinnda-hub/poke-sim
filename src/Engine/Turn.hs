@@ -63,6 +63,7 @@ newBattle dx fmt t1 t2 = do
         , acSpeed = 1 * speedScale
         , acActor = Nothing
         , acArg = 0
+        , acPranksterBoosted = False
         }
   pure Battle
     { bFormat = fmt
@@ -129,7 +130,7 @@ choiceActions dx b kind p c = case (kind, c) of
     s = sideOf p b
     active = Just (activeActor p b)
     mk k actor prio arg = Action
-      { acKind = k, acOrder = 0, acPriority = prio, acSpeed = 0, acActor = actor, acArg = arg }
+      { acKind = k, acOrder = 0, acPriority = prio, acSpeed = 0, acActor = actor, acArg = arg, acPranksterBoosted = False }
     switchTo k n = (\o -> [mk k active 0 o]) <$> sSlots s U.!? (n - 1)
     charges n = case monMoves (activeMon p b) SV.!? (n - 1) of
       Just ms -> isJust (moveSpec (moveData dx (msMove ms)) POwn EvPriorityChargeCallback)
@@ -164,7 +165,7 @@ turnLoop dx = do
     modify' (\b -> b {bQueue = SV.snoc q' residual, bMidTurn = True})
   loop
   where
-    plain k = Action {acKind = k, acOrder = 0, acPriority = 0, acSpeed = 0, acActor = Nothing, acArg = 0}
+    plain k = Action {acKind = k, acOrder = 0, acPriority = 0, acSpeed = 0, acActor = Nothing, acArg = 0, acPranksterBoosted = False}
     loop = do
       q <- gets bQueue
       case SV.uncons q of
@@ -225,7 +226,7 @@ runAction dx ac = do
       b <- get
       case acActor ac of
         Just a | monActive (monOf b a), not (monFainted (monOf b a)) -> do
-          runMovePrio fmt dx a (acArg ac) (Just (acPriority ac `quot` priorityScale))
+          runMovePrio fmt dx a (acArg ac) (Just (acPriority ac `quot` priorityScale, acPranksterBoosted ac))
           afterAction dx ac
         _ -> pure () -- the Pokemon left the field or fainted: no tail (battle.ts 'move' case returns false)
     KInstaSwitch -> switchAction dx ac >> afterAction dx ac
@@ -489,7 +490,7 @@ switchIn dx how p target = do
         -- queue.insertChoice({ choice: 'runSwitch', pokemon }): updateSpeed first, then a tie-aware insert
         getActionSpeed dx tgt >>= \sp -> modify' (modifyMon tgt (\m -> m {monSpeed = sp}))
         new <- resolveAction dx Action
-          { acKind = KRunSwitch, acOrder = 0, acPriority = 0, acSpeed = 0, acActor = Just tgt, acArg = 0 }
+          { acKind = KRunSwitch, acOrder = 0, acPriority = 0, acSpeed = 0, acActor = Just tgt, acArg = 0, acPranksterBoosted = False }
         q <- gets bQueue
         q' <- insertChoice new q
         modify' (\b -> b {bQueue = q'})
@@ -544,11 +545,10 @@ runMove fmt dx user slot = runMovePrio fmt dx user slot Nothing
 -- | 'runMove' with the priority of the queued action (slice 8e). Showdown's @getActionSpeed@ writes the priority that the
 -- @ModifyPriority@ events gave into @action.move.priority@ (battle.ts 2702), and @runMove@ reads it back off the same ActiveMove
 -- (@baseMove.priority@, 283): the move in use carries it, which Psychic Terrain's @onTryHit@ reads (a Prankster status move has priority
--- 1). 'Nothing' is the dex priority. @pranksterBoosted@ is set on the same object by Prankster's handler: it is derived here, for a
--- Status move of a Prankster holder (the ability the handler saw when the action was last given its priority).
--- LATENT: a holder that gained or lost Prankster after that (Skill Swap, Gastro Acid) is not modelled.
+-- 1). @pranksterBoosted@ is set on the same object by Prankster's handler: 'Engine.Queue.actionSpeedOf' records it in the action
+-- ('acPranksterBoosted') and it is carried here. 'Nothing' is the dex priority and no flag.
 {-# INLINABLE runMovePrio #-}
-runMovePrio :: MonadChance m => Format -> Dex -> Actor -> Int -> Maybe Int -> Eng m ()
+runMovePrio :: MonadChance m => Format -> Dex -> Actor -> Int -> Maybe (Int, Bool) -> Eng m ()
 runMovePrio fmt dx user@(Actor p _) slot qprio = do
   b <- get
   let target = activeActor (other p) b
@@ -571,9 +571,9 @@ runMovePrio fmt dx user@(Actor p _) slot qprio = do
     _ -> pure ()
   where
     -- the move as the queue left it: its priority and its prankster flag
-    inUse b0 mv0 = mv0
-      { mvPriority = fromMaybe (mvPriority mv0) qprio
-      , mvPranksterBoosted = mvStatus mv0 && hasAbility dx b0 user "prankster" }
+    inUse _ mv0 = mv0
+      { mvPriority = maybe (mvPriority mv0) fst qprio
+      , mvPranksterBoosted = maybe False snd qprio }
     -- @mix@: the Dex index of the move in use; @mslot@: the index of its move slot (Nothing: none, as for Struggle)
     go target mv mix mslot = do
       -- runEvent('BeforeMove'): before PP is deducted; a move stopped here costs no PP and returns from

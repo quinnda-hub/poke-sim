@@ -342,6 +342,9 @@ data Action = Action
   -- ^ @action.pokemon@.
   , acArg :: !Int
   -- ^ Move slot (-1 = Struggle) for 'KMove'; target orig for switches; team index for 'KTeam'.
+  , acPranksterBoosted :: !Bool
+  -- ^ @action.move.pranksterBoosted@ (slice 8e): Prankster's @onModifyPriority@ sets it on the action's move when the priority event runs
+  -- ('Engine.Queue.actionSpeedOf'); nothing clears it, and the move in use is that same object ('Engine.Turn.runMovePrio').
   }
   deriving (Eq, Show)
 

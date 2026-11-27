@@ -955,7 +955,7 @@ punchMoves dex = property $ do
       target = activeActor (other who) b0
       ix = fromMaybe (-1) (M.lookup name (dxMoveIx dex))
       mv = dxMoves dex V.! ix
-      act k a arg = Action {acKind = k, acOrder = 0, acPriority = 0, acSpeed = 0, acActor = Just a, acArg = arg}
+      act k a arg = Action {acKind = k, acOrder = 0, acPriority = 0, acSpeed = 0, acActor = Just a, acArg = arg, acPranksterBoosted = False}
       nMoves = SV.length (monMoves (monOf b0 target))
   case request b0 of
     Finished _ -> success

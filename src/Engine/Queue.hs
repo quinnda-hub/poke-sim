@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -fexpose-all-unfoldings #-}
 -- Unfoldings are exposed so that "Engine.Turn" can specialise every engine function to the concrete chance monads
 -- ('Engine.Chance.Sample', 'Engine.Chance.Replay'); without them each call here passes a Monad dictionary.
@@ -19,6 +20,7 @@ import Control.Monad.Trans.State.Strict (get, modify')
 import qualified Data.Vector.Strict as SV
 
 import Engine.Chance (MonadChance (..), speedSortWith)
+import Engine.Damage (hasAbility)
 import Engine.Dex
 import Engine.Dispatch (Eng, getActionSpeed, movePriorityEvent)
 import Engine.Event (SortKey (..), compareKey, priorityScale, speedScale)
@@ -59,7 +61,10 @@ actionSpeedOf dx ac = do
   withPriority <- case (acKind ac, acActor ac) of
     (KMove, Just a@(Actor p _)) -> case moveInSlot dx (monOf b a) (acArg ac) of
       -- the priority the action has now (battle.ts 2690-2705): the move's ModifyPriority handler reads the field as it is
-      Just mv -> (\pr -> ac {acPriority = pr * priorityScale}) <$> movePriorityEvent dx a (Just (activeActor (other p) b)) mv
+      -- (slice 8e: Prankster's handler sets `move.pranksterBoosted` on the action's move whenever it runs, and nothing clears it: the flag is
+      -- sticky. The handler runs exactly when the holder has the ability (not ignoring it) and the move is a Status move)
+      Just mv -> (\pr -> ac {acPriority = pr * priorityScale, acPranksterBoosted = acPranksterBoosted ac || (mvStatus mv && hasAbility dx b a "prankster")})
+        <$> movePriorityEvent dx a (Just (activeActor (other p) b)) mv
       Nothing -> pure ac {acPriority = 0}
     _ -> pure ac
   case acActor ac of
