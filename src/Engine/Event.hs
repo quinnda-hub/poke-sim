@@ -175,6 +175,16 @@ data EventId
   -- ^ @runEvent('TryPrimaryHit', target, pokemon, moveData)@ in @tryPrimaryHitEvent@ (battle-actions.ts 1197-1205), step 0 of
   -- @spreadMoveHit@ (1115-1119) for a hit that is neither secondary nor on the user: its result is the damage array's entry.
   -- Only the Substitute volatile listens (priority -1).
+  -- slice 8 base
+  | EvChangeBoost
+  -- ^ @runEvent('ChangeBoost', target, source, effect, {...boost})@ in @battle.boost@ (battle.ts 2048), before the cap: the relay value is the
+  -- stage changes as given ('RBoosts', zeros included); a handler returns the table that replaces it (Contrary, Simple).
+  | EvTryBoost
+  -- ^ @runEvent('TryBoost', target, source, effect, {...boost})@ in @battle.boost@ (battle.ts 2050), after @getCappedBoost@: the relay value is the
+  -- capped table ('RBoosts'); a handler returns the table that replaces it (Clear Body, Hyper Cutter, Mirror Armor).
+  | EvAfterEachBoost
+  -- ^ @runEvent('AfterEachBoost', target, source, effect, currentBoost)@ in @battle.boost@ (battle.ts 2091), after each stat whose stage changed, with
+  -- that stat alone as the relay value ('RBoosts'). Opportunist's and Defiant's kin read it.
   deriving (Eq, Show, Enum, Bounded)
 
 -- | How @runEvent@ orders the handlers of an event (battle.ts 797-803).
@@ -279,6 +289,10 @@ eventName e = case e of
   EvOverrideAction -> "OverrideAction"
   -- slice 7b
   EvTryPrimaryHit -> "TryPrimaryHit"
+  -- slice 8 base
+  EvChangeBoost -> "ChangeBoost"
+  EvTryBoost -> "TryBoost"
+  EvAfterEachBoost -> "AfterEachBoost"
 
 -- | Which Pokemon a handler reacts to: the holder (@onX@), its allies (@onAllyX@), its foes (@onFoeX@), the
 -- source of the event (@onSourceX@) or anyone (@onAnyX@).

@@ -15,6 +15,7 @@ module Engine.Dispatch
   ( Eng
   , runEvent
   , runEventCrit
+  , runEventEff
   , runEventOnEffect
   , singleMoveEvent
   , HitResult (..)
@@ -54,6 +55,7 @@ module Engine.Dispatch
   , runStatusImmunity
   , effectiveWeather
   , boostMon
+  , moveCause
   , clampStage
   , trySetStatus
   , clearStatus
@@ -318,7 +320,7 @@ useItem dx a sourceEffect = do
             let boosts = maybe [] cnItemBoosts (effectOf dx itemKey)
             -- (the event's target is the source Pokemon; no supported AfterBoost listener reads it, and the active move matters only
             -- when it is Parting Shot, which never runs while an item is used)
-            unless (null boosts) (void (boostMon dx (Just a) Nothing a boosts))
+            unless (null boosts) (void (boostMon dx (Just a) Nothing (Just itemKey) a boosts))
             -- singleEvent('Use', item, itemState, this, source, sourceEffect) (Eject Pack's onUse sets the switch flag), then the item and its
             -- state go. Its result is not read
             void (singleEventFx dx EvUse itemKey (OwnMon a) Nothing Nothing sourceEffect RNone)
@@ -850,8 +852,9 @@ data Ctx = Ctx
   , cMove :: !(Maybe MoveData)
   , cMod :: !Int
   , cEffect :: !(Maybe EffectKey)
-  -- ^ The effect that caused the event (Showdown's @sourceEffect@ argument of @singleEvent@) when it is not a move: the
-  -- Booster Energy that adds a volatile (`effect?.name === 'Booster Energy'`).
+  -- ^ The effect that caused the event (Showdown's @sourceEffect@ argument of @singleEvent@ and @runEvent@) when it is not a move: the
+  -- Booster Energy that adds a volatile (`effect?.name === 'Booster Energy'`). The boost events ('boostMon') also name a move,
+  -- as @EffectKey EffMove 0@ (the move itself is then 'cMove'), so that a handler can tell a move's boost from an ability's.
   , cCrit :: !Bool
   -- ^ The target's @getMoveHitData(move).crit@ of the hit the event belongs to (@ModifyDamage@: Reflect and Light Screen
   -- do not weaken a critical hit); false for every other event.
@@ -877,7 +880,7 @@ runEvent dx = runEventCrit dx False
 -- | 'runEvent' for an event of a hit whose critical-hit result is known (@ModifyDamage@): the handlers can read it as
 -- 'cCrit'.
 runEventCrit :: MonadChance m => Dex -> Bool -> EventId -> Actor -> Maybe Actor -> Maybe MoveData -> Relay -> Eng m Relay
-runEventCrit dx crit = runEventFull dx crit False
+runEventCrit dx crit = runEventFull dx crit False Nothing
 
 -- | @runEvent@ with @onEffect@ (battle.ts 785-795): the source effect's own @on<Event>@ callback joins the collected handlers
 -- (first, `handlers.unshift`), and the whole list is then sorted as usual. The source effect is the move in use. Its keys
@@ -888,11 +891,16 @@ runEventCrit dx crit = runEventFull dx crit False
 -- 3381-3391). Its state has no duration. The callbacks that pass @onEffect@: @BasePower@ (battle-actions.ts 1708, here),
 -- @ModifyTarget@ (480) and @Damage@ (battle.ts 2138); only @BasePower@ has a supported handler of a move.
 runEventOnEffect :: MonadChance m => Dex -> EventId -> Actor -> Maybe Actor -> MoveData -> Relay -> Eng m Relay
-runEventOnEffect dx ev target source mv = runEventFull dx False True ev target source (Just mv)
+runEventOnEffect dx ev target source mv = runEventFull dx False True Nothing ev target source (Just mv)
 
--- | 'runEventCrit' with the @onEffect@ flag.
-runEventFull :: MonadChance m => Dex -> Bool -> Bool -> EventId -> Actor -> Maybe Actor -> Maybe MoveData -> Relay -> Eng m Relay
-runEventFull dx crit onEffect ev target source mv relay0 = do
+-- | @runEvent@ with the effect that caused it, as Showdown's @sourceEffect@ argument: the handlers read it as 'cEffect'. It is
+-- what the boost events carry ('boostMon').
+runEventEff :: MonadChance m => Dex -> Maybe EffectKey -> EventId -> Actor -> Maybe Actor -> Maybe MoveData -> Relay -> Eng m Relay
+runEventEff dx = runEventFull dx False False
+
+-- | 'runEventCrit' with the @onEffect@ flag and the source effect.
+runEventFull :: MonadChance m => Dex -> Bool -> Bool -> Maybe EffectKey -> EventId -> Actor -> Maybe Actor -> Maybe MoveData -> Relay -> Eng m Relay
+runEventFull dx crit onEffect eff ev target source mv relay0 = do
   b <- get
   let fmt = bFormat b
       own = [ Handler (EffectKey EffMove 0) (OwnMon target) (Just target) spec (sortKey ev spec (monSpeedKey b ev target) noEffectState) 0 False 0 False
@@ -925,7 +933,7 @@ runEventFull dx crit onEffect ev target source mv relay0 = do
               (OwnField, _) -> modify' (\bb -> maybe bb (\st -> setOwnerState OwnField (hKey h) st {esHasTarget = True} bb) (ownerState bb OwnField (hKey h)))
               _ -> pure ()
             -- a side or field handler is called with the event's own arguments: the Pokemon is the event's target
-            Res out md' <- runBody dx body (Ctx (fromMaybe target (hHolder h)) (hOwner h) (hKey h) source mv md Nothing crit) r
+            Res out md' <- runBody dx body (Ctx (fromMaybe target (hHolder h)) (hOwner h) (hKey h) source mv md eff crit) r
             case out of
               Keep -> go fmt hs r md'
               Replace r'
@@ -1561,7 +1569,7 @@ runNative dx n c relay = do
       | otherwise -> do
           b <- get
           let Actor hp' _ = holder
-          void (boostMon dx (Just (activeActor (other hp') b)) Nothing holder [(BSpe, -1)])
+          void (boostMon dx (Just (activeActor (other hp') b)) Nothing (Just (cKey c)) holder [(BSpe, -1)])
           keep
     -- reflect, lightscreen durationCallback(target, source, effect): `source?.hasItem('lightclay')` -> 8, else 5
     NLightClayDuration -> do
@@ -1882,7 +1890,7 @@ runNative dx n c relay = do
       | spId (speciesData dx (monSpecies m)) == "ogerpontealtera", monTerastallized m
       , esA (monAbilityState m) /= 1 -> do
           modify' (modifyMon holder (\x -> x {monAbilityState = (monAbilityState x) {esA = 1}}))
-          void (boostMon dx Nothing Nothing holder [(BSpe, 1)]) >> keep
+          void (boostMon dx Nothing Nothing (Just (cKey c)) holder [(BSpe, 1)]) >> keep
       | otherwise -> keep
   where
     -- the `eject` key of the holder's item state ('esA': 1 set, -1 absent)
@@ -2111,7 +2119,7 @@ moveOwnHit dx user target mv = case moveSpec mv POwn EvHit >>= hsBody of
   -- LATENT: Mirror Armor is not a supported ability, so `!target.hasAbility('mirrorarmor')` always holds; and no supported ability
   -- changes the drop (Clear Body, White Smoke, Hyper Cutter, Contrary, Defiant, Competitive), so a drop fails only at -6 on both.
   Just (BNative NPartingShotHit) -> do
-    boosted <- boostMon dx (Just user) (Just mv) target [(BAtk, -1), (BSpa, -1)]
+    boosted <- boostMon dx (Just user) (Just mv) moveCause target [(BAtk, -1), (BSpa, -1)]
     pure (HitOk, if boosted then mv else mv {mvSelfSwitch = False})
   -- ESCAPE HATCH: substitute (slice 7b). `volatileStatus: 'substitute'` is added by runMoveEffects (1316) before the move's onHit ('statusMove',
   -- [EOwnVolatile, EOwnHit]): the volatile's onStart sets the hp. Then substitute.onHit(target): `this.directDamage(target.maxhp / 4)`: floor,
@@ -2157,7 +2165,7 @@ moveOwnHitResult dx user target mv = case moveSpec mv POwn EvHit >>= hsBody of
         | bsAtk (monBoosts t) == -6 -> pure HitFail
         | otherwise -> do
             let atk = boostedStat (stAtk (monStats t)) (bsAtk (monBoosts t))
-            boosted <- boostMon dx (Just user) (Just mv) target [(BAtk, -1)]
+            boosted <- boostMon dx (Just user) (Just mv) moveCause target [(BAtk, -1)]
             healed <- battleHeal user atk
             pure (if healed || boosted then HitOk else HitFail)
       -- painsplit.onHit(target, pokemon): `averagehp = Math.floor((target.hp + pokemon.hp) / 2) || 1`, then
@@ -2178,7 +2186,7 @@ moveOwnHitResult dx user target mv = case moveSpec mv POwn EvHit >>= hsBody of
       NDefogHit -> do
         -- `if (!target.volatiles['substitute'] || move.infiltrates) success = !!this.boost({ evasion: -1 })` (slice 7b; infiltrates: LATENT)
         behindSub <- gets (\bb -> isJust (monSubstituteHp (monOf bb target)))
-        boosted <- if behindSub then pure False else boostMon dx (Just user) (Just mv) target [(BEvasion, -1)]
+        boosted <- if behindSub then pure False else boostMon dx (Just user) (Just mv) moveCause target [(BEvasion, -1)]
         let tp = playerOf target
             up = playerOf user
         onTarget <- forM (defogTargetOnly ++ hazards) $ \name -> do
@@ -2195,7 +2203,7 @@ moveOwnHitResult dx user target mv = case moveSpec mv POwn EvHit >>= hsBody of
         forM_ subs (\a -> modify' (modifyMon a (removeVolatile (fromEnum CSubstitute))))
         let up = playerOf target
         removed <- forM [up, other up] $ \p -> or <$> mapM (removeNamedSide dx p) hazards
-        boosted <- boostMon dx (Just user) (Just mv) target [(BAtk, 1), (BSpe, 1)]
+        boosted <- boostMon dx (Just user) (Just mv) moveCause target [(BAtk, 1), (BSpe, 1)]
         pure (if boosted || or removed || not (null subs) then HitOk else HitFail)
       -- trick, switcheroo .onHit(target, source, move): `yourItem = target.takeItem(source)`, `myItem = source.takeItem()` (both
       -- always run, in that order, whatever the first returned). A refusal (`false`), or no item on either side, puts the
@@ -2506,30 +2514,58 @@ updateSpeedAll dx = do
 clampStage :: Int -> Int
 clampStage = max (-6) . min 6
 
--- | @battle.boost@ (battle.ts 2037-2110) of one target: the changes are capped to [-6, 6] (@getCappedBoost@, pokemon.ts 1231), each stage
--- moves by its capped change, and @runEvent('AfterBoost', target, source, effect, boost)@ runs with the capped table (a stat at its limit is
--- absent: a drop at -6 is no drop). Returns whether any stage changed. It fails for a target with no HP or off the field, and when the foe
--- side has no Pokemon left, before the event. The order of the stats is unobservable (independent stages).
--- @source@ is the event's source Pokemon and @active@ Showdown's @activeMove@: the move whose hit or effect boosts, or 'Nothing' where
--- none is in use (a switch-in: Sticky Web, Embody Aspect, a seed). Only Eject Pack's @AfterBoost@ listens, and it reads only whether the
--- active move is Parting Shot; the move travels as the event's move argument.
--- LATENT: @ChangeBoost@, @TryBoost@ and @AfterEachBoost@ have no supported listener and are not run; @battle.boost@ also sets
--- @target.statsRaisedThisTurn@ / @statsLoweredThisTurn@ on success (battle.ts 2101); they are not in the state (Lash Out reads
--- @statsLoweredThisTurn@).
+-- | @battle.boost@ (battle.ts 2037-2100) of one target, step for step:
+--
+-- 1. it fails (@false@ or 0) for a target with no HP or off the field, and when the foe side has no Pokemon left, before any event;
+-- 2. @runEvent('ChangeBoost', target, source, effect, {...boost})@ (Contrary), then @getCappedBoost@ (pokemon.ts 1231): each change
+--    becomes the move of the stage within [-6, 6] relative to the stage now, a zero change is dropped, and a change that the limit
+--    cancels stays as a zero;
+-- 3. @runEvent('TryBoost', ...)@ with the capped table (Clear Body, Mirror Armor);
+-- 4. each stat of the table, in order: @boostBy@ caps it again against the stage as it stands and applies it; when the stage moved,
+--    @runEvent('AfterEachBoost', ..., {stat: value})@ runs (a zero change runs nothing);
+-- 5. @runEvent('AfterBoost', ..., boost)@ with the table.
+--
+-- A handler of the first three events replaces the table by returning one ('RBoosts'); any other result (@false@) leaves no stat to
+-- visit, as @for...in@ over @false@ does. Returns whether any stage changed (Showdown's @success@, null otherwise).
+--
+-- @source@ is the event's source Pokemon, @active@ the move the events carry as their move argument (Showdown's @activeMove@: the
+-- move whose hit or effect boosts, or 'Nothing' where none is in use: a switch-in, a seed; Eject Pack reads it), and @cause@ Showdown's
+-- @effect@ argument, read by the handlers as 'cEffect': 'moveCause' for a move (the move is then @active@), otherwise the ability,
+-- item or condition that boosts. Showdown's @null@ effect, which falls back to @this.effect@ (the effect running the event), is
+-- resolved by the caller: Intimidate passes the ability. @isSecondary@ and @isSelf@ only choose log lines, and are not passed.
+-- LATENT: @battle.boost@ also sets @target.statsRaisedThisTurn@ / @statsLoweredThisTurn@ on success (battle.ts 2101); they are not
+-- in the state (Lash Out reads @statsLoweredThisTurn@; no supported reader of either).
 {-# INLINABLE boostMon #-}
-boostMon :: MonadChance m => Dex -> Maybe Actor -> Maybe MoveData -> Actor -> [(BoostStat, Int)] -> Eng m Bool
-boostMon dx source active a@(Actor p _) changes = do
+boostMon :: MonadChance m => Dex -> Maybe Actor -> Maybe MoveData -> Maybe EffectKey -> Actor -> [(BoostStat, Int)] -> Eng m Bool
+boostMon dx source active cause a@(Actor p _) changes = do
   b <- get
   let m = monOf b a
   if monHp m <= 0 || not (monActive m) || sLeft (sideOf (other p) b) == 0
     then pure False
     else do
-      let cur = monBoosts m
-          capped = [(s, clampStage (boostOf s cur + d) - boostOf s cur) | (s, d) <- changes, d /= 0]
-          new = foldl (\bs (s, d) -> setBoostOf s (boostOf s bs + d) bs) cur capped
-      modify' (modifyMon a (\x -> x {monBoosts = new}))
-      void (runEvent dx EvAfterBoost a source active (RBoosts capped))
-      pure (new /= cur)
+      let table r = case r of RBoosts t -> t; _ -> []
+      changed <- table <$> runEventEff dx cause EvChangeBoost a source active (RBoosts changes)
+      -- getCappedBoost reads the target's stages after ChangeBoost (a handler does not change them)
+      b1 <- get
+      let curNow = monBoosts (monOf b1 a)
+          capped0 = [(s, clampStage (boostOf s curNow + d) - boostOf s curNow) | (s, d) <- changed, d /= 0]
+      boost <- table <$> runEventEff dx cause EvTryBoost a source active (RBoosts capped0)
+      let visit success [] = pure success
+          visit success ((s, v) : rest) = do
+            bb <- get
+            let cur = boostOf s (monBoosts (monOf bb a))
+                delta = clampStage (cur + v) - cur -- boostBy: getCappedBoost again, then apply
+            modify' (modifyMon a (\x -> x {monBoosts = setBoostOf s (cur + delta) (monBoosts x)}))
+            if delta /= 0
+              then runEventEff dx cause EvAfterEachBoost a source active (RBoosts [(s, v)]) >> visit True rest
+              else visit success rest
+      success <- visit False boost
+      void (runEventEff dx cause EvAfterBoost a source active (RBoosts boost))
+      pure success
+
+-- | The effect of a boost caused by the move in use ('boostMon').
+moveCause :: Maybe EffectKey
+moveCause = Just (EffectKey EffMove 0)
 
 -- | @singleEvent('End', pokemon.getAbility(), pokemon.abilityState, pokemon)@ and the same for the item: run when a
 -- Pokemon switches out (battle-actions.ts 142-143) and when it faints (battle.ts 2605-2606), before @clearVolatile@.

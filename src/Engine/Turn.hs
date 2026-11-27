@@ -660,7 +660,7 @@ useMoveWith fmt dx user target mv = case mrTarget rule of
               -- once accuracy passed. A user with no HP gets nothing.
               -- LATENT: a first hit that fails (a move TryHit that returns false, as Low Kick's against a Dynamaxed target) would
               -- make `moveResult` false and skip the boost; no supported selfBoost move has one.
-              unless (null (mrSelfBoost rule)) (void (boostMon dx (Just user) (Just mv) user (mrSelfBoost rule)))
+              unless (null (mrSelfBoost rule)) (void (boostMon dx (Just user) (Just mv) moveCause user (mrSelfBoost rule)))
               -- useMoveInner: the move succeeded (`moveResult`), the user is queued to faint if it has no HP, then
               -- runEvent('AfterMoveSecondarySelf', pokemon, target, move): Life Orb's recoil. A status move
               -- raises it too, but no supported handler acts on one.
@@ -766,7 +766,7 @@ statusMoveHit dx user tgt mv0 = do
           -- fail: `moveHit(source, source, move, moveData.self, ..., true)` adds roost's volatile (no draw)
           forM_ (mrSelf (mvRule mv0)) (applyEffect dx user mv0 tgt)
           pure (True, mv0)
-    [EBoost bs] -> (\r -> (r, mv0)) <$> boostMon dx (Just user) (Just mv0) tgt bs
+    [EBoost bs] -> (\r -> (r, mv0)) <$> boostMon dx (Just user) (Just mv0) moveCause tgt bs
     -- the move's own onHit (singleEvent('Hit'), battle-actions.ts 1338): its result decides whether the hit did
     -- something. A heal that fails with NOT_FAIL still counts as a hit (see 'HitResult'), a false return fails the move
     -- (the move in use comes back: Parting Shot's body deletes its selfSwitch)
@@ -892,7 +892,7 @@ hitEffects dx user target mv onSub = do
   -- to the user. move.selfDropped stops a repeat only for a single hit (`if (!move.multihit)`), so a
   -- multi-hit move draws every hit.
   forM_ (mrSelf rule) $ \e -> case e of
-    EBoost bs -> roll 0 100 >> void (boostMon dx (Just user) (Just mv) user bs)
+    EBoost bs -> roll 0 100 >> void (boostMon dx (Just user) (Just mv) moveCause user bs)
     _ -> pure ()
   -- secondaries: for each, random(100); below the chance it hits the target (moveHit with isSecondary), then
   -- its `self` effects (selfDrops with isSecondary draws nothing)
@@ -932,7 +932,7 @@ forceSwitchStep dx user target mv = when (mrForceSwitch (mvRule mv)) $ do
 -- | One effect of a secondary on a Pokemon (@moveHit@ with @isSecondary@ -> @runMoveEffects@), of the move @mv@ used by @user@.
 applyEffect :: MonadChance m => Dex -> Actor -> MoveData -> Actor -> Effect -> Eng m ()
 applyEffect dx user mv a e = case e of
-  EBoost bs -> void (boostMon dx (Just user) (Just mv) a bs)
+  EBoost bs -> void (boostMon dx (Just user) (Just mv) moveCause a bs)
   EStatus st -> void (trySetStatus dx a st)
   -- addVolatile('flinch'): needs HP (no affectsFainted), fails if it is already there; no immunity, no
   -- TryAddVolatile handler, duration 1
