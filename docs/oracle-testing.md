@@ -72,6 +72,7 @@ back to `local/showdown`.
 | `gen-slice3.js <outDir> <count> <poolFile> [firstSeed]` | Slice 1's teams with hazard, screen, Tailwind and Trick Room setters, Light Clay, Flying, Poison and Steel types, Shedinja, low levels, and abilities and items weighted toward Toxic Debris and Heavy-Duty Boots, recorded, then a tally of the hazard outcomes (each hazard's damage and layers, absorption, immunities, Boots blocks, hazard KOs, the order of several hazards on one switch-in, screens against each category and crits, both screens on one side, expiries, Trick Room restarts and speed ties under it, weather setters as moves and abilities, rocks, sand chip and immunities, weather speed abilities and Hydration, terrain setters, Terrain Extender, grounding, Overcoat and Leaf Guard, Protosynthesis and Quark Drive with and without Booster Energy, the seeds and Unburden; about one battle in six pairs a faster Paradox or seed holder against a slower opposing setter, so switch-in priority decides the order). Deterministic per seed and pool. Re-record the whole set when the pool changes. |
 | `gen-slice5.js <outDir> <count> <poolFile> [firstSeed]` | Slice 3's and slice 0's teams with a Tera type on every set (about half from usage, the rest uniform over the 18 types; about a quarter of sets are then made Stellar), recorded with Tera choices offered (`tera: true`, a `teraChance` of 0.1-0.5), plus scripted double Teras, Trick Room Teras and resistance duels, then a tally of each Tera branch. Deterministic per seed and pool. |
 | `gen-slice6.js <outDir> <count> <poolFile> [firstSeed]` | Slice 5's teams, each Pokémon with a pivot move (U-turn, Flip Turn, Volt Switch, Teleport, Parting Shot, Chilly Reception), with Tera offered. About a third random play, the rest scripted openings: each move into each hazard, a pivot into Rocky Helmet, a pivot that KOs, no switch target, both sides pivoting, Volt Switch into Ground, Parting Shot at -6, Chilly Reception with and without snow; and for 6b, each forcing move (Roar, Whirlwind, Dragon Tail, Circle Throw) into each hazard, a drag with one and with several candidates, no switch target, Dragon Tail into Rocky Helmet, two -6 movers, and a drag on the turn of a pivot; and for 6c, Regenerator and Natural Cure through each kind of switch, damaging pivots and Dragon Tail into Eject Button and Red Card, no switch target, a KO on the holder, and both items in one turn; and for 6d, Eject Pack after self-drops, foe drops, Sticky Web on each kind of switch-in, Parting Shot, a stat at -6, two packs on one move, no switch target, Red Card and pivots in the same turn, and a holder dragged back in. Its teams alone cover every accepted move, species, ability and item. |
+| `gen-slice7a.js` ... `gen-slice7f.js <outDir> <count> <poolFile> [firstSeed]` | Slice 7 (volatile conditions), one generator per phase, each on slice 6's teams with its own kit added and a tally from Showdown's own events: 7a the protect family and the stall counter (blocks, contact punishments, Endure, moving last, counter climbs); 7b Substitute (multi-hit, recoil and drain, status moves, forced switches, pivots, items, low HP, secondaries, Struggle); 7c Encore and Taunt (before and after the target moves, PP running out, switching, both at once); 7d Sucker Punch and Thunderclap (status, faster and slower targets, switches, pivots, Tera, priority ties); 7e the Choice items (locks, Trick and Switcheroo both ways, Knock Off, Thief, Scarf ties, pivots, PP, Tera). 7f crosses the five phases (the punches into Protect and Substitute, Protect under Encore and Taunt and against locked attackers, bypasssub moves, Encore against a Choice lock, Trick onto an encored or taunted Pokémon, Endure against a multi-hit through a Substitute, Scarf against priority), with about 40% random play. Deterministic per seed and pool. |
 | `gen-slice4.js <outDir> <count> <poolFile> [firstSeed]` | Slice 3's teams, with move slots weighted toward the moves with handler code and the conditions their bodies branch on (weights, statuses, boosts, held and used items, weather, terrain, grounding), recorded, then a tally of each branch from Showdown's own events. Deterministic per seed and pool. |
 | `gen-slice2.js <outDir> <count> <poolFile> [firstSeed] [profile]` | Slice 1's teams (or, with `struggle`, slice 0's Struggle teams) with abilities and items from the engine's pool, recorded, then a tally of the outcomes that distinguish each handler, observed by wrapping Showdown's event methods. Deterministic per seed and pool. |
 | `export-dex.js [outDir] [mod]` | Export species, moves, abilities, items, types and natures to `data/gen9/`. |
@@ -140,6 +141,21 @@ cabal run -v0 engine-pool > local/traces/slice5-pool.json
 node tools/oracle/gen-slice5.js local/traces/slice5 1200 local/traces/slice5-pool.json
 cabal run -v0 engine-pool > local/traces/slice6-pool.json
 node tools/oracle/gen-slice6.js local/traces/slice6 2500 local/traces/slice6-pool.json
+```
+
+Slice 7 (volatile conditions) has one set per phase. Each of 7a to 7e was
+recorded from its own phase branch's pool, in parallel; 7f from the stacked
+engine:
+
+```sh
+for x in a b c e; do
+  cabal run -v0 engine-pool > local/traces/slice7$x-pool.json
+  node tools/oracle/gen-slice7$x.js local/traces/slice7$x 1000 local/traces/slice7$x-pool.json
+done
+cabal run -v0 engine-pool > local/traces/slice7d-pool.json
+node tools/oracle/gen-slice7d.js local/traces/slice7d 600 local/traces/slice7d-pool.json
+cabal run -v0 engine-pool > local/traces/slice7f-pool.json
+node tools/oracle/gen-slice7f.js local/traces/slice7f 2000 local/traces/slice7f-pool.json
 ```
 
 Its teams put the moves with handler code where their bodies branch: weights

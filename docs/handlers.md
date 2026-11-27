@@ -930,8 +930,8 @@ field.
 ## Volatile conditions (slice 7)
 
 Roadmap step 4, designed 2026-11-27. Five phases are built in parallel,
-each in its own worktree from `slice7-base`, then stacked in order 7a to 7e
-and followed by an integration phase, 7f. The whitelist decides the scope
+each in its own worktree from `slice7-base`, then stacked in the order they
+finished (7a, 7d, 7e, 7c, 7b) and followed by an integration phase, 7f. The whitelist decides the scope
 (`data/usage/gen9ou.json`, 2026-10):
 
 | Phase | Moves | Items | Usage weight |
@@ -974,7 +974,15 @@ the whitelist and stay rejected.
   `AfterSubDamage` (7b), `OverrideAction` (7c). Any other change to where
   sorts or draws happen goes to the lead first.
 - **Bodies.** Every step-4 body is native (`BNative`) unless an existing
-  rule kind already fits. No rule kind is added in step 4.
+  rule kind already fits. No rule kind is added in step 4. One move-rule
+  effect was added instead: `EOwnVolatile`, a move's top-level
+  `volatileStatus` that names its own id, added in `runMoveEffects`. Roost's
+  `ERoost` is the precedent. It has seven users (Protect, Spiky Shield,
+  Baneful Bunker, Endure, Substitute, Encore and Taunt), well past the three a
+  new kind needs, and it replaced the per-phase versions 7b and 7c first wrote.
+- **The event mask.** After step 4, 59 of the mask's 64 bits are used. Step 5
+  needs a wider mask (two words, or a bitset), and that is the lead's
+  decision.
 - **The escape hatch.** Substitute is the first one. Its `TryPrimaryHit`
   body and the `HIT_SUBSTITUTE` outcome in the hit path are hand-written
   and marked `-- ESCAPE HATCH: substitute`.
@@ -1260,8 +1268,9 @@ First aside) and has no `mustrecharge`.
   imports `Engine.Dispatch`.
 - `runMove` is now exported from `Engine.Turn`, for the property.
 - LATENT: no recharge move is accepted, so `mustrecharge` never holds.
-- LATENT(7c): Encore swaps the move at `runAction` (`onOverrideAction`), not
-  in the queue, so the queued move stays the one chosen.
+- Encore swaps the move at `runMove` (`onOverrideAction`), not in the queue,
+  so the queued move stays the one chosen. Slice 7f shows it cannot matter in
+  singles (see 7f findings).
 - Property: whatever else is in the queue, `moveTry` gives the result that
   the target's own move actions alone give, and a failed move makes no accuracy,
   crit or damage draw and changes no HP.
@@ -1334,3 +1343,54 @@ time.
   Choice item and the locked move is in its slots, and (2) leaves no other
   move in `legalChoices` (Struggle when the move has no PP). The pivot
   playouts' teams hold Choice items and the item moves.
+
+### 7f findings
+
+The combined set `slice7f` (2000 battles, `tools/oracle/gen-slice7f.js`) records the crossings between the five phases. About 61% are
+scripted (1227; 175 more scripts were dropped because a faint asked for a switch, and were recorded as random play). It passed on the
+first full run: no engine divergence was found. The only failures were seven traces whose generator wrote a team with a duplicate move
+(a generator bug, fixed; the engine rejects such a team and Showdown does not).
+
+The scripts keep any Pokemon that Encore, Taunt or a Choice item may constrain on one move (the same slot every turn, or all-status
+moves, whose slot 1 is Struggle once taunted), because a script cannot branch on the state. The tally is read from Showdown's own
+events. Every counter is above zero. The kinds, with what they reach:
+
+- **punchprot**, **punchsub**, **punchstate**: Sucker Punch and Thunderclap into a protect move or Endure, a Substitute, and an
+  encored, taunted or Choice-locked target. A protect move (priority 4) always moves before a punch (priority 1), so the target has no
+  move action left and `onTry` fails before any block. No punch is ever blocked by `TryHit`. A punch works on a Substitute 163 times.
+- **protsub**, **protchoice**, **protencore**, **prottaunt**: a protect move before and after a Substitute (never in one turn: Protect
+  is priority 4 and Substitute 0, so one Pokemon cannot hold both volatiles at a decision point), Spiky Shield and Baneful Bunker
+  against a Choice-locked contact attacker, and Encore into Protect (the override runs the protect move: the stall draw fails 2 times
+  in 3). Taunt cannot block a protect move in `BeforeMove`: Protect goes before any Taunt that could land. It does block a queued
+  Substitute (192 times).
+- **subbypass**, **itemsub**: Encore and Taunt on a Substitute holder (`bypasssub`), Substitute under Taunt and under Encore at low
+  HP, Trick, Switcheroo, Knock Off, Thief and a Choice-locked U-turn into a Substitute.
+- **encchoice**, **duo**: Encore on a Choice-locked target, a Choice item handed by Trick to an encored (24) or taunted (26) Pokemon,
+  Encore and Taunt on one Pokemon with Struggle (82).
+- **endure**, **scarf**: Endure against a multi-hit move that breaks a Substitute (47 breaks, 41 saves) and a Choice Scarf against
+  priority 1 and 4 (the Scarf holder's speed is in the cached `speed` the trace compares).
+
+What the interactions turned out to be:
+
+- **Choice-lock `-fail` with Encore (the old LATENT(7c)) cannot be reached.** The lock is added in `ModifyMove`, the same step that sets
+  `lastMove`. Encore names `lastMove`, so the encored move is the locked move. The engine keeps the path, as Showdown has it
+  (`onOverrideAction` before `BeforeMove`), but no trace can reach it.
+- **The queued punch cannot be overridden.** A punch (priority 1) moves before the Encore (priority 0) that could replace it. A target
+  that is encored while it has a queued move is encored by a Pokemon that is not using a punch that turn. A puncher that is encored
+  after its punch is encored into the punch.
+- **Encore into Protect** climbs the stall counter as any use does; the roll at a counter of 9 or more under Encore happens 3 times.
+- Counters with no trace by construction: a Substitute while protected, an override over a queued punch, a Choice-lock `-fail`, and
+  Taunt's block of a protect move.
+
+Properties (both tiers):
+
+- `disableRules` in `checkBattle`: at a move request, the move slots in `legalChoices` are exactly the slots that every disabling effect
+  allows together (an encore, a taunt, a live choicelock and an Assault Vest, each by its Showdown rule, and PP), or move 1 (Struggle)
+  when there are none. This checks both directions, so a missed effect and a double-applied one both fail. It does not read `msDisabled`.
+  A `cover` on `pivotPlayouts` requires a request with a Pokemon under two of the four (about 15% of playouts; threshold 7%).
+- The heavy-team generator draws a move from every kit at once, and Assault Vest joins the pivot-heavy item mix, so the kits meet
+  on one set.
+
+LATENT comments: `LATENT(7c)` in `Dispatch.hs` (two) are resolved and now say why. The two `LATENT(7a)` in `Turn.hs` stay as plain
+`LATENT` (Dancer and Instruct; Sturdy, Magic Guard and Focus Sash), since the mechanics are still unsupported.
+

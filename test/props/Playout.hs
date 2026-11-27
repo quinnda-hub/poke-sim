@@ -19,7 +19,7 @@ import Control.Monad.Trans.State.Strict (State, modify', runState)
 import Data.Aeson (Value (..), object, (.=))
 import qualified Data.Aeson.Key as K
 import qualified Data.Map.Strict as M
-import Data.List (nub)
+import Data.List (nub, sort)
 import qualified Data.Vector as V
 import qualified Data.Vector.Strict as SV
 import qualified Data.Vector.Unboxed as U
@@ -75,6 +75,8 @@ genTeamsWith dx pivotHeavy = (,) <$> genTeam <*> genTeam
     -- slice 7b: Substitute with the moves that meet one (multi-hit, recoil, drain, secondaries and self drops, pivots and forcers are in the others)
     substituteKit = [m | m <- ["substitute", "substitute", "armthrust", "doubleedge", "drainpunch", "closecombat", "rapidspin"], m `elem` moves]
     step4Kits = [(3, Gen.element k) | k <- [protectKit, punches, encoreKit], not (null k)] ++ [(5, Gen.element substituteKit) | not (null substituteKit)] -- (slice 7b: its own weight)
+      -- slice 7f: a draw over every kit's moves, so that the kits meet on one set (Encore with a Choice item and Taunt, Substitute with a protect move, ...)
+      ++ [(6, Gen.element (concat [protectKit, punches, encoreKit, substituteKit])) | not (null (concat [protectKit, punches, encoreKit, substituteKit]))]
     pickMove
       | pivotHeavy && not (null step4Kits) && not (null pivots) && not (null dragKit) =
           Gen.frequency ([(3, Gen.element pivots), (3, Gen.element dragKit), (2, Gen.element moves)] ++ step4Kits)
@@ -84,7 +86,7 @@ genTeamsWith dx pivotHeavy = (,) <$> genTeam <*> genTeam
     -- Rocky Helmet, and the two items that switch their holder out or force the attacker out (slice 6c)
     pickItem
       | pivotHeavy && not (null switchItems) && not (null choiceItems) =
-          Gen.frequency [(8, Gen.element switchItems), (4, Gen.element ("rockyhelmet" : switchItems)), (4, Gen.element items), (4, Gen.element choiceItems)]
+          Gen.frequency [(8, Gen.element switchItems), (4, Gen.element ("rockyhelmet" : switchItems)), (4, Gen.element items), (4, Gen.element choiceItems), (2, Gen.element ("assaultvest" : choiceItems))]
       | pivotHeavy && not (null switchItems) = Gen.frequency [(4, Gen.element switchItems), (2, Gen.element ("rockyhelmet" : switchItems)), (2, Gen.element items)]
       | pivotHeavy && "rockyhelmet" `elem` items = Gen.frequency [(2, pure "rockyhelmet"), (3, Gen.element items)]
       | otherwise = Gen.element items
@@ -126,6 +128,32 @@ genTeamsWith dx pivotHeavy = (,) <$> genTeam <*> genTeam
 -- dropped by the next BeforeMove or DisableMove event).
 choiceLocked :: Dex -> Mon -> Bool
 choiceLocked dx m = any (\(Volatile i _) -> i == fromEnum CChoiceLock) (SV.toList (monVolatiles m)) && itemId dx (monItem m) `elem` ["choiceband", "choicespecs", "choicescarf"]
+
+-- | slice 7f: the disabling effects on a Pokemon's move slots (see 'checkBattle'): Encore (its encored move, when it knows it), Taunt, a live
+-- Choice lock (its locked moves) and an Assault Vest.
+disablers :: Dex -> Mon -> (Maybe Int, Bool, [Int], Bool)
+disablers dx m =
+  ( case [esA st | Volatile i st <- vols, i == fromEnum CEncore, any ((== esA st) . msMove) (SV.toList (monMoves m))] of e : _ -> Just e; [] -> Nothing
+  , any (\(Volatile i _) -> i == fromEnum CTaunt) vols
+  , [esA st | choiceLocked dx m, Volatile i st <- vols, i == fromEnum CChoiceLock]
+  , monItem m /= noItem && itemId dx (monItem m) == "assaultvest"
+  )
+  where vols = SV.toList (monVolatiles m)
+
+-- | Whether a slot has PP and every disabling effect allows it.
+slotAllowed :: Dex -> Mon -> MoveSlot -> Bool
+slotAllowed dx m ms = msPP ms > 0 && maybe True (== msMove ms) encored && not (taunted && status && mvId mv /= "mefirst")
+  && (null locks || msMove ms `elem` locks) && not (vest && status)
+  where
+    (encored, taunted, locks, vest) = disablers dx m
+    mv = dxMoves dx V.! msMove ms
+    status = mvStatus mv
+
+-- | slice 7f: a move request with an active Pokemon under at least two of the disabling effects.
+multiDisabled :: Dex -> Battle -> Int
+multiDisabled dx b = case request b of
+  Awaiting MoveRequest _ _ -> length [() | p <- [P1, P2], sHasActive (sideOf p b), let (e, t, l, v) = disablers dx (activeMon p b), length (filter id [e /= Nothing, t, not (null l), v]) >= 2]
+  _ -> 0
 
 -- | A battle at team preview.
 startBattle :: Dex -> Team -> Team -> Sample Battle
@@ -177,6 +205,9 @@ data Seen = Seen
   -- ^ a Pokemon in play before and after the step that had no Substitute before and has one after
   , seenSubHit :: !Int
   -- ^ a Pokemon in play before and after the step with a Substitute at both ends, whose HP went down
+  -- slice 7f
+  , seenMultiDisable :: !Int
+  -- ^ a move request with an active Pokemon under two or more of the disabling effects (encore, taunt, choicelock, Assault Vest)
   }
   deriving (Eq, Show)
 
@@ -203,6 +234,8 @@ instance Semigroup Seen where
       -- slice 7b
       , seenSub = f seenSub
       , seenSubHit = f seenSubHit
+      -- slice 7f
+      , seenMultiDisable = f seenMultiDisable
       }
     where
       f g = g x + g y
@@ -229,6 +262,8 @@ instance Monoid Seen where
       -- slice 7b
       , seenSub = 0
       , seenSubHit = 0
+      -- slice 7f
+      , seenMultiDisable = 0
       }
 
 -- | Play with random legal choices, checking every state on the way, until the battle ends (or the cap).
@@ -274,7 +309,7 @@ playChecked dx t1 t2 = startBattle dx t1 t2 >>= go 0 mempty
 -- could bring it back.
 -- Returns what the step went through.
 checkStep :: Dex -> Battle -> Battle -> (Maybe Choice, Maybe Choice) -> Either String Seen
-checkStep dx b b' (c1, c2) = (mappend stallSeen <$>) $ mapM_ one [(p, i) | (p, side) <- [(P1, bP1), (P2, bP2)], i <- [0 .. SV.length (sMons (side b)) - 1]] >> turnOk >> (((,) <$> drag (P1, c1) <*> drag (P2, c2)) >>= \ds -> pivotsOk ds >> switchOuts >>= \so -> pure (so <> mempty {seenDrags = length (filter id [fst ds, snd ds]), seenEncore = volatileAtRequest CEncore, seenTaunt = volatileAtRequest CTaunt, seenLocked = length lockedNow, seenLockStruggle = length (filter (mustStruggle b) lockedNow)}))
+checkStep dx b b' (c1, c2) = (mappend stallSeen <$>) $ mapM_ one [(p, i) | (p, side) <- [(P1, bP1), (P2, bP2)], i <- [0 .. SV.length (sMons (side b)) - 1]] >> turnOk >> (((,) <$> drag (P1, c1) <*> drag (P2, c2)) >>= \ds -> pivotsOk ds >> switchOuts >>= \so -> pure (so <> mempty {seenDrags = length (filter id [fst ds, snd ds]), seenEncore = volatileAtRequest CEncore, seenTaunt = volatileAtRequest CTaunt, seenLocked = length lockedNow, seenLockStruggle = length (filter (mustStruggle b) lockedNow), seenMultiDisable = multiDisabled dx b'}))
   where
     -- slice 7c: the step ended at a move request with an active Pokemon that has the volatile
     volatileAtRequest c = case request b' of
@@ -424,7 +459,24 @@ checkBattle dx b = do
     [(P1, bP1 b), (P2, bP2 b)]
   conditions
   choiceLocks
+  disableRules
   where
+    -- slice 7f. At a move request the moves offered are exactly the slots that every disabling effect allows at once, or Struggle (move 1)
+    -- when there are none. The effects are the four whose onDisableMove disables slots (the rule of each, from its Showdown handler):
+    -- an encore (every slot but the encored move, when the Pokemon knows it: data/conditions.ts encore.onDisableMove), a taunt (Status
+    -- moves but Me First: taunt.onDisableMove), a live choicelock (every slot but the locked move) and an Assault Vest (Status moves);
+    -- and a slot with no PP is unusable. Both directions are checked, so an effect that is missed and one that is applied twice both fail.
+    disableRules = case request b of
+      Awaiting MoveRequest _ _ -> mapM_ offerOk [p | p <- [P1, P2], sHasActive (sideOf p b), not (monFainted (activeMon p b))]
+      _ -> Right ()
+    offerOk p = do
+      let m = activeMon p b
+          slots = zip [1 :: Int ..] (SV.toList (monMoves m))
+          allowed = [n | (n, ms) <- slots, slotAllowed dx m ms]
+          expected = if null allowed then [1] else allowed
+          offered = nub [n | c <- legalChoices b p, n <- case c of Move k -> [k]; MoveTera k -> [k]; _ -> []]
+      if sort offered == sort expected then Right ()
+        else Left (show p ++ ": offered move slots " ++ show (sort offered) ++ " where the disabling effects allow " ++ show expected)
     -- slice 7e. At a move request every Pokemon in play has had endTurn's DisableMove event (which drops a stale lock), so a live choicelock
     -- (1) is on a Pokemon holding a Choice item, with the locked move among its slots; and (2) leaves it no other move in 'legalChoices':
     -- the Move and MoveTera choices name the locked slot only, or the single Struggle choice when that slot has no PP left. (Switches stay.)

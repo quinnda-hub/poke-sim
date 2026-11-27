@@ -160,6 +160,8 @@ pivotPlayouts dex = property $ do
       -- slice 7b: a Pokemon that had no Substitute has one after the step, and a substitute that was hit stays or breaks
       cover 10 "a Substitute was made" (seenSub seen > 0)
       cover 2 "a Substitute was hit" (seenSubHit seen > 0)
+      -- slice 7f: a move request with a Pokemon under two disabling effects at once (the exact-moves check of checkBattle then combines them)
+      cover 7 "a move request came with an active Pokemon under two disabling effects" (seenMultiDisable seen > 0)
       case request b of
         Finished _ -> success
         Awaiting {} -> footnote "playout ended without a result" >> failure
