@@ -1116,3 +1116,31 @@ Lead review (2026-11-27):
   decision steps/s, banana, one P-core). That is the cost of running the events
   Showdown runs on every boost and every damage. It is accepted: speed work is
   for a dedicated optimisation pass after the catalog.
+
+### 8a findings
+
+(To be written by phase 8a.)
+
+### 8b findings
+
+(To be written by phase 8b.)
+
+### 8c findings
+
+(To be written by phase 8c.)
+
+### 8d findings
+
+(To be written by phase 8d.)
+
+### 8e findings
+
+(To be written by phase 8e.)
+
+### 8f findings
+
+(To be written by phase 8f.)
+
+### 8g findings
+
+(To be written by phase 8g.)
