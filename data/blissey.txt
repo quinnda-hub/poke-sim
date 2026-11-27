@@ -1,9 +1,0 @@
-Blissey (F) @ Heavy-Duty Boots  
-Ability: Natural Cure  
-Tera Type: Normal  
-EVs: 252 HP / 252 Def 
-Bold Nature  
-IVs: 0 Atk  
-- Soft-Boiled
-
-

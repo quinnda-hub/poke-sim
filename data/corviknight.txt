@@ -1,6 +1,0 @@
-Corviknight @ Leftovers  
-Ability: Pressure  
-Tera Type: Flying  
-EVs: 252 HP / 252 Def / 4 SpD  
-Impish Nature  
-- Peck
