@@ -310,6 +310,8 @@ parseHandlerName n = case T.stripPrefix "on" n of
 data CondId = CBrn | CPar | CPsn | CTox | CFrz | CFlinch | CProtosynthesis | CQuarkDrive | CUnburden | CRoost | CChillyReception
   -- slice 7a
   | CStall | CProtect | CSpikyShield | CBanefulBunker | CEndure
+  -- slice 7e
+  | CChoiceLock
   deriving (Eq, Show, Enum, Bounded)
 
 -- | The key of the condition in @conditions.json@ (data/conditions.ts).
@@ -332,6 +334,9 @@ condName c = case c of
   CSpikyShield -> "spikyshield"
   CBanefulBunker -> "banefulbunker"
   CEndure -> "endure"
+
+  -- slice 7e
+  CChoiceLock -> "choicelock"
 
 -- | The condition with a key of @conditions.json@ (or a move's own volatile).
 condByName :: T.Text -> Maybe CondId
@@ -673,6 +678,15 @@ data NativeId
   -- ^ spikyshield, banefulbunker @condition.onHit@: acts only for a Z or Max move, of which there are none.
   | NEndureDamage
   -- ^ endure @condition.onDamage@ (priority -10): a move's damage of at least the holder's HP leaves it 1 HP.
+  -- slice 7e
+  | NChoiceItemStart
+  -- ^ choiceband, choicescarf, choicespecs @onStart@: `pokemon.removeVolatile('choicelock')` (data/items.ts 971-1040).
+  | NChoiceItemModifyMove
+  -- ^ the same items' @onModifyMove@: `pokemon.addVolatile('choicelock')`, which records the move in use.
+  | NChoiceLockStart
+  -- ^ choicelock @onStart@ (data/conditions.ts 326-330): `effectState.move = activeMove.id`; the move is recorded by 'NChoiceItemModifyMove'.
+  | NChoiceLockBeforeMove
+  | NChoiceLockDisableMove
   deriving (Eq, Show)
 
 -- | The body of each handler the engine implements (written by hand: Showdown's handlers are code). A condition
@@ -723,6 +737,10 @@ nativeBody c POwn e = BNative <$> case (c, e) of
   (CBanefulBunker, EvHit) -> Just NInertZMaxHit
   (CEndure, EvStart) -> Just NLogOnly
   (CEndure, EvDamage) -> Just NEndureDamage
+  -- slice 7e: choicelock (data/conditions.ts 324-362)
+  (CChoiceLock, EvStart) -> Just NChoiceLockStart
+  (CChoiceLock, EvBeforeMove) -> Just NChoiceLockBeforeMove
+  (CChoiceLock, EvDisableMove) -> Just NChoiceLockDisableMove
   (_, EvModifyAtk) | paradox c -> Just NParadoxAtk
   (_, EvModifyDef) | paradox c -> Just NParadoxDef
   (_, EvModifySpA) | paradox c -> Just NParadoxSpA

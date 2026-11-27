@@ -1118,4 +1118,68 @@ First aside) and has no `mustrecharge`.
 
 ### 7e findings
 
-(to be written by 7e)
+Choice Band, Choice Specs and Choice Scarf are accepted, with the `choicelock` volatile.
+Knock Off, Trick, Switcheroo and Thief are unchanged: they already did the
+right thing, and this phase records them against Choice items for the first
+time.
+
+- **The lock is added in `ModifyMove`.** `useMoveInner` runs
+  `runEvent('ModifyMove')` (battle-actions.ts 495-503) after `BeforeMove` and
+  after PP is deducted. So the lock is added even if the move then misses or
+  fails, and by Struggle. The item's `onModifyMove` calls
+  `addVolatile('choicelock')`, and the volatile's `onStart` records
+  `activeMove.id`. The engine records the move in the item's handler, right
+  after `addVolatile` succeeds, because `Start` has no move to read.
+- **No `onRestart`.** A holder that is already locked fails `addVolatile`, so
+  the lock never moves. `esA` is the locked move's `Dex` index. A lock made by
+  Struggle has `esA = -1` (Struggle is no `Dex` move). `hasMove('struggle')` is
+  false, so `DisableMove` removes it at the next `endTurn`.
+- **Stat boosts.** `onModifyAtk`, `onModifySpA` and `onModifySpe` are
+  `chainModify(1.5)`, a plain `RChainModify 3 2`. The Dynamax test is moot.
+- **The item's `onStart` removes the lock.** `setItem` runs it, so a Choice
+  item that arrives by Trick, Switcheroo or Thief starts with no lock.
+- **Stale locks go lazily.** Nothing removes a lock when the Choice item
+  leaves (Knock Off, Thief, Trick). The volatile drops itself the next time
+  its `onBeforeMove` or `onDisableMove` runs and the holder has no Choice item
+  (or, for `onDisableMove`, the locked move is not among its slots). A Trick
+  user locks itself into Trick before the swap, so after it gives its Choice
+  item away it keeps the lock until the next `endTurn`.
+  `onBeforeMove` removes the lock and lets the move go on (it returns
+  nothing, not false).
+- **`DisableMove` runs only in `endTurn`.** It disables every slot but the
+  locked one (`disableMove(id, false)`). A locked move with no PP counts as
+  disabled through the request's PP test, so `mustStruggle` already gives
+  Struggle. The existing `legalChoices` needed no change.
+- **The request.** The locked-out slots appear with `disabled: true`; the
+  legal list drops them (record.js). The Tera variant of the locked move stays
+  offered: `getMoveRequestData` (pokemon.ts 1133-1169) only drops
+  `canTerastallize` for `getLockedMove()`, which is a different thing from
+  `choicelock`. A Pokemon that must Struggle is offered `move 1` alone.
+- **The trace.** The volatile appears as `choicelock` with `move`, the locked
+  move's id (record.js keeps `effectState.move`).
+  **The parity test needed one change** to compare it: `diffMon` writes only
+  `duration` for a volatile, so any volatile with a `move`, `hp` or `counter`
+  key fails. This phase adds the `move` key for `choicelock` (a separate
+  commit; the other phases will meet the same gap for their volatiles).
+- **Switch-out.** `clearVolatile` removes the lock, with every other volatile.
+- **`BeforeMove` `-fail`.** The engine has the path (a move other than the
+  locked move and Struggle fails with no PP lost) but no trace reaches it:
+  the request offers only the locked move. It becomes reachable with Encore
+  (`-- LATENT(7c)`).
+- **Scarf mid-turn.** The gen 8+ re-sort in `runAction` already exists
+  (`afterAction`). In singles it cannot change the order of two move actions,
+  so it shows only in the cached `speed` the trace compares. A Scarf that
+  moves by Trick is picked up there.
+- **The set.** `local/traces/slice7e`, 1000 battles from `gen-slice7e.js`.
+  About 57% are scripted openings (lock, trick, knock, thief, scarf, pivot,
+  pp, tera, pair); the rest are random play over slice 6's teams with
+  Choice items and the item moves added. The tally counts, from Showdown's
+  own events, locks added per item, removals by the item's `onStart`, by
+  `DisableMove` and by `BeforeMove`, locked requests (including one for a
+  locked move with no PP), Struggle by a locked holder, Knock Off and Thief
+  on a Choice item, Trick in each direction, a Scarf speed tie, Tera while
+  locked, and a locked pivot.
+- **Properties.** At a move request a live lock (1) is on a Pokemon with a
+  Choice item and the locked move is in its slots, and (2) leaves no other
+  move in `legalChoices` (Struggle when the move has no PP). The pivot
+  playouts' teams hold Choice items and the item moves.

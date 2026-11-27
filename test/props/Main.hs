@@ -145,6 +145,9 @@ pivotPlayouts dex = property $ do
       -- slice 7a: the protect family succeeded, and again with the stall volatile in place (the counter climbed)
       cover 20 "a protect move succeeded (a stall volatile was held)" (seenStall seen > 0)
       cover 5 "a protect move succeeded with a stall counter of 9 or more" (seenStallClimb seen > 0)
+      -- slice 7e
+      cover 20 "a Pokemon was locked by a Choice item at a move request" (seenLocked seen > 0)
+      cover 1 "a locked Pokemon had no PP left in its move (Struggle)" (seenLockStruggle seen > 0)
       case request b of
         Finished _ -> success
         Awaiting {} -> footnote "playout ended without a result" >> failure

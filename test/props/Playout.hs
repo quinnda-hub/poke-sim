@@ -59,7 +59,9 @@ genTeamsWith dx pivotHeavy = (,) <$> genTeam <*> genTeam
     pivots = [m | m <- ["uturn", "flipturn", "voltswitch", "teleport", "partingshot", "chillyreception"], m `elem` moves]
     -- (slice 6d: Sticky Web and the moves that drop a stat, for Eject Pack: self-drops, secondary drops, Defog and Strength Sap)
     dragKit = [m | m <- ["roar", "whirlwind", "dragontail", "circlethrow", "stealthrock", "spikes", "toxicspikes", "toxic", "willowisp", "thunderwave", "spore"
-                        , "stickyweb", "closecombat", "dracometeor", "overheat", "leafstorm", "moonblast", "snarl", "icywind", "defog", "strengthsap"], m `elem` moves]
+                        , "stickyweb", "closecombat", "dracometeor", "overheat", "leafstorm", "moonblast", "snarl", "icywind", "defog", "strengthsap"
+                        -- slice 7e: the item moves that meet a Choice item
+                        , "trick", "switcheroo", "thief", "knockoff"], m `elem` moves]
     pickSpecies
       | pivotHeavy && "shedinja" `elem` species = Gen.frequency [(3, pure "shedinja"), (7, Gen.element species)]
       | otherwise = Gen.element species
@@ -77,10 +79,14 @@ genTeamsWith dx pivotHeavy = (,) <$> genTeam <*> genTeam
       | otherwise = Gen.element moves
     -- Rocky Helmet, and the two items that switch their holder out or force the attacker out (slice 6c)
     pickItem
+      | pivotHeavy && not (null switchItems) && not (null choiceItems) =
+          Gen.frequency [(8, Gen.element switchItems), (4, Gen.element ("rockyhelmet" : switchItems)), (4, Gen.element items), (4, Gen.element choiceItems)]
       | pivotHeavy && not (null switchItems) = Gen.frequency [(4, Gen.element switchItems), (2, Gen.element ("rockyhelmet" : switchItems)), (2, Gen.element items)]
       | pivotHeavy && "rockyhelmet" `elem` items = Gen.frequency [(2, pure "rockyhelmet"), (3, Gen.element items)]
       | otherwise = Gen.element items
+    -- (slice 7e: the Choice items join them, for a lock that Trick, Knock Off, Thief and a pivot meet)
     switchItems = [i | i <- ["ejectbutton", "redcard", "ejectpack"], i `elem` items]
+    choiceItems = [i | i <- ["choiceband", "choicespecs", "choicescarf"], i `elem` items]
     -- Regenerator and Natural Cure act at every switch-out
     pickAbility
       | pivotHeavy && not (null switchAbilities) = Gen.frequency [(3, Gen.element switchAbilities), (3, Gen.element abilities)]
@@ -111,6 +117,11 @@ genTeamsWith dx pivotHeavy = (,) <$> genTeam <*> genTeam
         [ "species" .= sp, "teraType" .= tera, "moves" .= ms, "nature" .= nat, "level" .= lvl, "ability" .= ab, "item" .= it
         , "evs" .= object [K.fromText k .= v | (k, v) <- zip ["hp", "atk", "def", "spa", "spd", "spe"] evs]
         ])
+
+-- | slice 7e: a Pokemon with a choicelock volatile and a Choice item (Showdown: the lock is live; a lock with no Choice item is stale and is
+-- dropped by the next BeforeMove or DisableMove event).
+choiceLocked :: Dex -> Mon -> Bool
+choiceLocked dx m = any (\(Volatile i _) -> i == fromEnum CChoiceLock) (SV.toList (monVolatiles m)) && itemId dx (monItem m) `elem` ["choiceband", "choicespecs", "choicescarf"]
 
 -- | A battle at team preview.
 startBattle :: Dex -> Team -> Team -> Sample Battle
@@ -147,14 +158,52 @@ data Seen = Seen
   -- ^ a Pokemon holding a @stall@ volatile after a step: a protect move succeeded
   , seenStallClimb :: !Int
   -- ^ a @stall@ volatile with a counter of 9 or more: a protect move succeeded again with the volatile in place
+  -- slice 7e
+  , seenLocked :: !Int
+  -- ^ a Pokemon with a live choicelock at a move request
+  , seenLockStruggle :: !Int
+  -- ^ one of those with no usable move left (the locked move out of PP): Struggle
   }
   deriving (Eq, Show)
 
+-- (by field name, so that each phase's fields join in a block of their own)
 instance Semigroup Seen where
-  Seen a b c d e f g h i <> Seen a' b' c' d' e' f' g' h' i' = Seen (a + a') (b + b') (c + c') (d + d') (e + e') (f + f') (g + g') (h + h') (i + i')
+  x <> y =
+    Seen
+      { seenDrags = f seenDrags
+      , seenRegen = f seenRegen
+      , seenCure = f seenCure
+      , seenEject = f seenEject
+      , seenRedCard = f seenRedCard
+      , seenPack = f seenPack
+      , seenPackIn = f seenPackIn
+      -- slice 7a
+      , seenStall = f seenStall
+      , seenStallClimb = f seenStallClimb
+      -- slice 7e
+      , seenLocked = f seenLocked
+      , seenLockStruggle = f seenLockStruggle
+      }
+    where
+      f g = g x + g y
 
 instance Monoid Seen where
-  mempty = Seen 0 0 0 0 0 0 0 0 0
+  mempty =
+    Seen
+      { seenDrags = 0
+      , seenRegen = 0
+      , seenCure = 0
+      , seenEject = 0
+      , seenRedCard = 0
+      , seenPack = 0
+      , seenPackIn = 0
+      -- slice 7a
+      , seenStall = 0
+      , seenStallClimb = 0
+      -- slice 7e
+      , seenLocked = 0
+      , seenLockStruggle = 0
+      }
 
 -- | Play with random legal choices, checking every state on the way, until the battle ends (or the cap).
 --
@@ -199,12 +248,14 @@ playChecked dx t1 t2 = startBattle dx t1 t2 >>= go 0 mempty
 -- could bring it back.
 -- Returns what the step went through.
 checkStep :: Dex -> Battle -> Battle -> (Maybe Choice, Maybe Choice) -> Either String Seen
-checkStep dx b b' (c1, c2) = (mappend stallSeen <$>) $ mapM_ one [(p, i) | (p, side) <- [(P1, bP1), (P2, bP2)], i <- [0 .. SV.length (sMons (side b)) - 1]] >> turnOk >> (((,) <$> drag (P1, c1) <*> drag (P2, c2)) >>= \ds -> pivotsOk ds >> switchOuts >>= \so -> pure (so <> mempty {seenDrags = length (filter id [fst ds, snd ds])}))
+checkStep dx b b' (c1, c2) = (mappend stallSeen <$>) $ mapM_ one [(p, i) | (p, side) <- [(P1, bP1), (P2, bP2)], i <- [0 .. SV.length (sMons (side b)) - 1]] >> turnOk >> (((,) <$> drag (P1, c1) <*> drag (P2, c2)) >>= \ds -> pivotsOk ds >> switchOuts >>= \so -> pure (so <> mempty {seenDrags = length (filter id [fst ds, snd ds]), seenLocked = length lockedNow, seenLockStruggle = length (filter (mustStruggle b) lockedNow)}))
   where
     chose p = if p == P1 then c1 else c2
     -- slice 7a: the stall volatiles after the step (the protect volatiles themselves end with the turn, so only stall shows)
     stalls = [st | p <- [P1, P2], m <- SV.toList (sMons (sideOf p b')), Volatile i st <- SV.toList (monVolatiles m), i == fromEnum CStall]
     stallSeen = mempty {seenStall = length stalls, seenStallClimb = length [() | st <- stalls, esA st >= 9]}
+    -- slice 7e: the sides whose active Pokemon holds a live choicelock at a move request (the step starts from one)
+    lockedNow = [p | Awaiting MoveRequest _ _ <- [request b], p <- [P1, P2], sHasActive (sideOf p b), choiceLocked dx (activeMon p b)]
     abilityIs name m = abilityId dx (monAbility m) == name
     itemIs name m = monItem m /= noItem && itemId dx (monItem m) == name
     knownMoves m = [mvId (dxMoves dx V.! msMove ms) | ms <- SV.toList (monMoves m)]
@@ -337,7 +388,25 @@ checkBattle dx b = do
   mapM_ (\(p, s) -> if any monForceSwitchFlag (SV.toList (sMons s)) then Left (show p ++ ": a force-switch flag at a decision point") else Right ())
     [(P1, bP1 b), (P2, bP2 b)]
   conditions
+  choiceLocks
   where
+    -- slice 7e. At a move request every Pokemon in play has had endTurn's DisableMove event (which drops a stale lock), so a live choicelock
+    -- (1) is on a Pokemon holding a Choice item, with the locked move among its slots; and (2) leaves it no other move in 'legalChoices':
+    -- the Move and MoveTera choices name the locked slot only, or the single Struggle choice when that slot has no PP left. (Switches stay.)
+    choiceLocks = case request b of
+      Awaiting MoveRequest _ _ -> mapM_ lockOk [p | p <- [P1, P2], sHasActive (sideOf p b), choiceLocked dx (activeMon p b)]
+      _ -> Right ()
+    lockOk p = do
+      let m = activeMon p b
+          locked = [esA st | Volatile i st <- SV.toList (monVolatiles m), i == fromEnum CChoiceLock]
+          who = show p ++ ": a choicelock "
+          slotOf n = monMoves m SV.!? (n - 1)
+          named c = case c of Move n -> Just n; MoveTera n -> Just n; _ -> Nothing
+          offered = [n | Just n <- map named (legalChoices b p)]
+      if any (\l -> any ((== l) . msMove) (SV.toList (monMoves m))) locked then Right () else Left (who ++ "with the locked move not among the move slots")
+      if mustStruggle b p
+        then if all (== 1) offered then Right () else Left (who ++ "with no usable move offers more than Struggle")
+        else if all (\n -> fmap msMove (slotOf n) `elem` map Just locked) offered then Right () else Left (who ++ "that offers a move other than the locked one")
     -- The switch flag (slice 6a): only the Pokemon in the active slot has one (a fainted one is no longer 'isActive' there: faintMessages
     -- sets `isActive = false`); a self-switch move's flag (SwitchMove) is on an active Pokemon with HP, a faint's (SwitchForced) on a
     -- fainted one, an Eject Button's on an active one with HP and no item. A flag outlives no decision point except the switch request that asks for it, and a switch request asks exactly
@@ -471,6 +540,8 @@ checkBattle dx b = do
             -- (a pivot or an Eject Button that switches its holder out mid-turn leaves a request while the foe's protect volatile, or
             -- Endure, is still up: the move that triggered it was not blocked by it, as it hit the Endure holder or went around)
             | i `elem` map fromEnum [CProtect, CSpikyShield, CBanefulBunker, CEndure] = esDuration st == 1 && (midTurnRequest || finished)
+            -- slice 7e: choicelock has no duration; its state is the locked move (a Dex move index, or -1 for Struggle)
+            | i == fromEnum CChoiceLock = esDuration st == 0 && esA st >= (-1) && esA st < V.length (dxMoves dx)
             | otherwise = False
           -- a live Pokemon flagged to switch out (a pivot's or an Eject Button's switch request) means the turn is not over
           -- (a battle that ends mid-turn, on Spiky Shield's damage for one, never reaches the Residual that removes them)

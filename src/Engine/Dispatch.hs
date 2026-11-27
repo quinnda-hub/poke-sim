@@ -334,6 +334,10 @@ itemTakeEvent dx owner target source ix mv =
   where
     key = EffectKey EffItem ix
 
+-- | @pokemon.getItem().isChoice@ (slice 7e): the holder's item is one of the three Choice items of the whitelist.
+isChoiceItem :: Dex -> Mon -> Bool
+isChoiceItem dx m = any (\n -> hasItemNamed dx n m) ["choiceband", "choicescarf", "choicespecs"]
+
 -- | What @pokemon.takeItem(source)@ returned (pokemon.ts 1873): @undefined@ with no item, @false@ when a handler refused,
 -- else the item.
 data TakeResult = TookNone | TookRefused | Took !Int
@@ -1165,6 +1169,10 @@ runNative dx n c relay = do
   m <- gets (`monOf` holder)
   fmt <- gets bFormat
   let boots = hasItemNamed dx "heavydutyboots" m
+      -- slice 7e: the choicelock volatile of the holder
+      lockKey = EffectKey EffVolatile (fromEnum CChoiceLock)
+      lockedMove = maybe (-1) esA (effectState m lockKey)
+      dropLock = modify' (modifyMon holder (\x -> if monHp x > 0 then removeVolatile (fromEnum CChoiceLock) x else x))
       -- `isGrounded() && !isSemiInvulnerable()` of the holder (the event's target: the Pokemon being hit or statused, or
       -- the attacker of a BasePower event)
       groundedHolder = isGrounded dx m && not (isSemiInvulnerable m)
@@ -1448,6 +1456,39 @@ runNative dx n c relay = do
     NAssaultVestDisable -> do
       modify' (modifyMon holder (\x -> x {monMoves = SV.map disableStatus (monMoves x)}))
       keep
+    -- slice 7e. choiceband, choicescarf, choicespecs .onStart(pokemon): `pokemon.removeVolatile('choicelock')` (needs HP)
+    NChoiceItemStart -> do
+      modify' (modifyMon holder (\x -> if monHp x > 0 then removeVolatile (fromEnum CChoiceLock) x else x))
+      keep
+    -- the same items' .onModifyMove(move, pokemon): `pokemon.addVolatile('choicelock')`. The volatile's onStart reads
+    -- `this.activeMove.id` (the move being used, which is the event's move here), so the move is recorded once the volatile has
+    -- been added; with the volatile already present addVolatile fails and choicelock has no onRestart, so the lock never moves.
+    -- (`hasBounced` and `sourceEffect === 'snatch'`, which make onStart return false, need Magic Bounce and Snatch: LATENT.)
+    -- Struggle records no Dex index (-1): the lock is gone at the next endTurn (`hasMove('struggle')` is false).
+    NChoiceItemModifyMove -> do
+      added <- addVolatile dx holder CChoiceLock
+      when added $ forM_ (cMove c) $ \mv ->
+        modify' (modifyMon holder (\x -> maybe x (\st -> setEffectState lockKey st {esA = M.findWithDefault (-1) (mvId mv) (dxMoveIx dx)} x)
+          (effectState x lockKey)))
+      keep
+    NChoiceLockStart -> keep
+    -- choicelock.onBeforeMove(pokemon, target, move): a holder whose item is not a Choice item drops the lock and the move goes on;
+    -- otherwise a move other than the locked one and Struggle fails (`-fail`, no PP lost, returns false). The `ignoringItem` and
+    -- `dynamax` exceptions cannot arise (no Klutz, Embargo, Magic Room or Dynamax is supported). The `-fail` path is not reached by any
+    -- recorded trace: a locked holder is offered only its locked move, so it needs a move that the request did not offer.
+    -- LATENT(7c): Encore's onOverrideAction swaps in the encored move at move time, so a Choice holder locked into another move meets this
+    -- `-fail` (no PP lost), with Encore's own BeforeMove order and the choicelock/encore DisableMove interplay unverified.
+    NChoiceLockBeforeMove
+      | not (isChoiceItem dx m) -> dropLock >> keep
+      | Just mv <- cMove c, mvId mv /= "struggle", M.lookup (mvId mv) (dxMoveIx dx) /= Just lockedMove -> returning stop
+      | otherwise -> keep
+    -- choicelock.onDisableMove(pokemon): without a Choice item, or without the locked move among its slots, the lock goes;
+    -- otherwise every other slot is disabled (pokemon.disableMove(id, false, sourceEffect))
+    NChoiceLockDisableMove
+      | not (isChoiceItem dx m) || not (any ((== lockedMove) . msMove) (monMoves m)) -> dropLock >> keep
+      | otherwise -> do
+          modify' (modifyMon holder (\x -> x {monMoves = SV.map (\ms -> if msMove ms /= lockedMove then ms {msDisabled = True} else ms) (monMoves x)}))
+          keep
     -- stealthrock.onSwitchIn(pokemon): `if (pokemon.hasItem('heavydutyboots')) return;`, then
     -- typeMod = clampIntRange(pokemon.runEffectiveness(stealthrock), -6, 6) and this.damage(maxhp * 2 ** typeMod / 8),
     -- which spreadDamage floors and clamps to at least 1 (exact in integers: a power of two over 8)
