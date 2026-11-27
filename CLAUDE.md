@@ -25,7 +25,7 @@ correct, fast simulator first, and no bot work until it exists.
 
   | Machine | CPU | Traces | Parity threads | Fast | Long |
   | --- | --- | --- | --- | --- | --- |
-  | `banana` (workstation) | Core Ultra 7 265K, pinned to P-cores 0-7 under `nice` | 15,600 packed | 8 | about 4 s | about 31 s |
+  | `banana` (workstation) | Core Ultra 7 265K, pinned to P-cores 0-7 under `nice` | 23,800 packed | 4 (measured beside another job) | about 10 s | about 100 s |
   | `blueberry` (laptop) | i7-10710U, 12 threads | 9,000 JSON (before trace format v2) | 6 | about 10 s | about 190 s |
 - Parity test only: `cabal test parity --test-show-details=direct`. It honours
   `POKESIM_TIER`.
@@ -124,7 +124,7 @@ by nothing else.
   `tools/usage/gen-whitelist.js`; regenerate it, never edit it by hand.
 - `local/` is gitignored. It holds the Showdown checkout (`local/showdown`,
   read-only), the packed trace corpus and the pool files (`local/traces`,
-  about 165 MB for the current 15,600 battles), and JSON sets being recorded
+  about 255 MB for the current 23,800 battles), and JSON sets being recorded
   (`local/record`). Write throwaway scripts elsewhere.
 - Scope is bounded by Gen 9 OU usage. Do not implement mechanics for other
   generations or build a generation-agnostic framework.

@@ -2121,11 +2121,16 @@ fainted (44 traces). The property that said otherwise is `checkBattle`'s "hp 0 b
 goes on (cherry-picked into this stack from `faint-bug`).
 
 **The coverage statements** are decided statistically. `statistical` in `test/props/Main.hs` wraps each property that has a `cover`:
-hedgehog's `verifiedTermination` runs it until every cover's Wilson interval (confidence one in a million) lies above its threshold
-(confirmed) or one lies below (the property fails), so a rate near a threshold no longer passes or fails by chance. Hedgehog stops an
-early-terminating run at 100 cases whatever `withTests` says, so the case count is a floor made by one more always-true cover whose
-threshold is the lowest percentage the interval confirms after exactly that many cases. No threshold changed and no cover was dropped.
-A cover whose true rate sits on its threshold would never be decided and the run would not end.
+hedgehog's `verifiedTermination` runs it until every cover's interval (confidence one in a million) lies above its threshold
+(confirmed) or one lies below (the property fails), so a rate near a threshold no longer passes or fails by chance. No threshold
+changed and no cover was dropped. A cover whose true rate sits on its threshold would never be decided and the run would not end.
+Two facts about hedgehog 1.7 shaped it:
+- `wilsonBounds` divides the offset by the denominator twice, so its interval is too narrow, and at few cases it confirms a rare
+  cover with no hit (0 of 100 gives a lower bound of 1.9%). So the run needs a floor of cases: an always-true cover whose threshold
+  is the lowest percentage confirmed after exactly 400 cases. The same narrow interval limits the floor to about 600 cases.
+- An early-terminating run ignores `withTests` and stops at 100 cases once decided. So the long tier's 2000 cases are run again
+  beside it (`withoutCovers`: the same property with its coverage logs removed, "every case of: ..."), as the long tier ran them before.
+The fast tier's properties with covers now run 400 cases or more (more while a cover is undecided).
 
 **LATENT notes resolved.** Built and checked by the set, now plain comments: Mold Breaker against every breakable ability of 8a to 8d
 (Effects.hs, Dispatch.hs), Magic Bounce reaching Good as Gold, Prankster and Libero (8f), Magic Guard against Rough Skin and Rocky
