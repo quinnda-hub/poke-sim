@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-// Generates random battles for "slice 5" (Terastallization without Stellar; phase 5a) and records each on Showdown.
+// Generates random battles for "slice 5" (Terastallization; phase 5a, and Stellar since phase 5b) and records each on Showdown.
 //
 // Every scenario is recorded with `tera: true`, so the policy is offered `move N terastallize` next to every move, and with a
 // `teraChance` (0.1 to 0.5, by battle) so that a side terastallizes at varied turns instead of almost always on the first
@@ -10,7 +10,11 @@
 // a Tera type and a role from a generator of its own, so that slices 1 and 3 stay reproducible from their seeds.
 //
 // The Tera type: about half the sets draw it from the species' usage (data/usage/gen9ou.json `teraTypes`, a species the usage
-// file does not list falls back to the next rule), the rest uniformly from the 18 types (Stellar is not supported until 5b).
+// file does not list falls back to the next rule), the rest uniformly from the 18 types. Then, from a generator of its own (so
+// that the other draws stay what 5a drew), about a quarter of the sets are made Stellar, far above its usage, whatever Tera type
+// they had; a Stellar set often (about a third) gets a multi-hit move (the boost must survive the later hits), and in a
+// non-Struggle battle often (about a third) a low-base-power move (the 60 floor on an unboosted type, of any type). In a double
+// Terastallization battle two times in five both leads are Stellar (both sides Stellar).
 //
 // Roles (about two Pokemon in three have one):
 //   - a Roost user (a Flying type or not), with a Tera type of Flying about two times in five: Roost under Terastallization, as a
@@ -102,6 +106,9 @@ function usageTera(speciesId, rnd) {
 
 function assign(scenario, pool, seed) {
 	const rnd = mulberry32(seed * 3266489917 + 668265263);
+	// Stellar's draws come from a generator of their own, so that adding them leaves every other decision as 5a made it
+	const rs = mulberry32(seed * 2246822519 + 374761393);
+	const ints = (n) => Math.floor(rs() * n);
 	const int = (n) => Math.floor(rnd() * n);
 	const pick = (xs) => xs[int(xs.length)];
 	const only = (xs) => xs.filter(id => hasMove(pool, id));
@@ -145,7 +152,22 @@ function assign(scenario, pool, seed) {
 	};
 	const typeOfMove = (id) => move(id).type;
 
-	const tune = (s) => {
+	const stellarMulti = pool.moves.filter(id => { const m = move(id); return m.basePower > 0 && m.multihit; });
+	const stellarize = (s) => {
+		if (ints(100) >= 25) return;
+		tera(s, 'Stellar');
+		if (kind === 'struggle') return;
+		const putS = (id) => {
+			if (!id || s.moves.includes(id)) return;
+			s.moves[ints(4)] = id;
+			s.moves = [...new Set(s.moves)];
+			while (s.moves.length < 4) { const m = pool.moves[ints(pool.moves.length)]; if (!s.moves.includes(m)) s.moves.push(m); }
+		};
+		if (stellarMulti.length && ints(100) < 33) putS(stellarMulti[ints(stellarMulti.length)]);
+		if (lowBp.length && ints(100) < 33) putS(lowBp[ints(lowBp.length)]);
+	};
+	const tune = (s) => { tuneRole(s); stellarize(s); };
+	const tuneRole = (s) => {
 		randomTera(s);
 		const role = int(100);
 		if (kind === 'struggle') return;
@@ -215,6 +237,8 @@ function assign(scenario, pool, seed) {
 		if (twins) scenario.teams[1] = JSON.parse(JSON.stringify(scenario.teams[0]));
 		for (const s of [lead(0), lead(1)]) steady(s);
 		if (twins) scenario.teams[1][0] = JSON.parse(JSON.stringify(lead(0)));
+		// both sides Stellar
+		if (ints(100) < 40) { tera(lead(0), 'Stellar'); tera(lead(1), 'Stellar'); }
 		const m = 1 + int(4);
 		scenario.choices = [['team 123456', 'team 123456'], [`move ${m} terastallize`, `move ${twins ? m : 1 + int(4)} terastallize`]];
 	} else if (kind === 'trickroom' && hasMove(pool, 'trickroom')) {
@@ -269,7 +293,7 @@ function newTally() {
 	const z = (keys) => Object.fromEntries(keys.map(k => [k, 0]));
 	return {
 		// the action
-		terastallizeCalled: 0, teraType: z(TYPES), teraIntoOriginalType: 0, teraIntoNewType: 0,
+		terastallizeCalled: 0, teraType: z([...TYPES, 'Stellar']), teraIntoOriginalType: 0, teraIntoNewType: 0,
 		teraTurnOne: 0, teraLaterTurn: 0, terastallizedThenStruggle: 0,
 		bothTeraSameTurn: 0, teraActionsSorted: 0, teraActionsSpeedTie: 0, teraActionsUnderTrickRoom: 0,
 		teraActionBeforeHigherPriorityMove: 0, teraOfFasterSide: 0, teraOfSlowerSide: 0,
@@ -295,15 +319,36 @@ function newTally() {
 		ogerponTealTera: 0, ogerponNoOp: 0, ogerponNoOpRepeated: 0, ogerponTeraOverParadoxOrUnburden: 0, ogerponTeraOverOtherAbility: 0,
 		embodyBoostAtTera: 0, embodyBoostOnSwitchIn: 0, ogerponTealTeraFainted: 0, ogerponFaintedAbilityRestored: 0,
 		ogerponSwitchedBackInAsTealTera: 0,
+		// Stellar (phase 5b). The STAB step, by the boost's state (the list is stellarBoostedTypes, the flag move.stellarBoosted; an
+		// original type is one of the Pokemon's stored types): first use, a repeat use, and a later hit of the same multi-hit use
+		stellarTera: 0, bothSidesStellar: 0,
+		stellarFirstOriginal2x: 0, stellarFirstNew1_2x: 0, stellarRepeatOriginal1_5x: 0, stellarRepeatNew1x: 0,
+		stellarMultihitLaterHitOriginal: 0, stellarMultihitLaterHitNew: 0, stellarMultihitFirstHit: 0,
+		// the 60 floor of a Stellar user, by what decided it (the Struggle one is a floor on the typeless '???')
+		stellarFloorApplied: 0, stellarFloorSkippedTypeBoosted: 0, stellarFloorSkippedPriority: 0, stellarFloorSkippedMultihit: 0,
+		stellarFloorSkippedVariablePower: 0, stellarFloorNotNeededBasePowerAtLeast60: 0, stellarStruggleFloor: 0,
+		// defence: the types are unchanged
+		stellarHitResistedByOriginalTypes: 0, stellarHitWeakByOriginalTypes: 0, stellarFlyingImmuneToGround: 0, stellarHitByGround: 0,
+		stellarSwitchInStealthRock: 0, stellarSwitchInSpikesGrounded: 0, stellarSwitchInSpikesFlying: 0, stellarPoisonAbsorbsToxicSpikes: 0,
+		stellarSteelOrFlyingSkipsToxicSpikes: 0, stellarGroundedPoisonedByToxicSpikes: 0, stellarPsnImmuneByPoisonOrSteel: 0,
+		stellarPoisonedWithoutPoisonOrSteel: 0,
+		// switching, fainting, Roost, Ogerpon
+		stellarSwitchedOut: 0, stellarSwitchedBackIn: 0, stellarSwitchedBackInWithBoosts: 0, stellarFainted: 0, stellarFaintedWithBoosts: 0,
+		stellarRoostFlying: 0, stellarRoostNonFlying: 0, stellarRoostVolatileFailed: 0, stellarOgerponNoOp: 0, stellarOgerponNoOpRepeated: 0,
+		stellarFlyingInGrassyTerrain: 0, stellarGroundedInGrassyTerrain: 0,
 		// structurally zero
+		// - Stellar's boosted list is never cleared: `stellarBoostedTypes = []` is in the constructor only (pokemon.ts 504), so a
+		//   switch or a faint keeps it (the faint cannot be seen: no fainted Pokemon returns; the switch is stellarSwitchedBackInWithBoosts)
+		// - a Stellar-type move against a terastallized target (runEffectiveness gives typeMod 1, pokemon.ts 2232): Tera Blast is
+		//   banned in gen9ou and Tera Starstorm belongs to Terapagos-Stellar
+		// - Terapagos-Stellar (no Terapagos forme is supported): its move.type 'Stellar', and the list not growing (1839)
 		// - Tera offered to a Pokemon that must Struggle: the request omits canTerastallize (pokemon.ts 1133-1158), so the policy
 		//   is never offered it, and the engine offers none
-		// - Stellar: a Stellar Tera type is rejected at parseTeam until 5b, and the generator never draws it
 		// - Morpeko: the Tera branch needs Morpeko-Hangry, which only Hunger Switch makes, and it is unsupported
 		// - a Pokemon locked into a move: no locking move or volatile is supported yet (no Choice item, no Outrage-style move)
 		// - Illusion, Terapagos-Terastal and a transformed Ogerpon: no such ability, forme or move is supported
 		// - an Ogerpon whose ability is cantsuppress: no supported ability carries the flag
-		teraOfferedWhileStruggling: 0, stellarTera: 0, morpekoTeraBranch: 0, teraWhileLockedIntoMove: 0, illusionOrTerapagosTera: 0, ogerponWithCantSuppressAbility: 0,
+		teraOfferedWhileStruggling: 0, stellarMoveVsTerastallizedTarget: 0, terapagosStellar: 0, morpekoTeraBranch: 0, teraWhileLockedIntoMove: 0, illusionOrTerapagosTera: 0, ogerponWithCantSuppressAbility: 0,
 	};
 }
 
@@ -327,7 +372,9 @@ function install() {
 			const foe = pokemon.side.foe.active[0];
 			if (foe && teraTurn.get(foe) === this.battle.turn) c.bothTeraSameTurn++;
 			if (foe) { if (pokemon.speed > foe.speed) c.teraOfFasterSide++; else if (pokemon.speed < foe.speed) c.teraOfSlowerSide++; }
-			if (pokemon.types.includes(pokemon.teraType)) c.teraIntoOriginalType++; else c.teraIntoNewType++;
+			if (pokemon.teraType === 'Stellar') {
+				if (foe && foe.side.pokemon.some(p => p.terastallized === 'Stellar')) c.bothSidesStellar++;
+			} else if (pokemon.types.includes(pokemon.teraType)) c.teraIntoOriginalType++; else c.teraIntoNewType++;
 		}
 		state.inTera = true;
 		const r = terastallize.call(this, pokemon);
@@ -335,6 +382,7 @@ function install() {
 		if (c) {
 			if (pokemon.terastallized) {
 				teraTurn.set(pokemon, this.battle.turn);
+				if (pokemon.terastallized === 'Stellar') c.stellarTera++;
 				if (pokemon.species.id === 'ogerpontealtera') {
 					c.ogerponTealTera++;
 					if (['protosynthesis', 'quarkdrive', 'unburden'].includes(before.ability)) c.ogerponTeraOverParadoxOrUnburden++;
@@ -342,6 +390,7 @@ function install() {
 				}
 			} else if (pokemon.species.baseSpecies === 'Ogerpon') {
 				c.ogerponNoOp++;
+				if (pokemon.teraType === 'Stellar') { c.stellarOgerponNoOp++; if (noops.get(pokemon)) c.stellarOgerponNoOpRepeated++; }
 				if (noops.get(pokemon)) c.ogerponNoOpRepeated++;
 				noops.set(pokemon, (noops.get(pokemon) || 0) + 1);
 			}
@@ -384,7 +433,20 @@ function install() {
 			else if (relayVar === 1.5 && target.terastallized === sourceEffect.type) c.stabNewTeraType++;
 			else if (relayVar === 1.5) c.stabKeptOriginalTypeAfterTera++;
 		}
-		if (c && eventid === 'BasePower' && target && target.terastallized && sourceEffect && sourceEffect.type) {
+		if (c && eventid === 'BasePower' && target && target.terastallized === 'Stellar' && sourceEffect && sourceEffect.type) {
+			// a Stellar user's floor (1718-1719): any type not yet boosted
+			const dexMove = dex.moves.get(sourceEffect.id);
+			const bp = r === undefined ? relayVar : r;
+			if (bp >= 60) c.stellarFloorNotNeededBasePowerAtLeast60++;
+			else if (dexMove.priority > 0) c.stellarFloorSkippedPriority++;
+			else if (dexMove.multihit) c.stellarFloorSkippedMultihit++;
+			else if ((sourceEffect.basePower === 0 || sourceEffect.basePower === 150) && sourceEffect.basePowerCallback) c.stellarFloorSkippedVariablePower++;
+			else if (target.stellarBoostedTypes.includes(sourceEffect.type)) c.stellarFloorSkippedTypeBoosted++;
+			else {
+				c.stellarFloorApplied++;
+				if (sourceEffect.type === '???') c.stellarStruggleFloor++;
+			}
+		} else if (c && eventid === 'BasePower' && target && target.terastallized && sourceEffect && sourceEffect.type) {
 			const dexMove = dex.moves.get(sourceEffect.id);
 			const bp = r === undefined ? relayVar : r;
 			if (target.terastallized !== sourceEffect.type) {
@@ -401,11 +463,35 @@ function install() {
 		return r;
 	};
 
-	// a hit on a terastallized target: what its Tera type changed
+	// a Stellar attacker's STAB step (modifyDamage 1835-1841), by the boost's state before the hit
+	const modifyDamage = BattleActions.prototype.modifyDamage;
+	BattleActions.prototype.modifyDamage = function (baseDamage, pokemon, target, move, ...rest) {
+		const c = t();
+		if (!(c && pokemon.terastallized === 'Stellar' && move.type && move.type !== '???')) {
+			return modifyDamage.call(this, baseDamage, pokemon, target, move, ...rest);
+		}
+		const listed = pokemon.stellarBoostedTypes.includes(move.type), flagged = !!move.stellarBoosted;
+		const original = pokemon.types.includes(move.type);
+		const r = modifyDamage.call(this, baseDamage, pokemon, target, move, ...rest);
+		if (!listed) {
+			if (original) c.stellarFirstOriginal2x++; else c.stellarFirstNew1_2x++;
+			if (move.multihit) c.stellarMultihitFirstHit++;
+		} else if (flagged) {
+			if (original) c.stellarMultihitLaterHitOriginal++; else c.stellarMultihitLaterHitNew++;
+		} else if (original) c.stellarRepeatOriginal1_5x++;
+		else c.stellarRepeatNew1x++;
+		return r;
+	};
+
+	// a hit on a terastallized target: what its Tera type changed (for Stellar: the types stay)
 	const getDamage = BattleActions.prototype.getDamage;
 	BattleActions.prototype.getDamage = function (source, target, move, ...rest) {
 		const c = t();
-		if (c && target && target.terastallized && move && move.type && move.type !== '???' && move.category !== 'Status') {
+		if (c && target && target.terastallized === 'Stellar' && move && move.type && move.type !== '???' && move.category !== 'Status') {
+			const orig = dex.getEffectiveness(move.type, target.types);
+			if (orig < 0) c.stellarHitResistedByOriginalTypes++;
+			if (orig > 0) c.stellarHitWeakByOriginalTypes++;
+		} else if (c && target && target.terastallized && move && move.type && move.type !== '???' && move.category !== 'Status') {
 			const orig = dex.getEffectiveness(move.type, target.types);
 			const now = dex.getEffectiveness(move.type, [target.terastallized]);
 			if (now < 0 && orig >= 0) c.teraTargetResistsNew++;
@@ -425,7 +511,9 @@ function install() {
 		const r = runImmunity.call(this, source, message);
 		const c = t();
 		const type = typeof source === 'string' ? source : source.type; // (a move or a type)
-		if (c && this.terastallized && type && type !== '???') {
+		if (c && this.terastallized === 'Stellar' && type === 'Ground') {
+			if (!r) c.stellarFlyingImmuneToGround++; else c.stellarHitByGround++;
+		} else if (c && this.terastallized && type && type !== '???') {
 			const wasImmune = !dex.getImmunity(type, this.types) || (type === 'Ground' && this.types.includes('Flying'));
 			if (!r && !wasImmune) c.teraImmunityGained++;
 			if (r && wasImmune) c.teraImmunityLost++;
@@ -439,7 +527,10 @@ function install() {
 	Pokemon.prototype.runStatusImmunity = function (type, message) {
 		const r = runStatusImmunity.call(this, type, message);
 		const c = t();
-		if (c && this.terastallized && type === 'psn') {
+		if (c && this.terastallized === 'Stellar' && type === 'psn') {
+			if (!r && (this.types.includes('Poison') || this.types.includes('Steel'))) c.stellarPsnImmuneByPoisonOrSteel++;
+			if (r && !(this.types.includes('Poison') || this.types.includes('Steel'))) c.stellarPoisonedWithoutPoisonOrSteel++;
+		} else if (c && this.terastallized && type === 'psn') {
 			const was = this.types.includes('Poison') || this.types.includes('Steel');
 			const now = this.terastallized === 'Poison' || this.terastallized === 'Steel';
 			if (!r && now && !was) c.teraPsnImmuneByPoisonOrSteel++;
@@ -459,7 +550,15 @@ function install() {
 		state.inSwitch = true;
 		const r = runSwitch.call(this, pokemon);
 		state.inSwitch = false;
-		if (c && wasTera) {
+		if (c && wasTera && pokemon.terastallized === 'Stellar') {
+			if (had.stealthrock) c.stellarSwitchInStealthRock++;
+			if (had.spikes) { if (types.includes('Flying')) c.stellarSwitchInSpikesFlying++; else c.stellarSwitchInSpikesGrounded++; }
+			if (had.toxicspikes) {
+				if (types.includes('Poison') && !('toxicspikes' in pokemon.side.sideConditions)) c.stellarPoisonAbsorbsToxicSpikes++;
+				else if (types.includes('Steel') || types.includes('Flying')) c.stellarSteelOrFlyingSkipsToxicSpikes++;
+				else if (pokemon.status) c.stellarGroundedPoisonedByToxicSpikes++;
+			}
+		} else if (c && wasTera) {
 			c.teraSwitchedBackIn += 0; // counted at switchIn
 			if (had.stealthrock) c.teraSwitchInStealthRock++;
 			if (had.spikes) { if (pokemon.terastallized === 'Flying') c.teraSwitchInSpikesFlying++; else c.teraSwitchInSpikesGrounded++; }
@@ -480,6 +579,11 @@ function install() {
 		if (c) {
 			const old = pokemon.side.active[pos];
 			if (old && old !== pokemon && old.terastallized && old.hp) c.teraSwitchedOut++;
+			if (old && old !== pokemon && old.terastallized === 'Stellar' && old.hp) c.stellarSwitchedOut++;
+			if (pokemon.terastallized === 'Stellar') {
+				c.stellarSwitchedBackIn++;
+				if (pokemon.stellarBoostedTypes.length) c.stellarSwitchedBackInWithBoosts++;
+			}
 			if (pokemon.terastallized) {
 				c.teraSwitchedBackIn++;
 				if (pokemon.species.id === 'ogerpontealtera') c.ogerponSwitchedBackInAsTealTera++;
@@ -495,7 +599,10 @@ function install() {
 		const c = t();
 		const id = typeof status === 'string' ? status : status.id;
 		if (c && id === 'roost') {
-			if (this.terastallized) {
+			if (this.terastallized === 'Stellar') {
+				if (this.types.includes('Flying')) c.stellarRoostFlying++; else c.stellarRoostNonFlying++;
+				if (!r || !this.volatiles.roost) c.stellarRoostVolatileFailed++;
+			} else if (this.terastallized) {
 				if (this.terastallized === 'Flying') c.roostTeraFlying++; else c.roostTeraNonFlying++;
 				if (!r || !this.volatiles.roost) c.roostVolatileFailedUnderTera++;
 			} else c.roostNotTera++;
@@ -511,6 +618,11 @@ function install() {
 			for (const side of this.sides) {
 				const p = side.active[0];
 				if (!p || !p.terastallized || !p.hp) continue;
+				if (p.terastallized === 'Stellar') {
+					if (this.field.terrain === 'grassyterrain' && !p.types.includes('Flying')) c.stellarGroundedInGrassyTerrain++;
+					if (this.field.terrain === 'grassyterrain' && p.types.includes('Flying')) c.stellarFlyingInGrassyTerrain++;
+					continue;
+				}
 				if (this.field.terrain === 'grassyterrain') {
 					if (p.terastallized === 'Flying') c.teraFlyingInGrassyTerrain++; else c.teraGroundedInGrassyTerrain++;
 				}
@@ -529,6 +641,10 @@ function install() {
 			for (const entry of this.faintQueue) {
 				const p = entry.target;
 				if (p.terastallized) c.teraFainted++;
+				if (p.terastallized === 'Stellar') {
+					c.stellarFainted++;
+					if (p.stellarBoostedTypes.length) c.stellarFaintedWithBoosts++;
+				}
 				if (p.species.id === 'ogerpontealtera') { c.ogerponTealTeraFainted++; watched.push(p); }
 			}
 		}

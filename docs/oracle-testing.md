@@ -70,7 +70,7 @@ back to `local/showdown`.
 | `gen-slice0.js <outDir> <count> [firstSeed] [format] [profile]` | Generate random slice-0 battles and record each. Deterministic per seed. |
 | `gen-slice1.js <outDir> <count> <poolFile> [firstSeed]` | Generate random slice-1 battles from the engine's own pool and record each, then print a coverage tally from Showdown's log. Deterministic per seed and pool. |
 | `gen-slice3.js <outDir> <count> <poolFile> [firstSeed]` | Slice 1's teams with hazard, screen, Tailwind and Trick Room setters, Light Clay, Flying, Poison and Steel types, Shedinja, low levels, and abilities and items weighted toward Toxic Debris and Heavy-Duty Boots, recorded, then a tally of the hazard outcomes (each hazard's damage and layers, absorption, immunities, Boots blocks, hazard KOs, the order of several hazards on one switch-in, screens against each category and crits, both screens on one side, expiries, Trick Room restarts and speed ties under it, weather setters as moves and abilities, rocks, sand chip and immunities, weather speed abilities and Hydration, terrain setters, Terrain Extender, grounding, Overcoat and Leaf Guard, Protosynthesis and Quark Drive with and without Booster Energy, the seeds and Unburden; about one battle in six pairs a faster Paradox or seed holder against a slower opposing setter, so switch-in priority decides the order). Deterministic per seed and pool. Re-record the whole set when the pool changes. |
-| `gen-slice5.js <outDir> <count> <poolFile> [firstSeed]` | Slice 3's and slice 0's teams with a Tera type on every set (about half from usage, the rest uniform over the 18 types other than Stellar), recorded with Tera choices offered (`tera: true`, a `teraChance` of 0.1-0.5), plus scripted double Teras, Trick Room Teras and resistance duels, then a tally of each Tera branch. Deterministic per seed and pool. |
+| `gen-slice5.js <outDir> <count> <poolFile> [firstSeed]` | Slice 3's and slice 0's teams with a Tera type on every set (about half from usage, the rest uniform over the 18 types; about a quarter of sets are then made Stellar), recorded with Tera choices offered (`tera: true`, a `teraChance` of 0.1-0.5), plus scripted double Teras, Trick Room Teras and resistance duels, then a tally of each Tera branch. Deterministic per seed and pool. |
 | `gen-slice4.js <outDir> <count> <poolFile> [firstSeed]` | Slice 3's teams, with move slots weighted toward the moves with handler code and the conditions their bodies branch on (weights, statuses, boosts, held and used items, weather, terrain, grounding), recorded, then a tally of each branch from Showdown's own events. Deterministic per seed and pool. |
 | `gen-slice2.js <outDir> <count> <poolFile> [firstSeed] [profile]` | Slice 1's teams (or, with `struggle`, slice 0's Struggle teams) with abilities and items from the engine's pool, recorded, then a tally of the outcomes that distinguish each handler, observed by wrapping Showdown's event methods. Deterministic per seed and pool. |
 | `export-dex.js [outDir] [mod]` | Export species, moves, abilities, items, types and natures to `data/gen9/`. |
@@ -136,7 +136,7 @@ Slice 5 (Terastallization) records with Tera choices offered:
 
 ```sh
 cabal run -v0 engine-pool > local/traces/slice5-pool.json
-node tools/oracle/gen-slice5.js local/traces/slice5 1000 local/traces/slice5-pool.json
+node tools/oracle/gen-slice5.js local/traces/slice5 1200 local/traces/slice5-pool.json
 ```
 
 Its teams put the moves with handler code where their bodies branch: weights
@@ -164,7 +164,7 @@ pass every argument through and run nothing Showdown would not run.
 
 Traces live under `local/` and are not committed. Slice 0's 800 battles take
 about 280 MB, slice 1's 600 about 320 MB, slice 2's 900 about 340 MB and slice 3's 1,500
-about 1.0 GB, slice 4's 1,500 about 1.0 GB and slice 5's 1,000 about 647 MB. They
+about 1.0 GB, slice 4's 1,500 about 1.0 GB and slice 5's 1,200 about 769 MB. They
 are reproducible from the seeds.
 
 To isolate one behaviour, write a scenario by hand and give it explicit choices:

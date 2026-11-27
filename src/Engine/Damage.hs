@@ -9,6 +9,8 @@ module Engine.Damage
   , monTypes
   , monTypesPreTera
   , teraFloor
+  , isStellar
+  , stellarBoosts
   , hasTypeNamed
   , hasItemNamed
   , typeIdNamed
@@ -22,6 +24,7 @@ module Engine.Damage
   , finalDamage
   ) where
 
+import Data.Bits (testBit)
 import qualified Data.Text as T
 import Data.Maybe (fromMaybe)
 import qualified Data.Vector as V
@@ -55,14 +58,26 @@ critDenominator ratio = case max 0 (min 4 ratio) of
 -- volatiles that have the handler, as a pure function; at most one does, so it sorts nothing and draws nothing. The fast path,
 -- a Pokemon with no volatile, returns the stored types: exact because no ability, item, status, side, field or foe handler of
 -- the event exists.
--- A Terastallized Pokemon returns @[terastallized]@ before the event (2161-2163; Stellar, which keeps its types, is not
--- supported). Roost's volatile does not apply then, and cannot be added (data/moves.ts 15449).
+-- A Terastallized Pokemon returns @[terastallized]@ before the event (2161-2163), unless its Tera type is Stellar, which
+-- keeps its types and runs the event as usual. Roost's volatile does not apply to a Terastallized Pokemon, and cannot be added
+-- (data/moves.ts 15449).
 -- LATENT: @addedType@ (Trick-or-Treat) is appended after the event (2167) and is not modelled. @setType@ (Soak, Burn Up)
 -- would overwrite 'monType1'/'monType2'.
 monTypes :: Dex -> Mon -> (Int, Int)
 monTypes dx m
-  | monTerastallized m = (monTeraType m, noType)
+  | monTerastallized m && not (isStellar dx m) = (monTeraType m, noType)
   | otherwise = monTypesPreTera dx m
+
+-- | @pokemon.terastallized === 'Stellar'@.
+isStellar :: Dex -> Mon -> Bool
+isStellar dx m = monTerastallized m && typeIsNamed dx (monTeraType m) "Stellar"
+
+-- | Whether this hit's STAB step (battle-actions.ts 1835-1840) takes the Stellar branch for the attacker: it is Stellar, the move
+-- has a type (@type !== '???'@, 1822) and the type is not yet in @stellarBoostedTypes@, or the move already carries
+-- @stellarBoosted@ (an earlier hit of the same use). The branch then marks the move and pushes the type.
+stellarBoosts :: Dex -> Mon -> MoveData -> Bool
+stellarBoosts dx m mv =
+  isStellar dx m && mvType mv /= noType && (not (testBit (monStellarBoosted m) (mvType mv)) || mvStellarBoosted mv)
 
 -- | @pokemon.getTypes(false, true)@ (@preterastallized@): the stored types through the @Type@ event, as 'monTypes' computes
 -- them for a Pokemon that has not Terastallized.
@@ -227,8 +242,13 @@ modifyDamage f dx attacker defender mv crit roll16 base1 =
       ty = mvType mv
       stab = ty /= noType && (ty == at1 || ty == at2 || ty == pt1 || ty == pt2)
       teraStab = monTerastallized attacker && monTeraType attacker == ty && (ty == pt1 || ty == pt2)
-      -- LATENT: runEvent('ModifySTAB') (1847), after the 2x: its only listener, Adaptability, is not supported.
-      base4 = if stab then modify f base3 (if teraStab then 8192 else 6144) else base3
+      -- Stellar (1835-1841): 2 for STAB, else [4915, 4096] (battle.modify: numerator 4915 over 4096, a modifier of 4915); no
+      -- ModifySTAB. Not Stellar: the 2x above, then runEvent('ModifySTAB') (1847), whose only listener, Adaptability, is not
+      -- supported (LATENT).
+      base4
+        | stellarBoosts dx attacker mv = modify f base3 (if stab then 8192 else 4915)
+        | stab = modify f base3 (if teraStab then 8192 else 6144)
+        | otherwise = base3
       tm = moveTypeMod dx mv defender
       base5
         | tm > 0 = base4 * 2 ^ tm
@@ -244,14 +264,18 @@ modifyDamage f dx attacker defender mv crit roll16 base1 =
 -- | The base-power floor of a Terastallized user (battle-actions.ts 1717-1726): a move of the user's Tera type (`hasType` reads
 -- 'monTypes': the Tera type alone) with base power under 60, whose dex priority is at most 0 and which has no multihit (the
 -- dex's), and is not variable-power (@basePower@ 0 or 150 with a @basePowerCallback@), is raised to 60. Runs after the
--- @BasePower@ event and its clamp. (Stellar's variant is phase 5b.)
+-- @BasePower@ event and its clamp. A Stellar user's condition is instead that the move's type (Struggle's '???' included, which
+-- is never pushed) is not in @stellarBoostedTypes@ (1718-1719).
 teraFloor :: Dex -> Mon -> MoveData -> Int -> Int
 teraFloor dx user mv power
-  | monTerastallized user, mvType mv /= noType, mvType mv == fst (monTypes dx user)
+  | monTerastallized user, ofType
   , power < 60, mvPriority mv <= 0, mrHits (mvRule mv) == OneHit
   , not ((mvPower mv == 0 || mvPower mv == 150) && hasCallback) = 60
   | otherwise = power
   where
+    ofType
+      | isStellar dx user = mvType mv == noType || not (testBit (monStellarBoosted user) (mvType mv))
+      | otherwise = mvType mv /= noType && mvType mv == fst (monTypes dx user)
     hasCallback = case moveSpec mv POwn EvBasePowerCallback of
       Just _ -> True
       Nothing -> False

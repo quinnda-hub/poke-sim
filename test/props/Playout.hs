@@ -12,6 +12,7 @@ module Playout
   , stepCap
   ) where
 
+import Data.Bits (complement, (.&.))
 import Control.Monad.Trans.State.Strict (State, modify', runState)
 import Data.Aeson (Value (..), object, (.=))
 import qualified Data.Aeson.Key as K
@@ -45,7 +46,7 @@ genTeams dx = (,) <$> genTeam <*> genTeam
     abilities = supportedAbilities dx
     items = supportedItems dx
     natures = M.keys (dxNatureIx dx)
-    -- every real type; Stellar is rejected by parseTeam until phase 5b
+    -- every real type, and Stellar, which a quarter of the sets take (its rules are the rarest to reach at random)
     teraTypes = [t | t <- V.toList (dxTypeNames dx), t `notElem` ["Stellar", "???"]]
     genTeam = do
       n <- Gen.int (Range.linear 1 6)
@@ -61,7 +62,7 @@ genTeams dx = (,) <$> genTeam <*> genTeam
       evs <- Gen.list (Range.singleton 6) (Gen.int (Range.linear 0 252))
       ab <- Gen.element abilities
       it <- Gen.element items
-      tera <- Gen.element teraTypes
+      tera <- Gen.frequency [(3, Gen.element teraTypes), (1, pure "Stellar")]
       pure (object
         [ "species" .= sp, "teraType" .= tera, "moves" .= ms, "nature" .= nat, "level" .= lvl, "ability" .= ab, "item" .= it
         , "evs" .= object [K.fromText k .= v | (k, v) <- zip ["hp", "atk", "def", "spa", "spd", "spe"] evs]
@@ -96,7 +97,22 @@ playChecked dx t1 t2 = startBattle dx t1 t2 >>= go 0
             r <- step dx b cs
             case r of
               Left e -> pure (Left ("step rejected legal choices " ++ show cs ++ ": " ++ show e))
-              Right b' -> go (n + 1) b'
+              Right b' -> either (pure . Left) (const (go (n + 1) b')) (checkStep b b')
+
+-- | What one decision step may do to a Stellar Pokemon's @stellarBoostedTypes@ (pokemon.ts 504 sets it in the constructor
+-- and nothing ever clears or removes from it, so a switch or a faint keeps it): it never loses a type, and a Pokemon that
+-- is on the bench before and after the step does not change it.
+checkStep :: Battle -> Battle -> Either String ()
+checkStep b b' = mapM_ one [(p, i) | (p, side) <- [(P1, bP1), (P2, bP2)], i <- [0 .. SV.length (sMons (side b)) - 1]]
+  where
+    side' p = if p == P1 then bP1 b' else bP2 b'
+    side0 p = if p == P1 then bP1 b else bP2 b
+    one (p, i) = case (sMons (side0 p) SV.!? i, sMons (side' p) SV.!? i) of
+      (Just m0, Just m1)
+        | monStellarBoosted m0 .&. complement (monStellarBoosted m1) /= 0 -> Left (show p ++ " member " ++ show i ++ " lost a boosted type")
+        | not (monActive m0) && not (monActive m1) && monStellarBoosted m0 /= monStellarBoosted m1 ->
+            Left (show p ++ " member " ++ show i ++ " changed its boosted types on the bench")
+      _ -> Right ()
 
 -- | Advance with random legal choices for at least @n@ steps and until the predicate holds, or the end.
 advanceWhile :: Dex -> Int -> (Battle -> Bool) -> Battle -> Sample (Either String Battle)
@@ -183,7 +199,7 @@ checkBattle dx b = do
       (False, False) -> Left (show p ++ " is not asked but has legal choices")
       _ -> Right ()
     side (p, s) = do
-      mapM_ (mon p) (SV.toList (sMons s))
+      mapM_ (mon p (sTeraUsed s)) (SV.toList (sMons s))
       -- Terastallization: at most one member is terastallized, and none unless the side has used its Tera (a member that
       -- fainted lost `terastallized` but the side keeps having used it)
       let terad = length (filter monTerastallized (SV.toList (sMons s)))
@@ -193,7 +209,7 @@ checkBattle dx b = do
       -- a Tera choice is legal only together with the move of the same slot
       let cs = legalChoices b p
       if and [Move n `elem` cs | MoveTera n <- cs] then Right () else Left (show p ++ ": a Tera choice without its move")
-    mon p m = do
+    mon p sTeraUsed' m = do
       let who = show p ++ " " ++ show (monSpecies m) ++ ": "
           bad what = Left (who ++ what)
       if monHp m < 0 || monHp m > monMaxHp m then bad ("hp " ++ show (monHp m) ++ " outside 0.." ++ show (monMaxHp m)) else Right ()
@@ -246,13 +262,22 @@ checkBattle dx b = do
           roosted = fromEnum CRoost `elem` ids
           without = [t | t <- baseTypes, Just t /= flyingId]
           expectedTypes = if roosted then (if null without then maybe [] pure normalId else without) else baseTypes
-      -- a terastallized Pokemon's types are exactly its Tera type, and a fainted one is not terastallized
-      let expected' = if monTerastallized m then [monTeraType m] else expectedTypes
+      -- a terastallized Pokemon's types are exactly its Tera type, except for Stellar, which keeps the types it had; a fainted
+      -- one is not terastallized
+      let stellar = dxTypeNames dx V.!? monTeraType m == Just "Stellar"
+          expected' = if monTerastallized m && not stellar then [monTeraType m] else expectedTypes
       if monTerastallized m && (monFainted m || roosted) then bad "terastallized and fainted, or with a Roost" else Right ()
       -- the base ability is the set's, except in a Tera forme, where the forme change made it Embody Aspect (Teal)
       let teraForme = spBaseSpecies sp == "Ogerpon" && spBattleOnly sp /= ""
       if (if teraForme then abilityId dx (monBaseAbility m) == "embodyaspectteal" else monBaseAbility m == monSetAbility m)
         then Right () else bad "the base ability is not the set's, outside a Tera forme"
+      -- the types a Stellar boost was spent on: only a Pokemon whose Tera type is Stellar has any, once its side has used its Tera,
+      -- and each is a real type. They are spent while terastallized and stay when it faints, so a Pokemon with any is
+      -- terastallized or fainted.
+      let boosted = monStellarBoosted m
+          realTypes = foldr (\(i, t) acc -> if t `notElem` ["Stellar", "???"] then acc + 2 ^ i else acc) (0 :: Int) (zip [0 :: Int ..] (V.toList (dxTypeNames dx)))
+      if boosted == 0 || (stellar && sTeraUsed' && (monTerastallized m || monFainted m) && boosted .&. complement realTypes == 0)
+        then Right () else bad ("boosted types " ++ show boosted ++ " without a Stellar Tera type or the side's Tera, or with a type that is not real")
       if storedTypes == baseTypes && gotTypes == expected' && (not roosted || all (\t -> Just t /= flyingId) gotTypes)
         then Right ()
         else bad ("stored types " ++ show storedTypes ++ ", getTypes " ++ show gotTypes ++ " but " ++ show expected')

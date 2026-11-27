@@ -105,6 +105,10 @@ data MoveData = MoveData
   -- with the metadata of the export and the bodies of "Engine.Effects" @moveBodies@. Empty when the move has none or
   -- when a handler has no body ('cnReject').
   --
+  , mvStellarBoosted :: !Bool
+  -- ^ @move.stellarBoosted@ (sim/dex-moves.ts 339): a Stellar Pokemon's boost was spent on this use of the move, so its later hits
+  -- keep it. Always 'False' in the dex; 'Engine.Turn' sets it on the copy in use.
+  --
   -- A 'MoveData' is also the move in use (Showdown's @ActiveMove@, a copy made when the move is used): the handlers
   -- that Showdown lets change the move return a changed copy, and every later step of the use reads the copy. It is never
   -- stored in the battle state.
@@ -575,7 +579,7 @@ moveOf tix condLookup conds v = do
         Nothing | ERoost `elem` mrSelf rule, not (cnSupported roost) -> Just ("condition roost is not supported: " <> fromMaybe "" (cnReject roost))
         _ -> rejected0
       supported = isNothing rejected && executable rule
-  pure (MoveData ident ty (cat == "Physical") (cat == "Status") bp acc prio crit pp noBoost (truthyField "struggleRecoil" v) rule rejected supported effect)
+  pure (MoveData ident ty (cat == "Physical") (cat == "Status") bp acc prio crit pp noBoost (truthyField "struggleRecoil" v) rule rejected supported effect False)
 
 natureOf :: Value -> Either String NatureData
 natureOf v = do
