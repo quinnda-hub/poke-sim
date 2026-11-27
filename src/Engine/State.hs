@@ -282,6 +282,9 @@ data Side = Side
   -- ^ A member has terastallized, so every member's @canTerastallize@ is null (battle-actions.ts 2004-2006).
   -- @canTerastallize@ itself is not stored: it is @teraType@ unless this is set (battle-actions.ts 1982-1988; no
   -- gen9ou Pokemon can hold a Z-crystal or Mega Evolve).
+  -- slice 8b
+  , sTotalFainted :: !Int
+  -- ^ @side.totalFainted@ (side.ts 263: 0 at the start; battle.ts 2601: +1 for each faint while it is below 100). Supreme Overlord reads it.
   }
   deriving (Eq, Show)
 

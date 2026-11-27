@@ -55,6 +55,7 @@ module Engine.Dispatch
   , runStatusImmunity
   , effectiveWeather
   , boostMon
+  , modifyBoost -- slice 8b
   , moveCause
   , clampStage
   , trySetStatus
@@ -589,7 +590,7 @@ setDurationFromCallback dx key owner source = do
   case effectOf dx key >>= \cn -> condSpec cn POwn EvDurationCallback >>= hsBody of
     Nothing -> pure ()
     Just body -> do
-      Res out _ <- runBody dx body (Ctx (holderOf b owner) owner key (Just source) Nothing baseMod Nothing False) RNone
+      Res out _ <- runBody dx body (Ctx (holderOf b owner) owner key (Just source) Nothing baseMod Nothing False (holderOf b owner)) RNone
       case out of
         Replace (RInt d) -> modify' (\bb -> maybe bb (\st -> setOwnerState owner key st {esDuration = d} bb) (ownerState bb owner key))
         _ -> pure ()
@@ -854,6 +855,9 @@ data Ctx = Ctx
   , cCrit :: !Bool
   -- ^ The target's @getMoveHitData(move).crit@ of the hit the event belongs to (@ModifyDamage@: Reflect and Light Screen
   -- do not weaken a critical hit); false for every other event.
+  , cTarget :: !Actor
+  -- ^ slice 8b. The event's target (@runEvent@'s first argument; for @singleEvent@ the holder). It differs from 'cHolder' for an @onAny@, @onFoe@
+  -- or @onAlly@ handler, which Unaware (@pokemon@ of @onAnyModifyBoost@) and Vessel of Ruin (@source@ of @onAnyModifySpA@) read.
   }
 
 -- | @battle.runEvent@ (battle.ts 765-925) on a Pokemon: collect the handlers, sort them, run them with the relay
@@ -933,7 +937,7 @@ runEventFull dx crit onEffect eff ev target source mv relay0 = do
             let mvNow = case r of
                   RMoveEdits es@(_ : _) -> applyMoveEdits es <$> mv
                   _ -> mv
-            Res out md' <- runBody dx body (Ctx (fromMaybe target (hHolder h)) (hOwner h) (hKey h) source mvNow md eff crit) r
+            Res out md' <- runBody dx body (Ctx (fromMaybe target (hHolder h)) (hOwner h) (hKey h) source mvNow md eff crit target) r
             case out of
               Keep -> go fmt hs r md'
               Replace r'
@@ -1002,7 +1006,7 @@ singleBodyFx dx ev body key owner holder source mv eff relay = do
   if off
     then pure relay
     else do
-      Res out _ <- runBody dx body (Ctx holder owner key source mv baseMod eff False) relay
+      Res out _ <- runBody dx body (Ctx holder owner key source mv baseMod eff False holder) relay
       pure (case out of Keep -> relay; Replace r -> r)
 
 -- | @battle.eachEvent@ (battle.ts 470), for @Update@, @BeforeTurn@, @Weather@ and @WeatherChange@: speed-sort the active Pokemon by their cached
@@ -2000,6 +2004,111 @@ runNative dx n c relay = do
     NSpeedBoostResidual
       | monActiveTurns m > 0 -> void (boostMon dx Nothing Nothing (Just (cKey c)) holder [(BSpe, 1)]) >> keep
       | otherwise -> keep
+    -- slice 8b ---------------------------------------------------------------------------------------------------------------------------
+    -- multiscale.onSourceModifyDamage(damage, source, target, move) (data/abilities.ts 2689): `target.hp >= target.maxhp` -> chainModify(0.5).
+    -- The holder is the target (the event's source). It reads the HP as it is at each hit, so a multi-hit move is halved only on its first.
+    -- LATENT(8f): breakable, so Mold Breaker and its kin skip it (the dispatcher's gate), which needs 8f's `ignoreAbility`.
+    NMultiscale
+      | monHp m >= monMaxHp m -> chained (1, 2)
+      | otherwise -> keep
+    -- sharpness.onBasePower(basePower, attacker, defender, move) (priority 19): `move.flags['slicing']` -> chainModify(1.5)
+    NSharpness
+      | Just mv <- cMove c, mrSlicing (mvRule mv) -> chained (3, 2)
+      | otherwise -> keep
+    -- tintedlens.onModifyDamage(damage, source, target, move): `target.getMoveHitData(move).typeMod < 0` -> chainModify(2). The target is the
+    -- event's source, whose clamped effectiveness 'moveTypeMod' is the hit data's typeMod (as for Expert Belt)
+    NTintedLens -> do
+      b <- get
+      case (cMove c, cSource c) of
+        (Just mv, Just d) | moveTypeMod dx mv (monOf b d) < 0 -> chained (2, 1)
+        _ -> keep
+    -- sniper.onModifyDamage: `target.getMoveHitData(move).crit` -> chainModify(1.5); the crit of this hit is the event's 'cCrit'
+    NSniper
+      | cCrit c -> chained (3, 2)
+      | otherwise -> keep
+    -- guts.onModifyAtk(atk, pokemon) (priority 5): `pokemon.status` -> chainModify(1.5). The burn's halving of a Physical move skips a Guts
+    -- holder in 'Engine.Damage.modifyDamage' (`!pokemon.hasAbility('guts')`).
+    NGuts
+      | monStatus m /= StatusNone -> chained (3, 2)
+      | otherwise -> keep
+    -- heatproof.onDamage(damage, target, source, effect): `effect?.id === 'brn'` -> `damage / 2`, which is not an integer for an odd damage;
+    -- spreadDamage then clampIntRange()s it, which floors it and raises it to 1 (battle.ts 2133 and 2142-2143; the first damage is at least 1)
+    NHeatproofDamage -> case (cEffect c, relay) of
+      (Just (EffectKey EffStatus i), RInt d) | i == fromEnum CBrn -> returning (Replace (RInt (if d == 0 then 0 else max 1 (d `quot` 2))))
+      _ -> keep
+    -- purifyingsalt.onSetStatus(status, target, source, effect): always false (the `-immune` line is for a status move only)
+    NPurifyingSaltSetStatus -> returning stop
+    -- purifyingsalt.onTryAddVolatile(status, target): `status.id === 'yawn'` -> null. LATENT: Yawn is not supported, so no volatile of that id exists.
+    NPurifyingSaltTryAddVolatile
+      | relay == RText "yawn" -> returning stop
+      | otherwise -> keep
+    -- waterbubble.onSetStatus(status, target, source, effect): `status.id !== 'brn'` returns; a burn is refused (false)
+    NWaterBubbleSetStatus
+      | relay == RText "brn" -> returning stop
+      | otherwise -> keep
+    -- waterbubble.onUpdate(pokemon): a burned holder is cured (`pokemon.cureStatus()`). A burn can only be there when the status was set past the
+    -- onSetStatus above (LATENT(8f): a Mold Breaker user's Will-O-Wisp, or a suppressed ability that comes back).
+    NWaterBubbleUpdate -> do
+      when (monStatus m == StatusBrn) (modify' (cureStatus holder))
+      keep
+    -- flashfire.onTryHit(target, source, move) (data/abilities.ts 1342): `target !== source && move.type === 'Fire'`: `move.accuracy = true` (the
+    -- move is dropped for this target right after, so no later step reads it), `target.addVolatile('flashfire')` (false when it is already there:
+    -- only the `-immune` line differs), and `return null`, which fails the hit.
+    -- LATENT(8c): TryHit runs left to right (never a draw): the order among the holder's other TryHit handlers (Volt Absorb, Water Absorb, Protect,
+    -- Overcoat) and the immunity steps is the dispatcher's, and 8c's immunities must keep it. Mold Breaker's skip of it (breakable) is 8f's.
+    NFlashFireTryHit -> case (cMove c, cSource c) of
+      (Just mv, Just src) | src /= holder, typeIsNamed dx (mvType mv) "Fire" -> do
+        void (addVolatile dx holder CFlashFire)
+        returning stop
+      _ -> keep
+    -- flashfire.onEnd(pokemon): `pokemon.removeVolatile('flashfire')` (a Pokemon with no HP keeps it: clearVolatile follows)
+    NFlashFireEnd -> modify' (modifyMon holder (\x -> if monHp x > 0 then removeVolatile (fromEnum CFlashFire) x else x)) >> keep
+    -- flashfire.condition.onModifyAtk and onModifySpA(atk, attacker, defender, move) (priority 5): `move.type === 'Fire' &&
+    -- attacker.hasAbility('flashfire')` -> chainModify(1.5). The volatile's holder is the attacker; it is no ability, so the dispatcher's
+    -- ability gates do not apply and only `hasAbility` (the Pokemon in play) does
+    NFlashFireBoost -> case cMove c of
+      Just mv | typeIsNamed dx (mvType mv) "Fire", hasAbility dx b0 holder "flashfire" -> chained (3, 2)
+      _ -> keep
+    -- supremeoverlord.onStart(pokemon) (data/abilities.ts 4732): `if (pokemon.side.totalFainted)`: `fallen = Math.min(totalFainted, 5)`, kept in the
+    -- ability state's 'esA' (-1: absent). The state is new at each switch-in, so the count is read again each time
+    NSupremeOverlordStart -> do
+      let tf = sTotalFainted (sideOf (playerOf holder) b0)
+      when (tf /= 0) (modify' (modifyMon holder (\x -> x {monAbilityState = (monAbilityState x) {esA = min tf 5}})))
+      keep
+    -- supremeoverlord.onBasePower(basePower, attacker, defender, move) (priority 21): `if (this.effectState.fallen)` (nonzero)
+    -- -> chainModify([powMod[fallen], 4096]) with powMod = [4096, 4506, 4915, 5325, 5734, 6144]
+    NSupremeOverlordPower
+      | fallen >= 1, fallen <= 5 -> chained ([4096, 4506, 4915, 5325, 5734, 6144] !! fallen, 4096)
+      | otherwise -> keep
+      where fallen = esA (monAbilityState m)
+    -- vesselofruin.onAnyModifySpA(spa, source, target, move) (data/abilities.ts 5271): the event's target is `source`, the attacker.
+    -- `if (source.hasAbility('Vessel of Ruin')) return` (a holder's own special attack is not lowered, nor by the other holder);
+    -- `if (!move.ruinedSpA) move.ruinedSpA = abilityHolder; if (move.ruinedSpA !== abilityHolder) return`: a move is lowered by one holder only.
+    -- In singles the attacker holds no Vessel of Ruin here, so the holder is the defender and the only one: the move's mark is the holder or
+    -- unset, so reading it is exact and the handler does not write it (a handler cannot change the move in use; nothing could tell).
+    -- LATENT: with more than one foe in play the first holder's mark would have to be written.
+    NVesselOfRuinSpA -> case cMove c of
+      Just mv
+        | hasAbility dx b0 (cTarget c) "vesselofruin" -> keep
+        | mvRuinedSpA mv /= -1 && mvRuinedSpA mv /= ruinSlot holder -> keep
+        | otherwise -> chained (3, 4)
+      Nothing -> keep
+    -- unaware.onAnyModifyBoost(boosts, pokemon) (data/abilities.ts 5217): `pokemon` is the event's target. The holder's own stages are left alone.
+    -- `unawareUser === this.activePokemon && pokemon === this.activeTarget`: the holder is using the move on the target, whose Defense, Special
+    -- Defense and evasion count as 0; `pokemon === this.activePokemon && unawareUser === this.activeTarget`: the holder is the move's target, and
+    -- the user's Attack, Defense, Special Attack and accuracy count as 0. The active target of a move that reaches a stage is the foe of its user.
+    -- LATENT(8a): it zeroes the stages that stat and accuracy reads see; the boost events (ChangeBoost, TryBoost, AfterEachBoost: Intimidate,
+    -- Defiant, Contrary) see the real ones. LATENT(8f): breakable, so Mold Breaker skips it.
+    NUnawareModifyBoost -> case (relay, bActiveMove b0) of
+      (RBoosts table, Just (MoveInUse active _))
+        | pokemon /= holder ->
+            let activeTarget = activeActor (other (playerOf active)) b0
+                zeroed =
+                  [s | holder == active, pokemon == activeTarget, s <- [BDef, BSpd, BEvasion]]
+                    ++ [s | pokemon == active, holder == activeTarget, s <- [BAtk, BDef, BSpa, BAccuracy]]
+             in if null zeroed then keep else returning (Replace (RBoosts [(s, if s `elem` zeroed then 0 else v) | (s, v) <- table]))
+      _ -> keep
+      where pokemon = cTarget c
   where
     -- slice 8a: `source && target === source` of the TryBoost handlers: a boost the holder causes itself (Guard Dog's, Weak Armor's)
     selfCaused ctx = cSource ctx == Just (cHolder ctx)
@@ -2007,6 +2116,8 @@ runNative dx n c relay = do
     byAbility ctx name = case cEffect ctx of
       Just (EffectKey EffAbility i) -> abilityId dx i == name
       _ -> False
+    -- vesselofruin: `move.ruinedSpA` names the holder; the slot is the side and the original position
+    ruinSlot (Actor p o) = playerIx p * 6 + o
     -- the `eject` key of the holder's item state ('esA': 1 set, -1 absent)
     ejectSet mm = esA (monItemState mm) == 1
     -- a no-op when the state is gone (the item was used up or lost)
@@ -2602,18 +2713,31 @@ movePriorityEvent dx user target mv = do
 -- Speed
 
 -- | @pokemon.getActionSpeed()@ (pokemon.ts 662): the Spe stat with its stage, through the @ModifySpe@ event
--- (@getStat('spe')@ also runs @ModifyBoost@, which has no handlers), capped and truncated to 13 bits.
+-- (@getStat('spe')@ first runs @ModifyBoost@ on the stage: Unaware's handler never zeroes Speed, but the event sorts its handlers, which
+-- can draw), capped and truncated to 13 bits.
 getActionSpeed :: MonadChance m => Dex -> Actor -> Eng m Int
 getActionSpeed dx a = do
   b <- get
   let m = monOf b a
-      boosted = boostedStat (stSpe (monStats m)) (bsSpe (monBoosts m))
+  -- slice 8b. getStat (pokemon.ts 639): `runEvent('ModifyBoost', this, null, null, {...boosts})`, read for the Spe stage
+  speStage <- modifyBoost dx a BSpe (bsSpe (monBoosts m))
+  let boosted = boostedStat (stSpe (monStats m)) speStage
   r <- runEvent dx EvModifySpe a Nothing Nothing (RInt boosted)
   -- `this.battle.field.getPseudoWeather('trickroom')` (the twisteddimensionmod rule, which inverts it, is not in gen9ou)
   let trickRoom = case M.lookup "trickroom" (dxFieldIx dx) of
         Just ci -> any (\(CondEntry j _) -> j == ci) (fPseudo (bField b))
         Nothing -> False
   pure (actionSpeed (bFormat b) trickRoom (case r of RInt v -> v; _ -> boosted))
+
+-- | slice 8b. @runEvent('ModifyBoost', statUser, null, null, boosts)@ of @calculateStat@ (pokemon.ts 602), @getStat@ (639) and @hitStepAccuracy@ (battle-actions.ts
+-- 782, 786), for the one stage the caller reads: the stage a handler leaves. Showdown's table holds every stage (@getStat@, accuracy) or only that
+-- one (@calculateStat@: `boosts[boostName] = boost`); a handler's writes to the other keys are never read.
+modifyBoost :: MonadChance m => Dex -> Actor -> BoostStat -> Int -> Eng m Int
+modifyBoost dx statUser s stage = do
+  r <- runEvent dx EvModifyBoost statUser Nothing Nothing (RBoosts [(s, stage)])
+  pure (case r of
+    RBoosts t | Just v <- lookup s t -> v
+    _ -> stage)
 
 -- | @battle.updateSpeed()@: refresh the cached speed of every Pokemon in play.
 updateSpeedAll :: MonadChance m => Dex -> Eng m ()
@@ -2785,6 +2909,8 @@ resolveFaints dx checkWinIfNoFaints checkWin' = do
           m <- gets (\bb -> monOf bb a)
           unless (monFainted m) $ do
             modify' (modifySide p (\s -> if sLeft s > 0 then s {sLeft = sLeft s - 1} else s))
+            -- slice 8b. battle.ts 2601: `if (pokemon.side.totalFainted < 100) pokemon.side.totalFainted++`, right after pokemonLeft
+            modify' (modifySide p (\s -> if sTotalFainted s < 100 then s {sTotalFainted = sTotalFainted s + 1} else s))
             -- singleEvent('End', ability) and singleEvent('End', item) (battle.ts 2605-2606), before the volatiles go
             endAbilityAndItem dx a
             -- pokemon.clearVolatile(false) resets the stat stages, the volatiles and the cached speed (setSpecies)

@@ -177,6 +177,9 @@ data MoveRule = MoveRule
   , mrBypassSub :: !Bool
   -- ^ @flags.bypasssub@ (every sound move, Defog, Roar, Taunt, ...): the Substitute's @onTryPrimaryHit@ lets the move through
   -- (data/moves.ts 18349). @move.infiltrates@ does the same; no supported effect sets it.
+  -- slice 8b
+  , mrSlicing :: !Bool
+  -- ^ @flags.slicing@: Sharpness's @onBasePower@ (data/abilities.ts 4178).
   }
   deriving (Eq, Show)
 
@@ -214,6 +217,8 @@ plainRule = MoveRule
   , mrFailEncore = False
   -- slice 7b
   , mrBypassSub = False
+  -- slice 8b
+  , mrSlicing = False
   }
 
 -- | The part of the vocabulary the engine can run in the current phase (phases 1 to 3: HP effects, stat stages
@@ -311,7 +316,6 @@ inertFlags :: [(T.Text, T.Text)]
 inertFlags =
   [ ("mirror", "read by Mirror Move, which is rejected")
   , ("metronome", "read by Metronome, which is rejected")
-  , ("slicing", "read by Sharpness only")
   , ("punch", "read by Iron Fist and Punching Glove only")
   , ("bite", "read by Strong Jaw only")
   , ("bullet", "read by Bulletproof only")
@@ -504,6 +508,8 @@ moveRule condOf ownRejected (Object o) = do
     , mrFailEncore = "failencore" `elem` flags
     -- slice 7b
     , mrBypassSub = "bypasssub" `elem` flags
+    -- slice 8b
+    , mrSlicing = "slicing" `elem` flags
     }
   where
     -- a flag that is true or absent
@@ -554,6 +560,7 @@ checkFlag f
   | f == "protect" = Right () -- translated: 'mrProtect'
   | f == "failencore" = Right () -- translated: 'mrFailEncore' (slice 7c)
   | f == "bypasssub" = Right () -- translated: 'mrBypassSub' (slice 7b)
+  | f == "slicing" = Right () -- translated: 'mrSlicing' (slice 8b)
   | Just _ <- lookup f inertFlags = Right ()
   | otherwise = Left ("not modelled: flag " <> f)
 

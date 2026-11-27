@@ -164,6 +164,41 @@ abilityBodies ty wx name = case name of
   "justified" -> Just [(POwn, EvDamagingHit, BNative NJustifiedDamagingHit)]
   "gooey" -> Just [(POwn, EvDamagingHit, BNative NGooeyDamagingHit)]
   "speedboost" -> Just [(POwn, EvResidual, BNative NSpeedBoostResidual)]
+  -- slice 8b
+  -- LATENT(8f): multiscale, heatproof, purifyingsalt, waterbubble, flashfire and unaware are @breakable@: the dispatcher's ability gate skips their
+  -- handlers while the move in use ignores abilities (Mold Breaker and its kin), which is 8f's `ignoreAbility` and is not set yet.
+  -- multiscale: onSourceModifyDamage, the holder at full HP -> chainModify(0.5)
+  "multiscale" -> Just [(PSource, EvModifyDamage, BNative NMultiscale)]
+  -- sharpness: onBasePower, `move.flags['slicing']` -> chainModify(1.5)
+  "sharpness" -> Just [(POwn, EvBasePower, BNative NSharpness)]
+  -- tintedlens: onModifyDamage, `typeMod < 0` -> chainModify(2); sniper: onModifyDamage, a critical hit -> chainModify(1.5)
+  "tintedlens" -> Just [(POwn, EvModifyDamage, BNative NTintedLens)]
+  "sniper" -> Just [(POwn, EvModifyDamage, BNative NSniper)]
+  -- guts: onModifyAtk, any status -> chainModify(1.5) (the burn's halving is skipped in modifyDamage)
+  "guts" -> Just [(POwn, EvModifyAtk, BNative NGuts)]
+  -- transistor: onModifyAtk and onModifySpA, an Electric move -> chainModify([5325, 4096])
+  "transistor" -> typeRule "Electric" 5325 4096 [POwn]
+  -- heatproof: onSourceModifyAtk and onSourceModifySpA, a Fire move -> chainModify(0.5); onDamage halves burn damage
+  "heatproof" -> (++ [(POwn, EvDamage, BNative NHeatproofDamage)]) <$> typeRule "Fire" 1 2 [PSource]
+  -- purifyingsalt: onSetStatus (always false), onTryAddVolatile (yawn), onSourceModifyAtk and onSourceModifySpA, a Ghost move -> chainModify(0.5)
+  "purifyingsalt" ->
+    (++ [(POwn, EvSetStatus, BNative NPurifyingSaltSetStatus), (POwn, EvTryAddVolatile, BNative NPurifyingSaltTryAddVolatile)])
+      <$> typeRule "Ghost" 1 2 [PSource]
+  -- waterbubble: onModifyAtk and onModifySpA, a Water move -> chainModify(2); onSourceModifyAtk and onSourceModifySpA, a Fire move -> chainModify(0.5);
+  -- onUpdate cures a burn; onSetStatus is false for a burn
+  "waterbubble" -> do
+    own <- typeRule "Water" 2 1 [POwn]
+    src <- typeRule "Fire" 1 2 [PSource]
+    Just (own ++ src ++ [(POwn, EvUpdate, BNative NWaterBubbleUpdate), (POwn, EvSetStatus, BNative NWaterBubbleSetStatus)])
+  -- flashfire: onTryHit absorbs a Fire move and gives the holder the volatile (whose handlers are 'nativeBody' CFlashFire's); onEnd removes it
+  "flashfire" -> Just [(POwn, EvTryHit, BNative NFlashFireTryHit), (POwn, EvEnd, BNative NFlashFireEnd)]
+  -- supremeoverlord: onStart records the fallen count, onBasePower scales by it, onEnd only logs
+  "supremeoverlord" ->
+    Just [(POwn, EvStart, BNative NSupremeOverlordStart), (POwn, EvBasePower, BNative NSupremeOverlordPower), (POwn, EvEnd, BNative NLogOnly)]
+  -- vesselofruin: onStart only logs; onAnyModifySpA lowers the special attack of every Pokemon but a Vessel of Ruin holder
+  "vesselofruin" -> Just [(POwn, EvStart, BNative NLogOnly), (PAny, EvModifySpA, BNative NVesselOfRuinSpA)]
+  -- unaware: onAnyModifyBoost
+  "unaware" -> Just [(PAny, EvModifyBoost, BNative NUnawareModifyBoost)]
   _ -> Nothing
   where
     speed ws = do
@@ -173,6 +208,11 @@ abilityBodies ty wx name = case name of
       i <- ty t
       let r = BRule (RChainModify 3 2 [CMoveType i, CHolderHpAtMost 1 3])
       Just [(POwn, EvModifyAtk, r), (POwn, EvModifySpA, r)]
+    -- slice 8b: `move.type === T` -> chainModify(n / d) on both stat events, under each of the prefixes
+    typeRule t n d ps = do
+      i <- ty t
+      let r = BRule (RChainModify n d [CMoveType i])
+      Just [(p, e, r) | p <- ps, e <- [EvModifyAtk, EvModifySpA]]
 
 -- | The bodies of an item, or 'Nothing' when the engine does not implement it. The arguments resolve a type name and
 -- a field-condition name (the seeds' terrain) to their ids.

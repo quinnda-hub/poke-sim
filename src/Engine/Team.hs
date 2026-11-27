@@ -160,6 +160,8 @@ buildSide fmt dx (Team team) = do
     , sHasActive = False
     , sConds = SV.empty
     , sTeraUsed = False
+    -- slice 8b
+    , sTotalFainted = 0
     }
 
 {-# INLINABLE buildMon #-}
