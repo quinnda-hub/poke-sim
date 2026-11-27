@@ -2029,7 +2029,59 @@ The move pipeline: Pressure, Prankster, Libero, Protean, Liquid Voice, Infiltrat
 
 ### 8f findings
 
-(To be written by phase 8f.)
+Built: Mold Breaker, Neutralizing Gas, Magic Bounce. No event was added. Whitelist abilities: 27 of 85.
+
+**Suppression.**
+- `ignoringAbility` now takes the dex: `ignoringAbility dx b a`. It reads `cantsuppress` from the data (`cnCantSuppress` in `Condition`)
+  and the gas from the Pokemon in play. Its clauses are in pokemon.ts order, in the comment. Transform and Gastro Acid stay LATENT.
+  A phase that calls it passes `dx`.
+- `skipped` (the `runEvent` loop) got the `eventid !== 'End'` exception, as battle.ts 884 has it.
+  `singleEvent` got the `SwitchIn` clause for a breakable ability while `suppressingAbility` holds (609-612).
+- `suppressingAbility` from the base was already exact. Outside `runEvent` Showdown asks it in `isGrounded` (Levitate, done),
+  Tera Shell, Heal Bell, Aromatherapy and six abilities' own handlers; those are LATENT(8g) in `Engine.Damage`.
+- Protosynthesis, Quark Drive and Unburden's volatile modifiers now test `ignoringAbility`, as Showdown does.
+
+**Mold Breaker.** `onModifyMove` returns `MEIgnoreAbility` through `RMoveEdits`. `useMove` applies it and sets the active move
+again, so `suppressingAbility` sees it for every later step. The user is never its own target (`activePokemon !== target`, gen 8+),
+so no handler of the user's ability is skipped. Prism Armor is not `breakable`; Filter, Solid Rock, Leaf Guard, Overcoat and Magic Bounce are.
+
+**Neutralizing Gas.**
+- `onSwitchIn` (priority 2) logs and sets `ending = false` ('esA' 0). Its Illusion, Slow Start, Commander, Ability Shield and strong-weather
+  steps have nothing to act on yet (LATENT in the body).
+- `onEnd` runs from `endAbilityAndItem` at a switch-out and at a faint, while the holder is still in play. Another gas in play keeps
+  the suppression (return, no restart). Otherwise it sets `ending` ('esA' 1) and speed-sorts the Pokemon in play, the holder included.
+  **The sort draws on a speed tie**, as `eachEvent` does. It then runs `singleEvent('Start')` on each other ability, which
+  restarts weather and terrain setters and Protosynthesis and Quark Drive.
+- A Pokemon that switches in under the gas starts with its ability suppressed; the gas leaving restarts it.
+- The state is reset at the holder's next switch-in, so `ending` never outlives its holder in play. A property checks it at every decision point.
+
+**Magic Bounce (ESCAPE HATCH: magicbounce).**
+- One body for `onTryHit` and `onAllyTryHitSide` (in singles the aimed-at Pokemon is the holder). It tests
+  `reflectable` (`mrReflectable`, a new `MoveRule` field read from the data), `hasBounced` and the target, and returns the relay
+  `RBounce` (falsy, so the event stops as for `null`). `Turn.useMove` and `sideMove` then run `bounceMove`, the nested
+  `useMove`, after the event returns. That changes nothing observable: the handlers after a falsy result do not run.
+- The fresh move is the dex's move with `mvHasBounced`, no `mvPranksterBoosted`, and the first use's priority (battle-actions.ts 475).
+  Nothing of the first use carries over (not `mvIgnoreAbility`).
+- `sourceEffect` is the ability (battle.effect), which has no `pp`: **no `DeductPP`**, so Pressure never drains a bounced move
+  (LATENT(8e) in `bounceMove`). Nothing restores the active move afterwards in Gen 9.
+- **Surprise:** Choice lock's `onStart` returns false for a `hasBounced` move (conditions.ts 329), so a bounced move does not lock its user.
+  `NChoiceItemModifyMove` skips the add for it; slice 7e had left this LATENT.
+- Parting Shot bounced makes the bouncer switch out; Defog bounced clears the bouncer's side too. Both match Showdown in the traces.
+
+**Tests.**
+- Playouts check, at every decision point, that `ignoringAbility` is exactly the clause list (gas, `cantsuppress`, Ability Shield, not in play)
+  and that no active gas is `ending`.
+- `magicBounceHolds`: a reflectable status move with no self effect, used into an unsuppressed holder, leaves the holder and its side
+  as they were, and changes the user in a good share of cases.
+- Coverage statements: gas in play, a gas leaving, a reflectable move into Magic Bounce, a Mold Breaker user against a breakable ability.
+- The Regenerator and Natural Cure invariants of `checkStep` now hold only in a step with no gas in play at either end.
+
+**Traces.** `tools/oracle/gen-slice8f.js`, 1000 battles (about 30% random, the rest scripted by kind; scripts Showdown rejects are dropped).
+Every branch has a tally and none is zero except the structural one. Mutation checks: skipping the gas's sort, and the Protosynthesis
+`ignoringAbility` test, each fail traces.
+
+**LATENT left.** (8a) Intimidate and the other `onStart` abilities restart at the gas's end; (8e) Pressure and `AfterMove` after a bounce;
+(8g) every other breakable ability, and abilities that call `suppressingAbility` themselves.
 
 ### 8g findings
 

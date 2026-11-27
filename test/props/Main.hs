@@ -36,7 +36,7 @@ import Engine.Chance (runSample, speedSortWith)
 import Engine.Dex (Condition (..), Dex (..), EvMask (..), MoveData (..), SpeciesData (..), abilityId, evBit, evMaskHas, moveSpec, prefixMask, dexCondLookup, itemId, supportedAbilities, supportedItems, supportedMoves, supportedSpecies)
 import Engine.Dispatch (HitResult (..), addSideCondition, basePowerCallback, damageMon, moveAfterHit, moveFieldHit, moveOwnHit, moveTry)
 import Engine.Effects (abilityBodies, fieldCondBodies, itemBodies, moveBodies)
-import Engine.Damage (hasAbility, moveTypeMod, typeIsNamed)
+import Engine.Damage (hasAbility, ignoringAbility, moveTypeMod, typeIsNamed)
 import Engine.Event (CondId (..), EffectKey (..), EffectKind (..), EventId (..), HandlerSpec (..), Prefix (..), condName, parseHandlerName)
 import Engine.Format (trunc, truncBits)
 import Engine.Rule (BoostStat (..), DamageKind (..), MoveRule (..), RuleTarget (..), executable, moveRule)
@@ -896,7 +896,8 @@ itemMoves dex = property $ do
             then monOf b' target === monOf b target
             else do
               sameButItem target b' === sameButItem target b
-              if hasUnburden b target then assert (unburdenVolatile b' target) else pure ()
+              -- (slice 8f: not while Neutralizing Gas ignores the target's ability: its onTakeItem is skipped)
+              if hasUnburden b target && not (ignoringAbility dex b target) then assert (unburdenVolatile b' target) else pure ()
               if holdsBoosterParadox b target
                 then itemOf b' target === itemOf b target
                 else itemOf b' target === noItem
@@ -941,6 +942,7 @@ itemMoves dex = property $ do
           -- the target's old item on the user. So two Unburden holders that both had items get their volatiles in that order, and two
           -- items that both stay in hand have states in that order. The orders are the battle's counter, which only grows.
           if itemOf b user /= noItem && itemOf b target /= noItem && hasUnburden b user && hasUnburden b target
+               && not (ignoringAbility dex b user) && not (ignoringAbility dex b target) -- (slice 8f: Neutralizing Gas)
               && not (unburdenVolatile b user) && not (unburdenVolatile b target)
             then assert (unburdenOrder b' target < unburdenOrder b' user)
             else pure ()
