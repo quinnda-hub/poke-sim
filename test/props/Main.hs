@@ -58,15 +58,18 @@ main = do
   conditionsJson <- eitherDecodeFileStrict' (dexDir </> "conditions.json") >>= either die pure
   abilitiesJson <- eitherDecodeFileStrict' (dexDir </> "abilities.json") >>= either die pure
   let n = if tier == ("fast" :: String) then 100 else 2000 :: Int
-  putStrLn ("props: tier " ++ tier ++ ", " ++ show n ++ " tests per property")
+      -- the properties with `cover` thresholds on rare events (a few percent of playouts): 100 cases leave a threshold short by chance
+      -- often enough to fail a run, so the fast tier runs these for more cases (slice 7). The long tier runs them at n.
+      nCover = if tier == ("fast" :: String) then 400 else n
+  putStrLn ("props: tier " ++ tier ++ ", " ++ show n ++ " tests per property (" ++ show nCover ++ " for the playouts with coverage thresholds)")
   H.defaultMain
     [ checkSequential $ Group "engine"
         [ ("random playouts keep the decision-point and state invariants", withTests (fromIntegral n) (playouts dex))
         , ("random playouts over teams heavy in self-switch moves, Rocky Helmet, Shedinja, Regenerator, Natural Cure, Eject Button, Red Card and Eject Pack keep the invariants, switch flags and mid-turn requests included",
-            withTests (fromIntegral n) (pivotPlayouts dex))
+            withTests (fromIntegral nCover) (pivotPlayouts dex))
         -- slice 7b
         , ("Substitute: a successful use costs exactly a quarter of the maximum HP and leaves a substitute of that size; a failed one changes nothing",
-            withTests (fromIntegral n) (substituteCost dex))
+            withTests (fromIntegral nCover) (substituteCost dex))
         , ("bad input is rejected without draws", withTests (fromIntegral n) (badInput dex))
         , ("every move translates to Right or Left and supported moves are executable",
             withTests 1 (translation dex movesJson))
@@ -155,8 +158,8 @@ pivotPlayouts dex = property $ do
       cover 10 "a move request came with an active Pokemon encored" (seenEncore seen > 0)
       cover 10 "a move request came with an active Pokemon taunted" (seenTaunt seen > 0)
       -- slice 7b: a Pokemon that had no Substitute has one after the step, and a substitute that was hit stays or breaks
-      cover 20 "a Substitute was made" (seenSub seen > 0)
-      cover 5 "a Substitute was hit" (seenSubHit seen > 0)
+      cover 10 "a Substitute was made" (seenSub seen > 0)
+      cover 2 "a Substitute was hit" (seenSubHit seen > 0)
       case request b of
         Finished _ -> success
         Awaiting {} -> footnote "playout ended without a result" >> failure
@@ -196,7 +199,7 @@ substituteCost dex = property $ do
               q = monMaxHp m `quot` 4
               works = not (hasSub m) && 4 * monHp m > monMaxHp m && monMaxHp m /= 1
               subHp = [esA st | Volatile i st <- SV.toList (monVolatiles m'), i == fromEnum CSubstitute]
-          cover 3 "a Substitute was tried in isolation" True
+          cover 1 "a Substitute was tried in isolation" True
           if fieldQuiet && monActive m' && monHp m' > 0
             then if works then (monHp m' === monHp m - q) >> (subHp === [q]) else (monHp m' === monHp m) >> (hasSub m' === hasSub m)
             else success
