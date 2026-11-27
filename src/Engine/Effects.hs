@@ -178,6 +178,11 @@ itemBodies ty fid name = case name of
   -- flameorb, toxicorb: onResidual, pokemon.trySetStatus('brn' / 'tox', pokemon)
   "flameorb" -> Just [(POwn, EvResidual, BNative NFlameOrb)]
   "toxicorb" -> Just [(POwn, EvResidual, BNative NToxicOrb)]
+  -- slice 7e. choiceband (data/items.ts 971-992): onStart removes choicelock, onModifyMove adds it, onModifyAtk (priority 1)
+  -- chainModify(1.5) (the dynamax test is moot: no Dynamax in gen9ou); choicespecs the same with onModifySpA, choicescarf with onModifySpe
+  "choiceband" -> Just (choiceItem EvModifyAtk)
+  "choicespecs" -> Just (choiceItem EvModifySpA)
+  "choicescarf" -> Just (choiceItem EvModifySpe)
   -- assaultvest: onModifySpD chainModify(1.5); onDisableMove disables the Status moves
   "assaultvest" ->
     Just [ (POwn, EvModifySpD, BRule (RChainModify 3 2 []))
@@ -441,3 +446,10 @@ moveBodies name = case name of
   where
     -- slice 7a: the handlers the four moves share
     stallingMove = [(POwn, EvPrepareHit, BNative NStallPrepareHit), (POwn, EvHit, BNative NStallHit)]
+
+-- | slice 7e: the handlers every Choice item has (data/items.ts 971-1040): onStart, onModifyMove, and the 1.5 stat boost of its stat.
+choiceItem :: EventId -> [(Prefix, EventId, Body)]
+choiceItem statEvent =
+  [ (POwn, EvStart, BNative NChoiceItemStart)
+  , (POwn, EvModifyMove, BNative NChoiceItemModifyMove)
+  , (POwn, statEvent, BRule (RChainModify 3 2 [])) ]
