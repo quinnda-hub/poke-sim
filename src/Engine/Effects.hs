@@ -208,6 +208,12 @@ itemBodies ty fid name = case name of
   -- Slice 6c. ejectbutton (items.ts 1692, onAfterMoveSecondaryPriority 2), redcard (5170): onAfterMoveSecondary
   "ejectbutton" -> Just [(POwn, EvAfterMoveSecondary, BNative NEjectButtonAfterMoveSecondary)]
   "redcard" -> Just [(POwn, EvAfterMoveSecondary, BNative NRedCardAfterMoveSecondary)]
+  -- Slice 6d. ejectpack (items.ts 1717-1769): onAfterBoost, onAnySwitchIn (priority -4), onAnyAfterMove, onResidual (order 29), onUseItem,
+  -- onUse, onEnd; onAnyAfterMega never fires in Gen 9 (Mega Evolution does not exist), and its handler is dropped by 'Engine.Dex'
+  "ejectpack" ->
+    Just [ (POwn, EvAfterBoost, BNative NEjectPackAfterBoost), (PAny, EvSwitchIn, BNative NEjectPackTrigger)
+         , (PAny, EvAfterMove, BNative NEjectPackTrigger), (POwn, EvResidual, BNative NEjectPackTrigger)
+         , (POwn, EvUseItem, BNative NEjectPackUseItem), (POwn, EvUse, BNative NEjectPackUse), (POwn, EvEnd, BNative NEjectPackEnd) ]
   -- terrainextender: no handlers (the terrains' durationCallback reads the item)
   "terrainextender" -> Just []
   _ -> case lookup name typeItems of

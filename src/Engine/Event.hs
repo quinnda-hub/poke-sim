@@ -38,6 +38,8 @@ module Engine.Event
 
 import qualified Data.Text as T
 
+import Engine.Rule (BoostStat)
+
 -- ---------------------------------------------------------------------------
 -- Events
 
@@ -148,6 +150,15 @@ data EventId
   -- ^ Not an event: a move's @priorityChargeCallback@, called directly by the @priorityChargeMove@ action (battle.ts 2793-2798).
   -- The export lists it as the handler @priorityChargeCallback@ and the engine keeps it as @(POwn, EvPriorityChargeCallback)@,
   -- as it does @durationCallback@.
+  | EvAfterBoost
+  -- ^ @runEvent('AfterBoost', target, source, effect, boost)@ at the end of @battle.boost@ (battle.ts 2098), once the boost is past the
+  -- early returns, with the capped table ('RBoosts'). Eject Pack (slice 6d).
+  | EvUse
+  -- ^ @singleEvent('Use', item, itemState, pokemon, source, sourceEffect)@ in @useItem@ (pokemon.ts 1859), after the item's @boosts@ and
+  -- before the item and its state are cleared. Eject Pack (slice 6d).
+  | EvAfterMove
+  -- ^ @singleEvent('AfterMove', move, null, pokemon, target, move)@ then @runEvent('AfterMove', pokemon, target, move)@ in @runMove@
+  -- (battle-actions.ts 367-368), after @useMove@. Eject Pack's @onAnyAfterMove@ (slice 6d).
   deriving (Eq, Show, Enum, Bounded)
 
 -- | How @runEvent@ orders the handlers of an event (battle.ts 797-803).
@@ -243,6 +254,9 @@ eventName e = case e of
   EvSwitchOut -> "SwitchOut"
   EvDragOut -> "DragOut"
   EvPriorityChargeCallback -> "PriorityChargeCallback"
+  EvAfterBoost -> "AfterBoost"
+  EvUse -> "Use"
+  EvAfterMove -> "AfterMove"
 
 -- | Which Pokemon a handler reacts to: the holder (@onX@), its allies (@onAllyX@), its foes (@onFoeX@), the
 -- source of the event (@onSourceX@) or anyone (@onAnyX@).
@@ -384,8 +398,9 @@ data Body
 
 -- | The value an event threads through its handlers (Showdown's @relayVar@). 'RNone' is the hidden @true@ of an
 -- event run without one: it is not passed to the handlers and it is relayTruthy.
-data Relay = RNone | RBool !Bool | RInt !Int | RText !T.Text
-  -- ^ 'RText' is a type or status key (@Immunity@: @'frz'@, @'sandstorm'@).
+data Relay = RNone | RBool !Bool | RInt !Int | RText !T.Text | RBoosts ![(BoostStat, Int)]
+  -- ^ 'RText' is a type or status key (@Immunity@: @'frz'@, @'sandstorm'@). 'RBoosts' is the capped stage changes @AfterBoost@ passes
+  -- (@getCappedBoost@: a stat with no change is absent, as in Showdown's sparse table).
   deriving (Eq, Show)
 
 -- | Showdown's truthiness of a relay value: @false@ and 0 are falsy.
@@ -600,6 +615,16 @@ data NativeId
   -- ^ ejectbutton @onAfterMoveSecondary@: the holder switches out.
   | NRedCardAfterMoveSecondary
   -- ^ redcard @onAfterMoveSecondary@: the attacker is forced out.
+  | NEjectPackAfterBoost
+  -- ^ ejectpack @onAfterBoost@: any negative capped stage sets @eject@ (the item state's 'esA'), unless the move in use is Parting Shot.
+  | NEjectPackTrigger
+  -- ^ ejectpack @onAnySwitchIn@, @onAnyAfterMove@ and @onResidual@: with @eject@ set, @useItem()@ on the holder, then delete @eject@.
+  | NEjectPackUseItem
+  -- ^ ejectpack @onUseItem@: false when the holder's side cannot switch or an active Pokemon has @switchFlag === true@.
+  | NEjectPackUse
+  -- ^ ejectpack @onUse@: the holder's @switchFlag = true@.
+  | NEjectPackEnd
+  -- ^ ejectpack @onEnd@: delete @eject@.
   deriving (Eq, Show)
 
 -- | The body of each handler the engine implements (written by hand: Showdown's handlers are code). A condition

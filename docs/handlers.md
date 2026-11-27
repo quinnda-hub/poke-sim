@@ -854,9 +854,75 @@ Button (0.036).**
     flag before `useItem` (`useItem` cannot fail for an active holder), and
     the two items' handler order (a holder has one item).
 
-**6d: Eject Pack** (items.ts 1717-1769). `onAfterBoost` (battle.ts 2100,
-after the per-stat loop) sets `effectState.eject` on any drop, except during
-Parting Shot. `onAnySwitchIn` (priority -4), `onAnyAfterMove` and
-`onResidual` (order 29) then call `useItem`. Its `onUseItem` gates on
-`canSwitch` and on no active `switchFlag === true`, and its `onUse` sets the
-holder's `switchFlag = true`.
+**6d: Eject Pack** (0.008 of usage; items.ts 1717-1769). It completes
+step 3. It adds three event points at Showdown's positions, and no state
+field.
+
+- **New event points** (lead decision; nothing accepted listens to them
+  yet, checked against data/gen9):
+  - `AfterBoost`: `battle.boost` (battle.ts 2037-2100) runs
+    `runEvent('AfterBoost', target, source, effect, boost)` after the
+    per-stat loop. It runs whenever the boost gets past the early returns
+    (no HP, not active, no foe Pokémon left), even if no stage changed.
+    `boost` is the capped table (`getCappedBoost`, pokemon.ts 1231-1240,
+    after `ChangeBoost`, before `TryBoost`), so a drop at -6 is 0 and not a
+    drop. `ChangeBoost`, `TryBoost` and `AfterEachBoost` have no accepted
+    listener and stay out.
+  - `Use`: in `useItem` (pokemon.ts 1833-1871), `singleEvent('Use', item,
+    itemState, this, source, sourceEffect)` after `item.boosts` and before
+    the item and its state are cleared.
+  - `AfterMove`: in `runMove` (battle-actions.ts 366-368), after
+    `useMove`: `singleEvent('AfterMove', move, ...)` then
+    `runEvent('AfterMove', pokemon, target, move)`. A move stopped before
+    `useMove` (sleep, paralysis, flinch, the early returns at 309-341)
+    does not reach it.
+- **`boostMon`** becomes the full `battle.boost` and takes the dex, the
+  source and the active move, so it can run `AfterBoost`. Its callers say
+  what Showdown's `activeMove` is. Eject Pack reads only whether it is Parting
+  Shot, which is true only while Parting Shot runs. A drag at the action
+  tail runs before `clearActiveMove` (battle.ts 2863-2875), but Parting Shot
+  is a Status move, so it never triggers a Red Card. Every switch-in after
+  Parting Shot comes after that clear, or after `runPursuitActivation`'s
+  (battle-actions.ts 65).
+- **The `eject` flag** is `esA` of the holder's item state. `useItem`
+  clears it with the state (`clearEffectState`), and the item's `onEnd`
+  (on switch-out and faint) deletes it.
+- **Handlers:**
+  - `onAfterBoost` returns if `eject` is set or the active move is Parting
+    Shot. Otherwise it sets `eject` on any negative capped stage.
+  - `onAnySwitchIn` (priority -4), `onAnyAfterMove` and `onResidual`
+    (order 29) each, if `eject` is set, call `useItem` on the holder and
+    then delete `eject` whether or not the item was used.
+  - `onUseItem` returns false if the holder's side cannot switch or any
+    active Pokémon has `switchFlag === true`. So a second Eject Pack,
+    triggered by the same move, is not used but loses its `eject`.
+  - `onUse` sets the holder's `switchFlag = true` (`SwitchForced`).
+  - `onAnyAfterMega` never fires in Gen 9.
+- **Sources of a drop in the pool:**
+  - self-drops (Close Combat, Draco Meteor, Overheat, Leaf Storm);
+  - secondary drops on the foe (Moonblast and the like);
+  - Sticky Web on switch-in (the item is used at once, by `onAnySwitchIn`
+    in the same `SwitchIn` event);
+  - Parting Shot (excepted);
+  - Defog's evasion drop;
+  - Strength Sap's attack drop.
+
+  Intimidate is not accepted.
+- Found while building it:
+  - The capped table reaches Eject Pack as a relay value (`RBoosts`). The
+    active move travels as the event's move argument, so the Parting Shot
+    test needs no new context field.
+  - `AfterMove` passes the chosen move, not the `ActiveMove` after
+    `useMove`'s changes. No handler of it reads the difference.
+  - `eject` never survives to a decision point: the `AfterMove` or
+    `SwitchIn` of the same action uses or deletes it, so the item's
+    `onResidual` never fires in a trace. Its entry still joins the
+    `Residual` sort, and the parity test catches its removal through the
+    tie draws.
+  - A holder can use its pack and still end the step active and unflagged.
+    In that case a Red Card drags it out, which clears both flags, and a
+    later Roar drags it back in. A trace kind (`eback`) records it.
+  - `onAnyAfterMega` is dropped: Gen 9 has no Mega Evolution.
+  - The `-4` priority of `onAnySwitchIn` makes no observable difference in
+    singles. Sticky Web still sorts first on the same Pokémon, and a second
+    pack is refused either way.

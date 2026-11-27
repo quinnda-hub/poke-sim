@@ -499,7 +499,9 @@ effectFor ident typeOrder ownPfx startAsSwitchIn v mbodies = do
         else names0
       -- naturalcure.onCheckShow (abilities.ts 2813, run only by a plain switch action, battle.ts 2818) returns at once in singles
       -- (`side.active.length === 1`) and its `showCure` is log-only: no event point, no body
-      names = if ident == "naturalcure" && startAsSwitchIn then filter (/= "onCheckShow") names1 else names1
+      names2 = if ident == "naturalcure" && startAsSwitchIn then filter (/= "onCheckShow") names1 else names1
+      -- ejectpack.onAnyAfterMega (items.ts 1739) runs `afterMega` events, which Gen 9 has none of (no Mega Evolution): no event point, no body
+      names = if ident == "ejectpack" && startAsSwitchIn then filter (/= "onAnyAfterMega") names2 else names2
   boosts <- case v of
     Object o | startAsSwitchIn, Just (Object bo) <- KM.lookup "boosts" o ->
       traverse (\(k, x) -> (,) <$> boostStatOf (K.toText k) <*> asInt x) (KM.toList bo)
