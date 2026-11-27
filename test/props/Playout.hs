@@ -207,7 +207,9 @@ checkStep dx b b' (c1, c2) = mapM_ one [(p, i) | (p, side) <- [(P1, bP1), (P2, b
         if regen && monHp m1 /= healed
           then Left (who ++ "Regenerator holder switched out from " ++ show (monHp m0) ++ " HP and has " ++ show (monHp m1) ++ ", not " ++ show healed)
           else Right ()
-        let cure = wasOn && benched && abilityIs "naturalcure" m0
+        -- (the ability can change within the step: a Terastallizing Ogerpon takes Embody Aspect before it pivots out, so the
+        -- holder must still have Natural Cure after the step)
+        let cure = wasOn && benched && abilityIs "naturalcure" m0 && abilityIs "naturalcure" m1
         if cure && monStatus m1 /= StatusNone then Left (who ++ "Natural Cure holder switched out with the status " ++ show (monStatus m1)) else Right ()
         let ejected = not stealing && wasOn && itemIs "ejectbutton" m0 && monItem m1 == noItem
             carded = not stealing && not forcing && wasOn && itemIs "redcard" m0 && monItem m1 == noItem
