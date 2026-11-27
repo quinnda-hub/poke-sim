@@ -1196,7 +1196,7 @@ blockedBy dex ability mv = mvSupported mv && mrTarget (mvRule mv) == TargetFoe &
 
 -- | An immunity ability stops a move at @TryHit@ (or, Levitate, at the type-immunity step), before the accuracy roll and every effect
 -- of the move: the target is unchanged except for the HP Water Absorb heals and the Attack Sap Sipper raises, the user loses no HP
--- (no recoil, no Life Orb), and no accuracy, crit or damage draw is made (only the speed-tie shuffles of the events before it).
+-- (no recoil, no Life Orb), and no draw at all is made, not even a speed-tie shuffle (the two sides each have one Pokemon in play).
 immunityAbilities :: Dex -> Property
 immunityAbilities dex = property $ do
   r <- reachedBattle dex
@@ -1217,7 +1217,7 @@ immunityAbilities dex = property $ do
           sameButHp x y = x {monHp = 0} == y {monHp = 0}
           sameButHpAtk x y = x {monHp = 0, monBoosts = setBoostOf BAtk 0 (monBoosts x)} == y {monHp = 0, monBoosts = setBoostOf BAtk 0 (monBoosts y)}
       footnote (T.unpack (mvId mv) ++ " into " ++ T.unpack ability ++ ", draws " ++ show draws)
-      assert (all (\(lo, hi) -> hi - lo < 16) draws)
+      draws === []
       monHp (monOf b' user) === monHp (monOf b1 user)
       case ability of
         "waterabsorb" -> assert (sameButHp t0 t1 && monHp t1 >= monHp t0)

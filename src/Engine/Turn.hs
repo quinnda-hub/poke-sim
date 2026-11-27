@@ -900,7 +900,14 @@ hitLoop fmt dx user target mv = do
                 -- slice 8c. spreadMoveHit's spreadDamage gave `false` (`damage event failed`): the target is dropped from the later steps (no
                 -- onHit, self drops, secondaries or DamagingHit) and `if (!moveDamage.some(val => val !== false)) break;` (battle-actions.ts
                 -- 1019) ends the loop before this hit's Update. At the first hit the whole move failed ('hitLoop').
-                Nothing -> pure (acc, sub, hit == 1)
+                -- From the second hit on, `[moveDamageThisHit, targetsCopy] = this.spreadMoveHit(targetsCopy, ...)` (1010) has put `false` in
+                -- targetsCopy (1143), so the later steps that read it see no target, as after a hit on a Substitute: `gotAttacked` (1055) and
+                -- the target's AfterMoveSecondary (1069) do not run for it. The earlier hit's flag does not carry over: it is 'True' here.
+                -- LATENT: Showdown drops the target only for `false` (battle.ts 2138-2143 returns the handler's value); a `null` or `undefined`
+                -- result is no `false`, so the loop goes on and that hit's Update runs (battle-actions.ts 1019-1029; 1150 then drops the target from targetsCopy). The engine's Damage
+                -- event cannot tell the two apart ('stop' is `false`), and no supported handler returns `null` for a Move cause (Magic Guard and
+                -- Poison Heal return `false`, Sturdy and Endure a damage), so only `false` is modelled. `gotAttacked` is not in the state.
+                Nothing -> pure (acc, True, hit == 1)
                 Just dealt -> do
                   hitEffects dx user target m' onSub
                   eachEvent dx EvUpdate -- eachEvent('Update') after each hit
