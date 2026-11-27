@@ -20,6 +20,7 @@ module Engine.Dispatch
   , HitResult (..)
   , moveOwnHit
   , moveTry
+  , movePrepareHit
   , movePriorityCharge
   , canSwitch
   , switchCandidates
@@ -178,8 +179,14 @@ addVolatile dx a c = addVolatileFx dx a c Nothing
 addVolatileFx :: MonadChance m => Dex -> Actor -> CondId -> Maybe EffectKey -> Eng m Bool
 addVolatileFx dx a c eff = do
   m <- gets (`monOf` a)
-  if monHp m <= 0 || isJust (effectState m key)
+  if monHp m <= 0
     then pure False
+    else if isJust (effectState m key)
+    -- pokemon.ts 2004-2010: `if (this.volatiles[status.id]) { if (!status.onRestart) return false; return this.battle.singleEvent('Restart',
+    -- status, this.volatiles[status.id], this, source, sourceEffect); }` (slice 7a: stall). The result is the handler's, `true` for none.
+    then case condSpec (conditionOf dx c) POwn EvRestart >>= hsBody of
+      Nothing -> pure False
+      Just _ -> relayTruthy <$> singleEventFx dx EvRestart key (OwnMon a) Nothing Nothing eff RNone
     else do
       immune <- runStatusImmunity dx a (condName c)
       allowed <- if immune then relayTruthy <$> runEvent dx EvTryAddVolatile a Nothing Nothing (RText (condName c)) else pure False
@@ -1309,6 +1316,37 @@ runNative dx n c relay = do
     NScreenBreakTryHit -> keep
     NRagingBullType -> keep
     NAuroraVeilTry -> keep
+    -- slice 7a: stall. onStart `this.effectState.counter = 3`; the counter is the state's esA
+    NStallStart -> setState c (\st -> st {esA = 3}) >> keep
+    -- stall.onStallMove(pokemon): `const counter = this.effectState.counter || 1; const success = this.randomChance(1, counter);
+    -- if (!success) delete pokemon.volatiles['stall']; return success` (data/conditions.ts 451-459). randomChance(1, d) is
+    -- `random(d) < 1`, one draw of range [0, d) (prng.ts 115), the same as 'randomChance' here
+    NStallStallMove -> do
+      st <- gets (\b -> ownerState b (cOwner c) (cKey c))
+      let counter = case st of Just x | esA x /= 0 -> esA x; _ -> 1
+      ok <- randomChance 1 counter
+      unless ok (modify' (modifyMon holder (removeVolatile (fromEnum CStall))))
+      returning (Replace (RBool ok))
+    -- stall.onRestart: `if (counter < counterMax (729)) counter *= 3; duration = 2` (data/conditions.ts 460-465)
+    NStallRestart -> setState c (\st -> st {esA = if esA st < 729 then esA st * 3 else esA st, esDuration = 2}) >> keep
+    -- the moves' own onPrepareHit and onHit are run by 'movePrepareHit' and 'moveOwnHitResult'
+    NStallPrepareHit -> keep
+    NStallHit -> keep
+    -- protect.condition.onTryHit(target, source, move) (data/moves.ts 13989-14004): `if (this.checkMoveBypassesProtect(move, source,
+    -- target)) return;` lets a move without the protect flag through (`runEvent('HitProtect')` has no listener: Unseen Fist is not
+    -- in this version, and Piercing Drill is not supported); otherwise the hit is blocked with NOT_FAIL (''), a falsy value
+    -- that is not `false`. (The `lockedmove` reset is for Outrage and the like: not supported.)
+    -- LATENT: Protective Pads, Unseen Fist and the moves with @breaksProtect@ (Feint, Phantom Force, Shadow Force, Hyperspace Hole
+    -- and Fury) are not accepted; Outrage's lockedmove reset is not modelled.
+    NProtectTryHit -> protectBlock Nothing
+    NSpikyShieldTryHit -> protectBlock (Just (\src srcM -> modify' (applyDamage src (max 1 (monMaxHp srcM `quot` 8)))))
+    NBanefulBunkerTryHit -> protectBlock (Just (\src _ -> void (trySetStatus dx src Psn)))
+    NInertZMaxHit -> keep
+    -- endure.condition.onDamage(damage, target, source, effect): `if (effect?.effectType === 'Move' && damage >= target.hp)` the
+    -- damage becomes `target.hp - 1` (data/moves.ts 4834-4839)
+    NEndureDamage -> case (cMove c, relay) of
+      (Just _, RInt d) | d >= monHp m -> returning (Replace (RInt (monHp m - 1)))
+      _ -> keep
     -- slice 6a: run by 'moveTry', 'moveOwnHit' and 'movePriorityCharge'
     NTeleportTry -> keep
     NPartingShotHit -> keep
@@ -1802,6 +1840,17 @@ runNative dx n c relay = do
       let mv = moveData dx (msMove ms)
        in if mvStatus mv && mvId mv /= "mefirst" then ms {msDisabled = True} else ms
     setStage holder v = modify' (modifyMon holder (\x -> x {monStatusState = (monStatusState x) {esA = v}}))
+    -- the running effect's own state, changed in place
+    setState c' f = modify' (\b -> maybe b (\st -> setOwnerState (cOwner c') (cKey c') (f st) b) (ownerState b (cOwner c') (cKey c')))
+    -- the TryHit of the protect family: the attacker is `cSource`, the move `cMove`. A move without the protect flag passes; else
+    -- the punishment for contact (checkMoveMakesContact: the contact flag; Protective Pads is not accepted) runs, then NOT_FAIL
+    protectBlock punish = case (cMove c, cSource c) of
+      (Just mv, Just src) | mrProtect (mvRule mv) -> do
+        when (mrContact (mvRule mv)) $ do
+          srcM <- gets (`monOf` src)
+          forM_ punish (\f -> f src srcM)
+        pure (Res (Replace (RText "")) (cMod c))
+      _ -> pure (Res Keep (cMod c))
 
 -- ---------------------------------------------------------------------------
 -- A move's own handlers (docs/handlers.md, "A move's own handlers")
@@ -2054,6 +2103,9 @@ moveOwnHitResult dx user target mv = case moveSpec mv POwn EvHit >>= hsBody of
                 pure HitOk
       -- clearsmog.onHit(target): target.clearBoosts() (every stage, accuracy and evasion too, 0), whatever the target's HP
       NClearSmogHit -> modify' (modifyMon target (\x -> x {monBoosts = noBoosts})) >> pure HitOk
+      -- protect, spikyshield, banefulbunker, endure .onHit(pokemon): `pokemon.addVolatile('stall')`; returns nothing (true). A stall
+      -- already there restarts (its counter triples)
+      NStallHit -> addVolatile dx target CStall >> pure HitOk
       _ -> pure HitOk
   _ -> pure HitOk
   where
@@ -2083,6 +2135,19 @@ moveTry dx user target mv = case moveSpec mv POwn EvTry >>= hsBody of
   Just (BNative NAuroraVeilTry) -> gets (maybe False (`elem` fieldIds dx ["hail", "snowscape"]) . effectiveWeather)
   -- poltergeist.onTry(source, target): `return !!target.item`
   Just (BNative NPoltergeistTry) -> gets (\b -> monItem (monOf b target) /= noItem)
+  _ -> pure True
+
+-- | @singleEvent('PrepareHit', move, {}, targets[0], pokemon, move)@ (battle-actions.ts 657) of a move on the user, whose handler can
+-- fail the move: the result is its truthiness. Protect, Spiky Shield, Baneful Bunker and Endure: `!!this.queue.willAct() &&
+-- this.runEvent('StallMove', pokemon)`. Nothing queued after the running action means the user moves last and the move fails with no
+-- draw; otherwise the @stall@ volatile (if the user has one) draws `randomChance(1, counter)`.
+movePrepareHit :: MonadChance m => Dex -> Actor -> MoveData -> Eng m Bool
+movePrepareHit dx user mv = case moveSpec mv POwn EvPrepareHit >>= hsBody of
+  Just (BNative NStallPrepareHit) -> do
+    b <- get
+    case willAct b of
+      Nothing -> pure False
+      Just _ -> relayTruthy <$> runEvent dx EvStallMove user Nothing Nothing RNone
   _ -> pure True
 
 -- | The @priorityChargeMove@ action (battle.ts 2793-2798): `action.move.priorityChargeCallback.call(this, action.pokemon)`, a direct

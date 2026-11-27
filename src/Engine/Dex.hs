@@ -322,7 +322,11 @@ loadDex dir = do
     let struggleContact = case struggleV of
           Object o | Just (Object fl) <- KM.lookup "flags" o -> KM.member "contact" fl
           _ -> False
-    struggle <- (\m -> m {mvType = noType, mvSupported = False, mvRule = (mvRule m) {mrContact = struggleContact}})
+        -- slice 7a: and `protect: 1`, read by checkMoveBypassesProtect (Struggle is blocked by Protect)
+        struggleProtect = case struggleV of
+          Object o | Just (Object fl) <- KM.lookup "flags" o -> KM.member "protect" fl
+          _ -> False
+    struggle <- (\m -> m {mvType = noType, mvSupported = False, mvRule = (mvRule m) {mrContact = struggleContact, mrProtect = struggleProtect}})
       <$> moveOf tix condLookup (V.fromList conds) struggleV
     natureEntries <- objectEntries naturesV
     natureL <- traverse (natureOf . snd) natureEntries
@@ -433,6 +437,11 @@ conditionFor conditionsV abilitiesV movesV c = do
     moveOf' x = case x of
       CRoost -> Just "roost"
       CChillyReception -> Just "chillyreception"
+      -- slice 7a: the volatiles of the protect family are their moves' @condition@ blocks (stall is in conditions.json)
+      CProtect -> Just "protect"
+      CSpikyShield -> Just "spikyshield"
+      CBanefulBunker -> Just "banefulbunker"
+      CEndure -> Just "endure"
       _ -> Nothing
 
 -- | A move's field condition by key, if the engine runs it ('Engine.Rule.CondLookup').
@@ -619,6 +628,10 @@ moveOf tix condLookup conds v = do
       rejected = case rejected0 of
         Nothing | ERoost `elem` mrSelf rule, not (cnSupported roost) -> Just ("condition roost is not supported: " <> fromMaybe "" (cnReject roost))
         Nothing | ident == "chillyreception", not (cnSupported chilly) -> Just ("condition chillyreception is not supported: " <> fromMaybe "" (cnReject chilly))
+        -- slice 7a: a move that adds its own volatile (the protect family) also adds stall, so both conditions must be supported
+        Nothing | EOwnVolatile `elem` mrOnHit rule, (c : _) <- [c | c <- [minBound .. maxBound], condName c == ident]
+                , (cn : _) <- [cn | cn <- [conds V.! fromEnum c, conds V.! fromEnum CStall], not (cnSupported cn)] ->
+                  Just ("condition " <> ident <> " or stall is not supported: " <> fromMaybe "" (cnReject cn))
         _ -> rejected0
       supported = isNothing rejected && executable rule
   pure (MoveData ident ty (cat == "Physical") (cat == "Status") bp acc prio crit pp noBoost (truthyField "struggleRecoil" v) rule rejected supported effect (mrSelfSwitch rule) False)

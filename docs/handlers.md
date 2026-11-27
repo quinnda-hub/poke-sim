@@ -1056,7 +1056,17 @@ the whitelist and stay rejected.
 
 ### 7a findings
 
-(to be written by 7a)
+Protect, Spiky Shield, Baneful Bunker and Endure are accepted, with the `stall` condition and the four volatiles.
+
+- **The move.** The top-level `volatileStatus` (the move's own id) is the effect `EOwnVolatile`. `runMoveEffects` adds it before the move's own `onHit`, which adds `stall`. `stallingMove` is read by nothing in `sim/`, so it is an inert key.
+- **PrepareHit.** `movePrepareHit` is `singleEvent('PrepareHit')` for a move on the user. The body is `!!queue.willAct() && runEvent('StallMove')`. A move that goes last fails with no draw. Without a `stall` volatile there is no draw either. The new event `StallMove` is run only here.
+- **The stall draw.** `randomChance(1, counter)` is `random(counter) < 1`: one draw of range `[0, counter)`. It sits in `PrepareHit`, after `Try` and before any hit step. A failure deletes `stall`. The counter is `esA`; `onRestart` triples it below 729 and sets the duration to 2.
+- **Restart.** `addVolatile` on a volatile that is already there now runs `Restart` when the condition has a handler for it, as `pokemon.addVolatile` does. A condition without one still fails. Only `stall` has one.
+- **The block.** `TryHit` (priority 3) blocks a move with the `protect` flag and returns `NOT_FAIL`, a falsy value that is not `false`. The flag is live: `mrProtect`, and Struggle has it. The block runs once per move, before accuracy, so a multi-hit move is blocked whole and a pivot never sets its flag. Spiky Shield's damage is `baseMaxhp / 8` and Baneful Bunker's poison goes through `trySetStatus`, both only for a contact move.
+- **Endure.** The `Damage` event is new. It runs in `hitMove`, after the clamp to 1 and before the damage is dealt, with the move as the effect. Endure returns `hp - 1`, which is 0 for a holder at 1 HP: no damage, and the hit loop goes on. Other `battle.damage` calls (residuals, recoil, Rocky Helmet, Spiky Shield) do not run it: Endure acts only on a Move effect.
+- **Mid-turn state.** A protect volatile lasts to the turn's Residual. A decision point can still see one in a mid-turn switch request (a pivot hit an Endure holder) and when the battle has just ended (Spiky Shield killed the attacker). The property allows exactly those.
+- **LATENT.** Protective Pads, Unseen Fist, `breaksProtect` moves (Feint, Phantom Force, Shadow Force, Hyperspace Hole and Fury) and Outrage's `lockedmove` reset are not accepted, so they are not built. The hit steps of a self-targeted move are skipped; nothing could act on them.
+- **The set.** `slice7a` has 1,000 battles. Ghost teams with a protect move and a low-PP move run to Struggle, which Protect blocks. The stall counter reaches 81 in the set; 243 and 729 need 5 and 6 straight successes (odds 1 in 3^10 and worse), and a seed search did not find one.
 
 ### 7b findings
 

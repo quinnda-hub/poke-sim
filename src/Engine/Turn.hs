@@ -579,7 +579,16 @@ useMove fmt dx user target mv0 = do
 useMoveWith :: MonadChance m => Format -> Dex -> Actor -> Actor -> MoveData -> Eng m ()
 useMoveWith fmt dx user target mv = case mrTarget rule of
   -- trySpreadMoveHit (battle-actions.ts 656): the move's own onTry first, on the user (Teleport fails when the side cannot switch)
-  TargetSelf -> moveTry dx user user mv >>= \tried -> when tried (statusMove dx user user mv)
+  -- (slice 7a: then `singleEvent('PrepareHit', move, {}, targets[0], pokemon, move) && runEvent('PrepareHit', pokemon, targets[0], move)`
+  -- (656-658): Protect and its kin fail here, on the stall draw or when the user moves last; a falsy result ends the move)
+  TargetSelf -> do
+    tried <- moveTry dx user user mv
+    prepared <- if tried then movePrepareHit dx user mv else pure False
+    ran <- if prepared then relayTruthy <$> runEvent dx EvPrepareHit user (Just user) (Just mv) RNone else pure False
+    -- LATENT(7a): the hit steps of a self-targeted move (Invulnerability, TryHit, accuracy, BreakProtect) are skipped: no handler acts
+    -- on one (a Protect user holds no protect volatile when it moves, and only the volatile's own TryHit would). Dancer, Instruct and
+    -- the like, which let a Pokemon move twice in a turn, are not supported.
+    when ran (statusMove dx user user mv)
   -- getMoveTargets (pokemon.ts 812): foeSide -> the foes (fainted ones too), allySide -> the allies and the user,
   -- all -> both, and tryMoveHit takes targets[0]: the foe for foeSide, the user for allySide and all
   TargetFoeSide -> sideMove dx user target mv
@@ -726,6 +735,15 @@ statusMove dx user tgt mv0 = do
     -- something. A heal that fails with NOT_FAIL still counts as a hit (see 'HitResult'), a false return fails the move
     -- (the move in use comes back: Parting Shot's body deletes its selfSwitch)
     [EOwnHit] -> (\(r, m) -> (r /= HitFail, m)) <$> moveOwnHit dx user tgt mv0
+    -- slice 7a, runMoveEffects (battle-actions.ts 1294-1296, 1338): `target.addVolatile(moveData.volatileStatus, source, move)` (the move's own
+    -- volatile: protect, spikyshield, banefulbunker, endure), then the move's onHit (adds `stall`), each folded into didSomething by
+    -- combineResults: one success is enough
+    [EOwnVolatile, EOwnHit] -> do
+      added <- case condByName (mvId mv0) of
+        Just c -> addVolatile dx tgt c
+        Nothing -> pure False
+      (r, m') <- moveOwnHit dx user tgt mv0
+      pure (added || r /= HitFail, m')
     -- `target.trySetStatus(moveData.status, ...)`; `!hitResult && move.status` fails the move
     [EStatus st] -> (\r -> (r, mv0)) <$> trySetStatus dx tgt st
     -- runMoveEffects (battle-actions.ts 1319-1322): `if (moveData.forceSwitch) hitResult = !!canSwitch(target.side)`, the move's only
@@ -871,6 +889,7 @@ applyEffect dx user mv a e = case e of
   EHeal _ _ -> pure () -- not executable as a secondary
   -- addVolatile('roost', source, move): `self.volatileStatus` of Roost; needs HP, and Terastallization (not modelled) fails it
   ERoost -> void (addVolatile dx a CRoost)
+  EOwnVolatile -> pure () -- run by 'statusMove', never as a secondary
   EOwnHit -> pure () -- run by 'moveOwnHit', never as a secondary
   EOwnHitField -> pure () -- run by 'moveFieldHit', never as a secondary
 
@@ -897,8 +916,18 @@ hitMove fmt dx user target mv = do
         (_, Just (DamageFixed n)) -> Just n
         _ -> Nothing
   (dmg, mv') <- maybe (getDamage fmt dx user target mv) (\d -> pure (d, mv)) fixed
+  -- spreadDamage (battle.ts 2146): `targetDamage = this.runEvent('Damage', target, source, effect, targetDamage, true)` after the clamp to
+  -- at least 1 (unless 0) and before the damage is dealt, with the move as the effect: Endure's onDamage leaves the target 1 HP. The
+  -- result is clamped again (`if (targetDamage !== 0) targetDamage = clampIntRange(targetDamage, 1)`). A falsy result ends the damage
+  -- (`damage event failed`): no handler returns one.
+  -- LATENT(7a): the other `battle.damage` calls (residuals, recoil, Rocky Helmet, Spiky Shield, ...) run no Damage event here: their
+  -- effect is not a Move, and Endure is its only listener and acts on a Move alone. An effect with a Damage handler of another kind
+  -- (Sturdy, Magic Guard, Focus Sash, Substitute) must add the event to those paths.
+  let damage0 = if dmg == 0 then 0 else max 1 dmg
+  dmgR <- runEvent dx EvDamage target (Just user) (Just mv') (RInt damage0)
+  let damage1 = fromRelay damage0 dmgR
   let -- spreadDamage: clamp to at least 1 unless 0, then Pokemon.damage; `dealt` is the damage returned
-      requested = if dmg == 0 then 0 else max 1 dmg
+      requested = if damage1 == 0 then 0 else max 1 damage1
       dealt = min requested (monHp tm)
   modify' (applyDamage target requested)
   -- spreadDamage, effect.drain (battle.ts ~2187): heal the user round(dealt * n / d); battle.heal turns a
