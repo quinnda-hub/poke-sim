@@ -505,6 +505,20 @@ diffSide dex p s sd =
     name = "sides[" ++ show (playerIx p) ++ "]"
     expected = arr (sd .: "pokemon")
 
+-- | The other @effectState@ keys record.js keeps for a volatile (@counter@, @hp@, @move@; see @snapshotPokemon@), for
+-- the volatiles whose state has them, as the engine holds them (docs/handlers.md, "Volatile conditions (slice 7)",
+-- the State table). The whole entry is compared, so a key Showdown writes and this table lacks is a failure, never a
+-- skip. A move is its Showdown id; -1 is Struggle (@choicelock@ records the active move, which can be Struggle).
+volatileKeys :: Dex -> T.Text -> EffectState -> [(K.Key, Value)]
+volatileKeys dex name vs = case name of
+  "stall" -> [("counter", Number (fromIntegral (esA vs)))]
+  "substitute" -> [("hp", Number (fromIntegral (esA vs)))]
+  "encore" -> [("move", moveKey)]
+  "choicelock" -> [("move", moveKey)]
+  _ -> []
+  where
+    moveKey = String (if esA vs < 0 then "struggle" else mvId (moveData dex (esA vs)))
+
 diffMon :: Dex -> String -> Int -> Mon -> Value -> [Diff]
 diffMon dex path orig m ev =
   cmp (path ++ ".orig") (int (ev .: "orig")) (Just orig)
@@ -518,10 +532,10 @@ diffMon dex path orig m ev =
     ++ cmp (path ++ ".statusState.stage") (int (ev .: "statusState" .: "stage")) (if esA (monStatusState m) < 0 then Nothing else Just (esA (monStatusState m)))
     -- volatiles: every volatile the engine holds, by name, with its duration as record.js writes it (only when
     -- Showdown's state has one: the engine's 0 is "no duration", since a duration that counts down to 0 removes the
-    -- volatile); every other volatile must be absent
+    -- volatile) and its other recorded keys ('volatileKeys'); every other volatile must be absent
     ++ cmp (path ++ ".volatiles") (ev .: "volatiles")
          (Object (KM.fromList
-           [ (K.fromText name, Object (if esDuration vs == 0 then KM.empty else KM.singleton "duration" (Number (fromIntegral (esDuration vs)))))
+           [ (K.fromText name, Object (KM.fromList ([("duration", Number (fromIntegral (esDuration vs))) | esDuration vs /= 0] ++ volatileKeys dex name vs)))
            | Volatile i vs <- SV.toList (monVolatiles m)
              -- an id with no condition name still shows up (as "<volatile i>"), so it cannot hide from the compare
            , let name = case [condName c | c <- [minBound .. maxBound], fromEnum c == i] of

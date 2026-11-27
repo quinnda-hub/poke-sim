@@ -926,3 +926,150 @@ field.
   - The `-4` priority of `onAnySwitchIn` makes no observable difference in
     singles. Sticky Web still sorts first on the same Pokémon, and a second
     pack is refused either way.
+
+## Volatile conditions (slice 7)
+
+Roadmap step 4, designed 2026-11-27. Five phases are built in parallel,
+each in its own worktree from `slice7-base`, then stacked in order 7a to 7e
+and followed by an integration phase, 7f. The whitelist decides the scope
+(`data/usage/gen9ou.json`, 2026-10):
+
+| Phase | Moves | Items | Usage weight |
+|---|---|---|---|
+| 7a | Protect, Spiky Shield, Baneful Bunker, Endure (and the `stall` condition) | | 0.251, 0.0018, 0.0094, 0.0157 |
+| 7b | Substitute | | 0.196 |
+| 7c | Encore, Taunt | | 0.276, 0.237 |
+| 7d | Sucker Punch, Thunderclap | | 0.430, 0.181 |
+| 7e | (Knock Off, Trick, Switcheroo and Thief against them) | Choice Band, Choice Specs, Choice Scarf | 0.184, 0.271, 0.274 |
+
+Detect, King's Shield, Silk Trap, Burning Bulwark and Shed Tail are not on
+the whitelist and stay rejected.
+
+### Decisions shared by every phase
+
+- **State.** A step-4 volatile is a `Volatile` entry like flinch and roost.
+  Its data lives in the generic `EffectState`, with these meanings:
+
+  | Volatile | `esDuration` | `esA` | `esB` |
+  |---|---|---|---|
+  | `stall` | 2 | `counter` | |
+  | `protect`, `spikyshield`, `banefulbunker`, `endure` | 1 | | |
+  | `substitute` | | the substitute's HP | |
+  | `encore` | 3, or 4 | the encored move (a `Dex` move index) | |
+  | `taunt` | 3, or 4 | | |
+  | `choicelock` | | the locked move (a `Dex` move index) | |
+
+  Two `Mon` fields may be added, by 7c only: `monLastMove :: !Int`
+  (`pokemon.lastMove`, a `Dex` move index or -1 for null) and, if no
+  equivalent exists, `monActiveTurns :: !Int` (`pokemon.activeTurns`). Any
+  other change to the state is the lead's: report it with the Showdown code
+  that needs it, and do not make it.
+- **Queue.** `willAct` and `willMove` in `Engine.State` are
+  `queue.willAct()` and `queue.willMove(pokemon)`. The running action has
+  already left `bQueue`, as in Showdown. Use them and do not write others.
+- **Events.** A phase may add an `EventId` and an event point only where
+  Showdown runs that event, at the same call site in the same order, with a
+  comment naming the file and function. Expected additions: `StallMove`
+  (7a), `Damage` if it does not run yet (7a, Endure), `TryPrimaryHit` and
+  `AfterSubDamage` (7b), `OverrideAction` (7c). Any other change to where
+  sorts or draws happen goes to the lead first.
+- **Bodies.** Every step-4 body is native (`BNative`) unless an existing
+  rule kind already fits. No rule kind is added in step 4.
+- **The escape hatch.** Substitute is the first one. Its `TryPrimaryHit`
+  body and the `HIT_SUBSTITUTE` outcome in the hit path are hand-written
+  and marked `-- ESCAPE HATCH: substitute`.
+- **Flags.** The inert-flag list in `Rule.hs` has `protect`, `failencore`
+  and `bypasssub`, each with a reason that names a mechanic not yet built.
+  The phase that builds the mechanic makes the flag live and drops it from
+  the inert list: `protect` in 7a, `bypasssub` in 7b and `failencore`
+  in 7c.
+- **Interactions.** Each phase must be exact against everything already on
+  main, which its own pool supplies (U-turn, the forced switches, Knock Off,
+  Trick, Rocky Helmet, Red Card, Eject Button, Eject Pack, Tera and so on).
+  Interactions between two step-4 phases are 7f's. Where a phase can see
+  one coming, it leaves a `-- LATENT(7x):` comment, with `7x` the other
+  phase.
+- **Parallel work.** Each phase keeps its additions to the shared lists (the
+  `CondId`, `NativeId` and `EventId` enums, `moveBodies`, `itemBodies`, the
+  native dispatch, the inert-flag list, the property and cover lists) in one
+  block per list, headed `-- slice 7x`. It does not reorder or reformat
+  existing code, and it writes its findings only in its own subsection
+  below.
+- **Traces.** Each phase has its own generator, `tools/oracle/gen-slice7x.js`
+  in the shape of `gen-slice6.js`, and its own set, `local/traces/slice7x`,
+  recorded from its own branch's `engine-pool`. Its teams are biased toward
+  its mechanics, and every newly accepted move or item appears in some
+  team. The sets of the other phases stay valid when they are stacked,
+  because the engine only accepts more. 7f records one combined set from the
+  stacked engine's pool.
+
+### Showdown pointers (read the source; these are leads, not facts)
+
+- **7a.** All four moves: priority 4, `stallingMove`; `onPrepareHit` is
+  `!!this.queue.willAct() && this.runEvent('StallMove', pokemon)`; `onHit`
+  adds `stall` (data/moves.ts: protect 13966, spikyshield 17539,
+  banefulbunker 985, endure 4811).
+  - `stall` (data/conditions.ts 443-466): `onStart` sets `counter = 3`;
+    `onStallMove` is `randomChance(1, counter)`, removing itself on a
+    failure; `onRestart` triples the counter to at most 729 and resets the
+    duration to 2. There is no draw when the user moves last or has no
+    `stall`.
+  - The blocking volatile: `onTryHitPriority` 3, `checkMoveBypassesProtect`
+    (sim/battle.ts 1314-1324), and the result `NOT_FAIL`. The contact
+    punishments are Spiky Shield's `baseMaxhp / 8` and Baneful Bunker's
+    poison, skipped with Protective Pads (battle.ts 1303).
+  - Endure: `onDamage` at priority -10.
+  - `hitStepBreakProtect` (battle-actions.ts 821-845) matters only if a
+    protect-breaking move is in the pool.
+- **7b.** data/moves.ts 18311-18401, battle-actions.ts `tryPrimaryHitEvent`
+  and the `HIT_SUBSTITUTE` handling in `spreadMoveHit` (about 1118-1160).
+  The items and abilities that test `volatiles['substitute']` are listed by
+  grep at data/items.ts and data/abilities.ts. Resolve the LATENT comments
+  at Dispatch.hs 1302, 2005 and 2017. Status moves without `bypasssub`
+  fail against a substitute through `getDamage` returning undefined.
+- **7c.** Encore (data/moves.ts 4730-4789): `onStart` fails without
+  `lastMove` and in the other listed cases, and adds 1 to the duration if
+  `!queue.willMove(target)`; `onOverrideAction` swaps in the encored move;
+  residual order 16 with the 0-PP check; `onDisableMove`.
+  - Taunt (18981-19010): +1 duration if `activeTurns && !willMove`;
+    `onBeforeMovePriority` 5; residual order 15.
+  - `lastMove` is set by `pokemon.moveUsed` (pokemon.ts 920-935) and
+    cleared by `clearVolatile`.
+  - `DisableMove` runs only at `endTurn` (battle.ts 1700-1712), which the
+    engine already does (Turn.hs 188-189).
+  - Check the LATENT at Turn.hs 528 (`BeforeMove` after the PP check).
+- **7d.** `onTry` (data/moves.ts 18403 and 19504) reads
+  `queue.willMove(target)`; the move fails if there is no move action, if
+  that move is a status move other than Me First, or if the target has
+  `mustrecharge`. If no recharge move is accepted, leave a LATENT.
+- **7e.** data/items.ts 971-1040; `choicelock` at data/conditions.ts 324-362.
+  - The items' `onModifyMove` adds `choicelock`, which records the active
+    move. `choicelock` has no `onRestart`, so the lock is never updated
+    while present. Their `onStart` removes it.
+  - `onBeforeMove` and `onDisableMove` drop the lock once the item is not a
+    Choice item.
+  - Knock Off and Thief leave the lock to be dropped lazily. Trick and
+    Switcheroo's `setItem` runs the new item's `Start`.
+  - A Choice Scarf arriving mid-turn is picked up by the gen 8+ resort in
+    `runAction` (battle.ts 2975-2985).
+  - Tera and the lock: not yet read.
+
+### 7a findings
+
+(to be written by 7a)
+
+### 7b findings
+
+(to be written by 7b)
+
+### 7c findings
+
+(to be written by 7c)
+
+### 7d findings
+
+(to be written by 7d)
+
+### 7e findings
+
+(to be written by 7e)
