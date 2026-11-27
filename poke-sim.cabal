@@ -52,7 +52,19 @@ extra-doc-files:    CHANGELOG.md
 -- extra-source-files:
 
 common warnings
+    -- -Wall, plus checks -Wall leaves out: -Wcompat (warnings for changes coming in later GHCs), partial record
+    -- fields and their updates (the engine rules forbid partial functions on reachable paths), redundant
+    -- constraints, identity conversions, and build-depends entries a component never imports.
+    -- -funbox-small-strict-fields unboxes strict fields of word size or smaller. GHC turns it on with -O, and every
+    -- component here builds with -O1 or -O2, so this makes the default explicit rather than changing any code.
     ghc-options: -Wall
+                 -Wcompat
+                 -Widentities
+                 -Wincomplete-record-updates
+                 -Wpartial-fields
+                 -Wredundant-constraints
+                 -Wunused-packages
+                 -funbox-small-strict-fields
 
 library
     -- Import common warning flags.
@@ -102,7 +114,6 @@ library
     default-language: Haskell2010
 
     ghc-options: -O2
-                 -funbox-small-strict-fields
 
 -- Property suite (hedgehog): engine invariants and agreement with JavaScript arithmetic.
 -- POKESIM_TIER=fast|long selects the number of tests (default long).
@@ -138,7 +149,6 @@ test-suite parity
         base ^>=4.17.2.1,
         poke-sim,
         aeson >= 2.2.3 && < 2.3,
-        bytestring >= 0.11.5 && < 0.12,
         containers >= 0.6.7 && < 0.7,
         directory >= 1.3 && < 1.4,
         filepath >= 1.4 && < 1.6,
