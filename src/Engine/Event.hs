@@ -40,7 +40,7 @@ module Engine.Event
 
 import qualified Data.Text as T
 
-import Engine.Rule (BoostStat)
+import Engine.Rule (BoostStat, Secondary)
 
 -- ---------------------------------------------------------------------------
 -- Events
@@ -195,6 +195,17 @@ data EventId
   | EvCriticalHit
   -- ^ @runEvent('CriticalHit', target, null, move)@ in @getDamage@ (battle-actions.ts 1704-1706), after a successful crit roll: a falsy result
   -- cancels the critical hit (Shell Armor's @onCriticalHit: false@, a constant). The relay value starts as the hidden @true@.
+  -- slice 8d
+  | EvAfterSetStatus
+  -- ^ @runEvent('AfterSetStatus', this, source, sourceEffect, status)@ at the end of @setStatus@ (pokemon.ts 1768-1770), once the status and its @Start@
+  -- are in place: the relay value is the status id ('RText'). The source is the Pokemon that inflicted it (the Pokemon itself when none did) and
+  -- the effect is the running one ('cEffect'). Synchronize.
+  | EvAfterFaint
+  -- ^ @runEvent('AfterFaint', faintData.target, faintData.source, faintData.effect, length)@ at the end of @resolveFaints@ (battle.ts 2654-2656), after
+  -- the win check and only when a faint was processed: the relay value is the length of the faint queue ('RInt'). Moxie's @onSourceAfterFaint@.
+  | EvModifySecondaries
+  -- ^ @runEvent('ModifySecondaries', target, source, moveData, secondaries.slice())@ in @secondaries@ (battle-actions.ts 1401), before the draws of
+  -- the secondaries, once per hit: the relay value is the list of secondaries ('RSecondaries'), and a handler returns the list that replaces it.
   deriving (Eq, Show, Enum, Bounded)
 
 -- | How @runEvent@ orders the handlers of an event (battle.ts 797-803).
@@ -307,6 +318,10 @@ eventName e = case e of
   EvModifyBoost -> "ModifyBoost"
   -- slice 8c
   EvCriticalHit -> "CriticalHit"
+  -- slice 8d
+  EvAfterSetStatus -> "AfterSetStatus"
+  EvAfterFaint -> "AfterFaint"
+  EvModifySecondaries -> "ModifySecondaries"
 
 -- | Which Pokemon a handler reacts to: the holder (@onX@), its allies (@onAllyX@), its foes (@onFoeX@), the
 -- source of the event (@onSourceX@) or anyone (@onAnyX@).
@@ -483,7 +498,8 @@ data Body
 
 -- | The value an event threads through its handlers (Showdown's @relayVar@). 'RNone' is the hidden @true@ of an
 -- event run without one: it is not passed to the handlers and it is relayTruthy.
-data Relay = RNone | RBool !Bool | RInt !Int | RText !T.Text | RBoosts ![(BoostStat, Int)] | RMoveEdits ![MoveEdit]
+data Relay = RNone | RBool !Bool | RInt !Int | RText !T.Text | RBoosts ![(BoostStat, Int)] | RMoveEdits ![MoveEdit] | RSecondaries ![Secondary]
+  -- ^ slice 8d: 'RSecondaries' is @move.secondaries@ as 'EvModifySecondaries' passes it (an array, so truthy even when empty).
   -- ^ 'RText' is a type or status key (@Immunity@: @'frz'@, @'sandstorm'@). 'RBoosts' is the capped stage changes @AfterBoost@ passes
   -- (@getCappedBoost@: a stat with no change is absent, as in Showdown's sparse table). 'RMoveEdits' is the relay of the
   -- holders' @ModifyType@ and @ModifyMove@ events (see 'MoveEdit').
@@ -877,6 +893,31 @@ data NativeId
   -- ^ sweetveil @onAllySetStatus@: sleep is blocked (LATENT(sleep): no sleep status).
   | NSweetVeilTryAddVolatile
   -- ^ sweetveil @onAllyTryAddVolatile@: yawn is blocked (LATENT(sleep): Yawn is not accepted).
+  -- slice 8d
+  | NFlameBodyDamagingHit
+  -- ^ flamebody @onDamagingHit@: a contact move burns its user on a 3 in 10 draw.
+  | NStaticDamagingHit
+  -- ^ static @onDamagingHit@: the same, paralysis.
+  | NRoughSkinDamagingHit
+  -- ^ roughskin @onDamagingHit@ (order 1): a contact move costs its user @baseMaxhp / 8@.
+  | NToxicChainDamagingHit
+  -- ^ toxicchain @onSourceDamagingHit@: any damaging hit poisons the target badly on a 3 in 10 draw, but not through Shield Dust or Covert Cloak.
+  | NBadDreamsResidual
+  -- ^ baddreams @onResidual@ (order 28, subOrder 2): a sleeping foe takes @baseMaxhp / 8@. LATENT(sleep).
+  | NSynchronizeAfterSetStatus
+  -- ^ synchronize @onAfterSetStatus@: the status is passed back to its source.
+  | NMagicianAfterMoveSecondarySelf
+  -- ^ magician @onAfterMoveSecondarySelf@: a user with no item takes the item of the target it hit.
+  | NPickpocketAfterMoveSecondary
+  -- ^ pickpocket @onAfterMoveSecondary@: a contact attacker's item goes to a holder with none.
+  | NBerserkDamage
+  -- ^ berserk @onDamage@: records in the ability state whether the damage came from a single-hit move ('esA' is @checkedBerserk@).
+  | NBerserkAfterMoveSecondary
+  -- ^ berserk @onAfterMoveSecondary@: +1 Special Attack when a move took the holder across half HP.
+  | NMoxieAfterFaint
+  -- ^ moxie @onSourceAfterFaint@: +1 Attack per faint, when a move caused it.
+  | NShieldDustModifySecondaries
+  -- ^ shielddust @onModifySecondaries@: only the secondaries with a @self@ effect remain.
   deriving (Eq, Show)
 
 -- | The body of each handler the engine implements (written by hand: Showdown's handlers are code). A condition

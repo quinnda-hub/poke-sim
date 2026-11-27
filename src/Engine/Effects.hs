@@ -225,6 +225,27 @@ abilityBodies ty wx name = case name of
   "sweetveil" -> Just [(PAlly, EvSetStatus, BNative NSweetVeilSetStatus), (PAlly, EvTryAddVolatile, BNative NSweetVeilTryAddVolatile)]
   -- shellarmor (4223): `onCriticalHit: false`, a constant handler
   "shellarmor" -> Just [(POwn, EvCriticalHit, BConst (RBool False))]
+  -- slice 8d (data/abilities.ts)
+  -- flamebody, static: onDamagingHit, a contact move and randomChance(3, 10) -> source.trySetStatus('brn' / 'par', target)
+  "flamebody" -> Just [(POwn, EvDamagingHit, BNative NFlameBodyDamagingHit)]
+  "static" -> Just [(POwn, EvDamagingHit, BNative NStaticDamagingHit)]
+  -- roughskin: onDamagingHit (order 1), a contact move damages the source by baseMaxhp / 8
+  "roughskin" -> Just [(POwn, EvDamagingHit, BNative NRoughSkinDamagingHit)]
+  -- toxicchain: onSourceDamagingHit, randomChance(3, 10) -> target.trySetStatus('tox', source)
+  "toxicchain" -> Just [(PSource, EvDamagingHit, BNative NToxicChainDamagingHit)]
+  -- baddreams: onResidual (order 28, subOrder 2)
+  "baddreams" -> Just [(POwn, EvResidual, BNative NBadDreamsResidual)]
+  -- synchronize: onAfterSetStatus
+  "synchronize" -> Just [(POwn, EvAfterSetStatus, BNative NSynchronizeAfterSetStatus)]
+  -- magician: onAfterMoveSecondarySelf; pickpocket: onAfterMoveSecondary
+  "magician" -> Just [(POwn, EvAfterMoveSecondarySelf, BNative NMagicianAfterMoveSecondarySelf)]
+  "pickpocket" -> Just [(POwn, EvAfterMoveSecondary, BNative NPickpocketAfterMoveSecondary)]
+  -- berserk: onDamage, onAfterMoveSecondary (onTryEatItem has no caller while berries are unsupported: 'Engine.Dex.effectFor' skips it)
+  "berserk" -> Just [(POwn, EvDamage, BNative NBerserkDamage), (POwn, EvAfterMoveSecondary, BNative NBerserkAfterMoveSecondary)]
+  -- moxie: onSourceAfterFaint
+  "moxie" -> Just [(PSource, EvAfterFaint, BNative NMoxieAfterFaint)]
+  -- shielddust: onModifySecondaries
+  "shielddust" -> Just [(POwn, EvModifySecondaries, BNative NShieldDustModifySecondaries)]
   _ -> Nothing
   where
     speed ws = do

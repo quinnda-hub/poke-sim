@@ -1921,7 +1921,65 @@ traces do); the long tier does.
 
 ### 8d findings
 
-(To be written by phase 8d.)
+Built: Flame Body, Static, Rough Skin, Toxic Chain, Bad Dreams, Synchronize, Magician, Pickpocket, Berserk, Moxie and Shield Dust. All are
+native handlers in `Engine.Effects` and `Engine.Dispatch`.
+
+**New events**, each at Showdown's call site:
+- `AfterSetStatus` (pokemon.ts 1768), run by `trySetStatusFx` after the status and its `Start` are in place. The relay is the status id.
+- `AfterFaint` (battle.ts 2654-2656), run by `resolveFaintsBy` after the win check and only if a faint was processed. The relay is the
+  length of the faint queue.
+- `ModifySecondaries` (battle-actions.ts 1401), run in `hitEffects` once per hit before the secondary draws. The relay is the secondary
+  list, a new `Relay` constructor `RSecondaries`. Shield Dust keeps only the secondaries with a `self` effect, so it removes their draws.
+  A hit on a Substitute has a null target in Showdown and no Shield Dust handler is collected, so the event is skipped there.
+
+**Changes outside the ability bodies:**
+- `trySetStatusFx dx a status source effect` is `trySetStatus` with the source and the effect that `setStatus` hands to `SetStatus` and
+  `AfterSetStatus`. Moves and secondaries pass the user and `moveCause`; Baneful Bunker, the orbs and Toxic Spikes pass their own.
+  Synchronize reads the source and refuses Toxic Spikes (`effect.id === 'toxicspikes'`).
+- `AfterMoveSecondary` now carries `move.totalDamage` as its relay value (`RInt`). Showdown's event has no relay value and no other handler
+  reads it. Berserk needs the total, and for a single hit it equals `getLastAttackedBy().damage`.
+- `Dex.effectFor` skips Berserk's `onTryEatItem`, as it does Natural Cure's `onCheckShow`: no berry is supported, so it has no caller.
+
+**Deviation: the faint queue has no source or effect.** Showdown keeps `{target, source, effect}` per entry, and `AfterFaint` gets the last
+entry's. `bFaintQueue` holds only the Pokemon, and changing it is a state change, so I did not. `resolveFaintsBy dx (Just user)` is called
+where a move resolves its own faints (after the hit loop, after a status move, at the end of `runMove`). A queued foe of the user then
+fainted of the move, so the event carries the user and `moveCause`. Every other call has no source. A first version read `bActiveMove`
+instead and was wrong: a Dragon Tail drags in a Pokemon that Spikes then faints, inside the move (battle.ts 2866-2873), and the faint is
+resolved while the move is still active (trace seed 182). If the lead wants the source stored with the entry, the three call sites and
+`resolveFaintsBy` are the only places to change.
+
+**Surprises, from the Showdown source:**
+- Flame Body, Static and Toxic Chain draw `randomChance(3, 10)` for every qualifying hit, whatever the attacker's state. Only the
+  `trySetStatus` is conditional. A Shield Dust or Covert Cloak target stops Toxic Chain before the draw, so it draws nothing.
+- `runEvent('DamagingHit')` and `runEvent('AfterMoveSecondary')` take the target as an array (battle-actions.ts 1170-1180, 877-880). In
+  singles it is the same as one target, and `onSource` handlers get the defender as `target`.
+- Toxic Chain is an `onSource` handler, so its holder is the attacker; the defender is the foe's active Pokemon.
+- Magician and Pickpocket take an item through a Substitute (the Substitute hit is in `hitTargets`, battle-actions.ts 680), and from a
+  fainted target (Showdown's `takeItem` does not test `isActive`).
+- Moxie does not fire when a Rocky Helmet or Rough Skin faints the user after the knockout: the last queue entry is the user. A residual
+  or hazard knockout has no move effect.
+- Berserk's `onDamage` runs for every damage the holder takes and stores `checkedBerserk` in `esA` (-1 before the first, then 0 or 1).
+  Nothing reads it while berries are unsupported.
+- Baneful Bunker's effect is the move (`getActiveMove('Baneful Bunker')`); only the id matters to Synchronize, so the volatile's key is passed.
+
+**LATENT comments left:** `LATENT(sleep)` on Bad Dreams (sleep is not modelled, so only Comatose could satisfy it);
+`LATENT(8c)` Magic Guard against Rough Skin, and Sturdy against Berserk; `LATENT(8f)` Mold Breaker against Shield Dust (a breakable
+handler, which the dispatcher's gate already skips) and Toxic Chain's `hasAbility('shielddust')` (not changed by Mold Breaker, as in
+Showdown); Berserk's `onTryEatItem`; Sheer Force's `suppressingSecondaries`; Protective Pads and gems in the contact and Magician checks.
+
+**Traces:** `tools/oracle/gen-slice8d.js`, 1000 battles (about 27% random play, 4% two same-speed mirrors with Bad Dreams, the rest scripted).
+A script is a program that reads the Showdown battle at each decision point (it also answers the forced switches after a knockout), so
+a script that ends in knockouts stays a script. The kinds are listed at the top of the file. The tally at the end of the run counts each
+branch from Showdown's own events, and no counter was zero.
+
+**Properties:**
+- `abilityPlayouts` (both tiers; 400 cases fast, 2000 long): playouts over small teams weighted toward these abilities and the moves and
+  items they meet. It checks `checkBattle` and `checkStep` at every state and step, with Berserk's flag (`esA` in -1..1) and "no step
+  creates an item" (an item held after a step was held before it by the Pokemon or by the other side). Covers keep the generator
+  reaching a Moxie boost after a knockout, an item taken into an empty hand by Magician or Pickpocket, and a Berserk boost.
+- The 6c check that an Eject Button, Red Card or Eject Pack that is gone was used now counts Magician and Pickpocket as item takers, on
+  either team (a pivot's replacement can come in during the step).
+
 
 ### 8e findings
 

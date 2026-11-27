@@ -573,9 +573,12 @@ effectFor ident typeOrder ownPfx startAsSwitchIn v mbodies = do
       -- slice 8c: Shell Armor's @onCriticalHit: false@ is not a function, so the export does not list it under @handlers@; Showdown still
       -- collects it as a handler whose callback is the constant (battle.ts 'findPokemonEventHandlers', 'runEvent' 903-905). The ability
       -- carries it as a key, and the engine runs it as a constant body ('BConst').
-      names = case v of
+      names4 = case v of
         Object o | startAsSwitchIn, KM.member "onCriticalHit" o, "onCriticalHit" `notElem` names3 -> names3 ++ ["onCriticalHit"]
         _ -> names3
+      -- slice 8d. berserk.onTryEatItem (abilities.ts 150) runs from `runEvent('TryEatItem')` in eatItem, which only a berry or Berry Juice
+      -- reaches; no berry is supported, so it has no event point and no body (LATENT: it returns checkedBerserk for the healing berries)
+      names = if ident == "berserk" && startAsSwitchIn then filter (/= "onTryEatItem") names4 else names4
   boosts <- case v of
     Object o | startAsSwitchIn, Just (Object bo) <- KM.lookup "boosts" o ->
       traverse (\(k, x) -> (,) <$> boostStatOf (K.toText k) <*> asInt x) (KM.toList bo)
