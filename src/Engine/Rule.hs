@@ -83,6 +83,10 @@ data Effect
   | EOwnHit
   -- ^ The move's own @onHit@ handler: @singleEvent('Hit', moveData, {}, target, source, move)@ in @runMoveEffects@, after the
   -- @boosts@, @heal@ and @status@ of the move (battle-actions.ts 1338). Slice 4b.
+  | EOwnVolatile
+  -- ^ @volatileStatus@ naming the move's own id (slice 7a: Protect, Spiky Shield, Baneful Bunker, Endure): @runMoveEffects@ adds it with
+  -- @target.addVolatile(moveData.volatileStatus, source, move)@ (battle-actions.ts 1294), after the move's boosts, heal and status and
+  -- before its own @onHit@. The move's @condition@ block is that volatile's.
   | EOwnHitField
   -- ^ The move's own @onHitField@ handler (a move on @all@): @singleEvent('HitField', ...)@ in @runMoveEffects@ (battle-actions.ts
   -- 1328-1331). Slice 4c.
@@ -132,6 +136,8 @@ data MoveRule = MoveRule
   -- ^ @move.ignoreImmunity === true@: the type-immunity step is skipped (pokemon.ts @runImmunity@).
   , mrContact :: !Bool
   -- ^ @flags.contact@: read by @checkMoveMakesContact@ (Rocky Helmet).
+  , mrProtect :: !Bool
+  -- ^ @flags.protect@ (slice 7a): @checkMoveBypassesProtect@ (battle.ts 1314) lets a move without it past a Protect-like volatile.
   , mrPowder :: !Bool
   -- ^ @flags.powder@: @hitStepTryImmunity@ gives Grass types a natural immunity (battle-actions.ts 735) and Overcoat's
   -- @onTryHit@ blocks it.
@@ -182,6 +188,7 @@ plainRule = MoveRule
   , mrDefrost = False
   , mrIgnoreImmunity = False
   , mrContact = False
+  , mrProtect = False
   , mrPowder = False
   , mrSideCondition = Nothing
   , mrWeather = Nothing
@@ -224,6 +231,8 @@ executable r =
               ([ERoost], [EHeal _ _], TargetSelf, Nothing, Nothing, Nothing, Nothing) -> True
               ([], [EBoost _], t, Nothing, Nothing, Nothing, Nothing) -> t == TargetFoe || t == TargetSelf
               ([], [EStatus _], TargetFoe, Nothing, Nothing, Nothing, Nothing) -> True
+              -- slice 7a: the move's own volatile, then its onHit, on the user (Protect, Spiky Shield, Baneful Bunker, Endure)
+              ([], [EOwnVolatile, EOwnHit], TargetSelf, Nothing, Nothing, Nothing, Nothing) -> True
               -- the move's own onHit alone, on the user or the foe
               ([], [EOwnHit], t, Nothing, Nothing, Nothing, Nothing) -> t == TargetFoe || t == TargetSelf
               -- a selfSwitch move on the user with nothing else (Teleport: its onTry is its only handler)
@@ -246,6 +255,7 @@ executable r =
       EFlinch -> True
       EHeal _ _ -> False
       ERoost -> False
+      EOwnVolatile -> False
       EOwnHit -> False
       EOwnHitField -> False
     -- the damage-formula fields only a damaging move can use
@@ -270,20 +280,23 @@ ruleKeys =
   , "sideCondition", "weather", "terrain", "pseudoWeather"
   , "damage", "overrideOffensiveStat", "overrideDefensiveStat", "overrideOffensivePokemon", "ignoreDefensive", "ignoreEvasion"
   , "selfBoost", "selfSwitch", "forceSwitch"
+  -- slice 7a
+  , "volatileStatus"
   ]
 
 -- | Keys that are truthy on moves the engine accepts but cannot change the outcome, and why.
 inertKeys :: [(T.Text, T.Text)]
 inertKeys =
   [ ("baseMoveType", "copy of type; only read by ModifyType handlers of Hidden Power and Terablast, which are rejected")
+  -- slice 7a
+  , ("stallingMove", "declared in dex-moves.ts and read by nothing in sim/: the stall logic is the move's own onPrepareHit")
   ]
 
 -- | Flags that cannot matter while the engine has none of the thing that reads them.
 -- REVISIT each entry when the mechanic in its reason is added.
 inertFlags :: [(T.Text, T.Text)]
 inertFlags =
-  [ ("protect", "blocked by Protect-like moves, which have handlers and are rejected")
-  , ("mirror", "read by Mirror Move, which is rejected")
+  [ ("mirror", "read by Mirror Move, which is rejected")
   , ("metronome", "read by Metronome, which is rejected")
   , ("slicing", "read by Sharpness only")
   , ("punch", "read by Iron Fist and Punching Glove only")
@@ -351,7 +364,7 @@ moveRule condOf ownRejected (Object o) = do
         Just (Object s) | Just (String v) <- KM.lookup "volatileStatus" s -> v == moveId && moveId == "roost"
         -- chillyreception: its priorityChargeCallback adds the volatile named for the move, so the move's @condition@ block is
         -- that volatile's ('Engine.Dex' checks it is supported)
-        _ -> moveId == "chillyreception"
+        _ -> moveId == "chillyreception" || moveId `elem` ownVolatileMoves -- slice 7a: the move's top-level volatileStatus is its own id
       hasCondField = conditionField moveId o /= Nothing || ownVolatile
   when (not (null conditionNames) && not hasCondField) $
     Left ("has handler code " <> showHandlers (Array (V.fromList (map String conditionNames))))
@@ -441,11 +454,18 @@ moveRule condOf ownRejected (Object o) = do
     Nothing -> Right False
     Just (Bool True) -> Right True
     Just v -> Left ("forceSwitch " <> showV v)
+  -- slice 7a: a top-level `volatileStatus` is translated only when it is the move's own id and one of the four (the volatile of
+  -- Protect, Spiky Shield, Baneful Bunker and Endure; 'Engine.Dex' checks its condition and the stall condition are supported).
+  -- Every other value (taunt, encore, substitute, ...) is a rejection.
+  ownVolatile7a <- case look "volatileStatus" of
+    Nothing -> Right []
+    Just (String v) | v == moveId, v `elem` ownVolatileMoves -> Right [EOwnVolatile]
+    Just v -> Left ("volatileStatus " <> showV v)
   pure MoveRule
     { mrDamaging = damaging
     , mrHits = hits
     , mrTarget = target
-    , mrOnHit = [EHeal a b | Just (a, b) <- [heal]] ++ boosts ++ status ++ [EOwnHit | "onHit" `elem` ownNames] ++ [EOwnHitField | "onHitField" `elem` ownNames]
+    , mrOnHit = [EHeal a b | Just (a, b) <- [heal]] ++ boosts ++ status ++ ownVolatile7a ++ [EOwnHit | "onHit" `elem` ownNames] ++ [EOwnHitField | "onHitField" `elem` ownNames]
     , mrSelf = self
     , mrSecondaries = secondaries
     , mrDrain = drain
@@ -454,6 +474,7 @@ moveRule condOf ownRejected (Object o) = do
     , mrDefrost = "defrost" `elem` flags
     , mrIgnoreImmunity = ignoreImm
     , mrContact = "contact" `elem` flags
+    , mrProtect = "protect" `elem` flags
     , mrPowder = "powder" `elem` flags
     , mrSideCondition = sideCond
     , mrWeather = weather
@@ -496,6 +517,10 @@ moveRule condOf ownRejected (Object o) = do
       Just v -> Left (k <> " " <> showV v)
 moveRule _ _ _ = Left "move is not an object"
 
+-- | The moves whose top-level @volatileStatus@ is their own id and is translated (slice 7a).
+ownVolatileMoves :: [T.Text]
+ownVolatileMoves = ["protect", "spikyshield", "banefulbunker", "endure"]
+
 -- | A key of the move is accounted for. @condition@ is the block of the field condition that the move's
 -- @sideCondition@, @weather@, @terrain@ or @pseudoWeather@ names; it is translated into the condition table.
 checkKey :: Bool -> (T.Text, Value) -> Either Reason ()
@@ -511,6 +536,7 @@ checkFlag f
   | f == "defrost" = Right () -- translated: 'mrDefrost'
   | f == "contact" = Right () -- translated: 'mrContact'
   | f == "powder" = Right () -- translated: 'mrPowder'
+  | f == "protect" = Right () -- translated: 'mrProtect'
   | Just _ <- lookup f inertFlags = Right ()
   | otherwise = Left ("not modelled: flag " <> f)
 

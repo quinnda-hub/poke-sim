@@ -15,6 +15,7 @@ module Engine.Event
     -- * Effects
   , CondId (..)
   , condName
+  , condByName
   , EffectKind (..)
   , ownPrefix
   , EffectKey (..)
@@ -159,6 +160,13 @@ data EventId
   | EvAfterMove
   -- ^ @singleEvent('AfterMove', move, null, pokemon, target, move)@ then @runEvent('AfterMove', pokemon, target, move)@ in @runMove@
   -- (battle-actions.ts 367-368), after @useMove@. Eject Pack's @onAnyAfterMove@ (slice 6d).
+  -- slice 7a
+  | EvStallMove
+  -- ^ @runEvent('StallMove', pokemon)@ in the @onPrepareHit@ of Protect, Spiky Shield, Baneful Bunker and Endure (data/moves.ts 13978 and
+  -- the like), when the user is not the last to act: the @stall@ volatile's @onStallMove@ draws @randomChance(1, counter)@.
+  | EvDamage
+  -- ^ @runEvent('Damage', target, source, effect, damage, true)@ in @spreadDamage@ (battle.ts 2146), after the damage is clamped to at least 1
+  -- and before it is dealt. Endure's @onDamage@ (priority -10). Run for a move's damage; see 'Engine.Turn.hitMove'.
   deriving (Eq, Show, Enum, Bounded)
 
 -- | How @runEvent@ orders the handlers of an event (battle.ts 797-803).
@@ -257,6 +265,8 @@ eventName e = case e of
   EvAfterBoost -> "AfterBoost"
   EvUse -> "Use"
   EvAfterMove -> "AfterMove"
+  EvStallMove -> "StallMove"
+  EvDamage -> "Damage"
 
 -- | Which Pokemon a handler reacts to: the holder (@onX@), its allies (@onAllyX@), its foes (@onFoeX@), the
 -- source of the event (@onSourceX@) or anyone (@onAnyX@).
@@ -298,6 +308,8 @@ parseHandlerName n = case T.stripPrefix "on" n of
 -- | The conditions the engine supports: the statuses of slice 1 and the flinch volatile. The index
 -- ('fromEnum') is the id used in the state and in the @Dex@ condition table.
 data CondId = CBrn | CPar | CPsn | CTox | CFrz | CFlinch | CProtosynthesis | CQuarkDrive | CUnburden | CRoost | CChillyReception
+  -- slice 7a
+  | CStall | CProtect | CSpikyShield | CBanefulBunker | CEndure
   deriving (Eq, Show, Enum, Bounded)
 
 -- | The key of the condition in @conditions.json@ (data/conditions.ts).
@@ -314,6 +326,18 @@ condName c = case c of
   CUnburden -> "unburden"
   CRoost -> "roost"
   CChillyReception -> "chillyreception"
+  -- slice 7a
+  CStall -> "stall"
+  CProtect -> "protect"
+  CSpikyShield -> "spikyshield"
+  CBanefulBunker -> "banefulbunker"
+  CEndure -> "endure"
+
+-- | The condition with a key of @conditions.json@ (or a move's own volatile).
+condByName :: T.Text -> Maybe CondId
+condByName n = case [c | c <- [minBound .. maxBound], condName c == n] of
+  (c : _) -> Just c
+  [] -> Nothing
 
 -- | What kind of effect holds a handler. Showdown's other kinds (slot conditions, the move itself) join when their
 -- holders exist in the state. A move is one for @onEffect@ events.
@@ -625,6 +649,27 @@ data NativeId
   -- ^ ejectpack @onUse@: the holder's @switchFlag = true@.
   | NEjectPackEnd
   -- ^ ejectpack @onEnd@: delete @eject@.
+  -- slice 7a: the protect family
+  | NStallStart
+  -- ^ stall @onStart@: @counter = 3@ (data/conditions.ts 443-447).
+  | NStallStallMove
+  -- ^ stall @onStallMove@: @randomChance(1, counter)@, deleting the volatile on a failure.
+  | NStallRestart
+  -- ^ stall @onRestart@: the counter triples while below 729, and the duration is 2 again.
+  | NStallPrepareHit
+  -- ^ protect, spikyshield, banefulbunker, endure @onPrepareHit@: `!!this.queue.willAct() && this.runEvent('StallMove', pokemon)`.
+  | NStallHit
+  -- ^ the same four moves' @onHit@: @pokemon.addVolatile('stall')@.
+  | NProtectTryHit
+  -- ^ protect @condition.onTryHit@ (priority 3): a move with the @protect@ flag is blocked (@NOT_FAIL@).
+  | NSpikyShieldTryHit
+  -- ^ spikyshield @condition.onTryHit@: as Protect's, and a contact move costs its user @baseMaxhp / 8@.
+  | NBanefulBunkerTryHit
+  -- ^ banefulbunker @condition.onTryHit@: as Protect's, and a contact move poisons its user.
+  | NInertZMaxHit
+  -- ^ spikyshield, banefulbunker @condition.onHit@: acts only for a Z or Max move, of which there are none.
+  | NEndureDamage
+  -- ^ endure @condition.onDamage@ (priority -10): a move's damage of at least the holder's HP leaves it 1 HP.
   deriving (Eq, Show)
 
 -- | The body of each handler the engine implements (written by hand: Showdown's handlers are code). A condition
@@ -660,6 +705,21 @@ nativeBody c POwn e = BNative <$> case (c, e) of
   (CRoost, EvType) -> Just NRoostType
   -- chillyreception (data/moves.ts 2413-2420): onBeforeMove only logs `-prepare`
   (CChillyReception, EvBeforeMove) -> Just NLogOnly
+  -- slice 7a: stall (data/conditions.ts 443-466) and the volatiles of protect, spikyshield, banefulbunker and endure (their moves'
+  -- @condition@ blocks, data/moves.ts 13966, 17539, 985, 4811). Their @onStart@ only logs `-singleturn`.
+  (CStall, EvStart) -> Just NStallStart
+  (CStall, EvStallMove) -> Just NStallStallMove
+  (CStall, EvRestart) -> Just NStallRestart
+  (CProtect, EvStart) -> Just NLogOnly
+  (CProtect, EvTryHit) -> Just NProtectTryHit
+  (CSpikyShield, EvStart) -> Just NLogOnly
+  (CSpikyShield, EvTryHit) -> Just NSpikyShieldTryHit
+  (CSpikyShield, EvHit) -> Just NInertZMaxHit
+  (CBanefulBunker, EvStart) -> Just NLogOnly
+  (CBanefulBunker, EvTryHit) -> Just NBanefulBunkerTryHit
+  (CBanefulBunker, EvHit) -> Just NInertZMaxHit
+  (CEndure, EvStart) -> Just NLogOnly
+  (CEndure, EvDamage) -> Just NEndureDamage
   (_, EvModifyAtk) | paradox c -> Just NParadoxAtk
   (_, EvModifyDef) | paradox c -> Just NParadoxDef
   (_, EvModifySpA) | paradox c -> Just NParadoxSpA

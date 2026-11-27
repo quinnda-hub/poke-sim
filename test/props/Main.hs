@@ -139,6 +139,9 @@ pivotPlayouts dex = property $ do
       cover 3 "a Red Card was used" (seenRedCard seen > 0)
       cover 3 "an Eject Pack was used" (seenPack seen > 0)
       cover 1 "an Eject Pack was used by a Pokemon as it switched in" (seenPackIn seen > 0)
+      -- slice 7a: the protect family succeeded, and again with the stall volatile in place (the counter climbed)
+      cover 20 "a protect move succeeded (a stall volatile was held)" (seenStall seen > 0)
+      cover 5 "a protect move succeeded with a stall counter of 9 or more" (seenStallClimb seen > 0)
       case request b of
         Finished _ -> success
         Awaiting {} -> footnote "playout ended without a result" >> failure
@@ -353,6 +356,11 @@ conditionsSupported dex conditionsV abilitiesV movesV = withTests 1 $ property $
         CUnburden -> abilityCondition "unburden"
         CRoost -> lookupKey "condition" (lookupKey "roost" movesV)
         CChillyReception -> lookupKey "condition" (lookupKey "chillyreception" movesV)
+        -- slice 7a: the volatiles of the protect family are their moves' condition blocks (stall is in conditions.json)
+        CProtect -> lookupKey "condition" (lookupKey "protect" movesV)
+        CSpikyShield -> lookupKey "condition" (lookupKey "spikyshield" movesV)
+        CBanefulBunker -> lookupKey "condition" (lookupKey "banefulbunker" movesV)
+        CEndure -> lookupKey "condition" (lookupKey "endure" movesV)
         _ -> lookupKey (condName c) conditionsV
       abilityCondition name = lookupKey "condition" (lookupKey name abilitiesV)
       lookupKey k v = case v of

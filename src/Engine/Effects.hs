@@ -428,4 +428,13 @@ moveBodies name = case name of
   "teleport" -> Just [(POwn, EvTry, BNative NTeleportTry)]
   "partingshot" -> Just [(POwn, EvHit, BNative NPartingShotHit)]
   "chillyreception" -> Just [(POwn, EvPriorityChargeCallback, BNative NChillyReceptionCharge)]
+  -- Slice 7a. protect (13966), spikyshield (17539), banefulbunker (985), endure (4811): onPrepareHit is `!!this.queue.willAct() &&
+  -- this.runEvent('StallMove', pokemon)`, onHit adds the stall volatile (the move's own volatile is added before it)
+  "protect" -> Just stallingMove
+  "spikyshield" -> Just stallingMove
+  "banefulbunker" -> Just stallingMove
+  "endure" -> Just stallingMove
   _ -> Nothing
+  where
+    -- slice 7a: the handlers the four moves share
+    stallingMove = [(POwn, EvPrepareHit, BNative NStallPrepareHit), (POwn, EvHit, BNative NStallHit)]

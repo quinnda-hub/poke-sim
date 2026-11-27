@@ -63,7 +63,11 @@ genTeamsWith dx pivotHeavy = (,) <$> genTeam <*> genTeam
     pickSpecies
       | pivotHeavy && "shedinja" `elem` species = Gen.frequency [(3, pure "shedinja"), (7, Gen.element species)]
       | otherwise = Gen.element species
+    -- slice 7a: the protect family, which the heavy teams carry on many sets (a repeated protect move climbs the stall counter and fails)
+    protectKit = [m | m <- ["protect", "spikyshield", "banefulbunker", "endure"], m `elem` moves]
     pickMove
+      | pivotHeavy && not (null protectKit) && not (null pivots) && not (null dragKit) =
+          Gen.frequency [(3, Gen.element pivots), (3, Gen.element dragKit), (3, Gen.element protectKit), (2, Gen.element moves)]
       | pivotHeavy && not (null pivots) && not (null dragKit) = Gen.frequency [(3, Gen.element pivots), (3, Gen.element dragKit), (2, Gen.element moves)]
       | pivotHeavy && not (null pivots) = Gen.frequency [(3, Gen.element pivots), (2, Gen.element moves)]
       | otherwise = Gen.element moves
@@ -134,14 +138,19 @@ data Seen = Seen
   -- ^ an Eject Pack used up
   , seenPackIn :: !Int
   -- ^ an Eject Pack used up by a Pokemon in the step that switched it in (Sticky Web)
+  -- slice 7a
+  , seenStall :: !Int
+  -- ^ a Pokemon holding a @stall@ volatile after a step: a protect move succeeded
+  , seenStallClimb :: !Int
+  -- ^ a @stall@ volatile with a counter of 9 or more: a protect move succeeded again with the volatile in place
   }
   deriving (Eq, Show)
 
 instance Semigroup Seen where
-  Seen a b c d e f g <> Seen a' b' c' d' e' f' g' = Seen (a + a') (b + b') (c + c') (d + d') (e + e') (f + f') (g + g')
+  Seen a b c d e f g h i <> Seen a' b' c' d' e' f' g' h' i' = Seen (a + a') (b + b') (c + c') (d + d') (e + e') (f + f') (g + g') (h + h') (i + i')
 
 instance Monoid Seen where
-  mempty = Seen 0 0 0 0 0 0 0
+  mempty = Seen 0 0 0 0 0 0 0 0 0
 
 -- | Play with random legal choices, checking every state on the way, until the battle ends (or the cap).
 --
@@ -186,9 +195,12 @@ playChecked dx t1 t2 = startBattle dx t1 t2 >>= go 0 mempty
 -- could bring it back.
 -- Returns what the step went through.
 checkStep :: Dex -> Battle -> Battle -> (Maybe Choice, Maybe Choice) -> Either String Seen
-checkStep dx b b' (c1, c2) = mapM_ one [(p, i) | (p, side) <- [(P1, bP1), (P2, bP2)], i <- [0 .. SV.length (sMons (side b)) - 1]] >> turnOk >> (((,) <$> drag (P1, c1) <*> drag (P2, c2)) >>= \ds -> pivotsOk ds >> switchOuts >>= \so -> pure (so <> mempty {seenDrags = length (filter id [fst ds, snd ds])}))
+checkStep dx b b' (c1, c2) = (mappend stallSeen <$>) $ mapM_ one [(p, i) | (p, side) <- [(P1, bP1), (P2, bP2)], i <- [0 .. SV.length (sMons (side b)) - 1]] >> turnOk >> (((,) <$> drag (P1, c1) <*> drag (P2, c2)) >>= \ds -> pivotsOk ds >> switchOuts >>= \so -> pure (so <> mempty {seenDrags = length (filter id [fst ds, snd ds])}))
   where
     chose p = if p == P1 then c1 else c2
+    -- slice 7a: the stall volatiles after the step (the protect volatiles themselves end with the turn, so only stall shows)
+    stalls = [st | p <- [P1, P2], m <- SV.toList (sMons (sideOf p b')), Volatile i st <- SV.toList (monVolatiles m), i == fromEnum CStall]
+    stallSeen = mempty {seenStall = length stalls, seenStallClimb = length [() | st <- stalls, esA st >= 9]}
     abilityIs name m = abilityId dx (monAbility m) == name
     itemIs name m = monItem m /= noItem && itemId dx (monItem m) == name
     knownMoves m = [mvId (dxMoves dx V.! msMove ms) | ms <- SV.toList (monMoves m)]
@@ -448,12 +460,23 @@ checkBattle dx b = do
             | i == fromEnum CRoost = esDuration st == 1
             -- chilly reception: one turn (duration 1); its priorityChargeMove action adds it
             | i == fromEnum CChillyReception = esDuration st == 1
+            -- slice 7a: stall (a protect move's counter) is 3 tripled up to 729, and lasts one or two turns (duration 2, 1 after a
+            -- residual). Protect, Spiky Shield, Baneful Bunker and Endure last the turn they are added (duration 1) and end at its
+            -- Residual, so no decision point but a mid-turn switch request, or the end of the battle, sees one
+            | i == fromEnum CStall = esA st `elem` [3, 9, 27, 81, 243, 729] && esDuration st `elem` [1, 2]
+            -- (a pivot or an Eject Button that switches its holder out mid-turn leaves a request while the foe's protect volatile, or
+            -- Endure, is still up: the move that triggered it was not blocked by it, as it hit the Endure holder or went around)
+            | i `elem` map fromEnum [CProtect, CSpikyShield, CBanefulBunker, CEndure] = esDuration st == 1 && (midTurnRequest || finished)
             | otherwise = False
+          -- a live Pokemon flagged to switch out (a pivot's or an Eject Button's switch request) means the turn is not over
+          -- (a battle that ends mid-turn, on Spiky Shield's damage for one, never reaches the Residual that removes them)
+          finished = case request b of Finished _ -> True; _ -> False
+          midTurnRequest = or [monSwitchFlag x /= NoSwitch && monHp x > 0 | p' <- [P1, P2], x <- SV.toList (sMons (sideOf p' b))]
           sp = speciesData dx (monSpecies m)
           ability name = abilityId dx (monAbility m) == name
           boosterOk st = esB st == 0 || (esB st == 1 && (not (spParadox sp) || itemId dx (monItem m) /= "boosterenergy"))
           ids = [i | Volatile i _ <- SV.toList (monVolatiles m)]
-      if all volatileOk (SV.toList (monVolatiles m)) then Right () else bad "a volatile that is not flinch, or an ability's volatile that breaks its invariant"
+      if all volatileOk (SV.toList (monVolatiles m)) then Right () else bad ("a volatile that breaks its invariant (id, esA, esB, duration): " ++ show [(i, esA st, esB st, esDuration st) | Volatile i st <- SV.toList (monVolatiles m)])
       if length ids == length (nub ids) then Right () else bad "a volatile twice"
       -- a Pokemon with no item has a default item state (useItem clears the state with the item)
       if monItem m == noItem && monItemState m /= noEffectState then bad "no item but an item state" else Right ()
