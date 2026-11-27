@@ -43,8 +43,9 @@ genTeams :: Dex -> Gen (Team, Team)
 genTeams dx = genTeamsWith dx False
 
 -- | 'genTeams' weighted toward the moves that switch their user out (U-turn, Flip Turn, Volt Switch, Teleport, Parting Shot, Chilly
--- Reception), Rocky Helmet and Shedinja (1 HP: a contact pivot into a Rocky Helmet faints its user after the flag is set), so that the
--- playouts reach the mid-turn switch requests that a uniform draw over every move seldom does.
+-- Reception) and the moves that force the target out (Roar, Whirlwind, Dragon Tail, Circle Throw), the hazards they drag into, Rocky
+-- Helmet and Shedinja (1 HP: a contact pivot into a Rocky Helmet faints its user after the flag is set), so that the playouts reach the
+-- mid-turn switch requests and the drags that a uniform draw over every move seldom does.
 genPivotTeams :: Dex -> Gen (Team, Team)
 genPivotTeams dx = genTeamsWith dx True
 
@@ -54,10 +55,12 @@ genTeamsWith dx pivotHeavy = (,) <$> genTeam <*> genTeam
     species = supportedSpecies dx
     moves = supportedMoves dx
     pivots = [m | m <- ["uturn", "flipturn", "voltswitch", "teleport", "partingshot", "chillyreception"], m `elem` moves]
+    dragKit = [m | m <- ["roar", "whirlwind", "dragontail", "circlethrow", "stealthrock", "spikes", "toxicspikes"], m `elem` moves]
     pickSpecies
       | pivotHeavy && "shedinja" `elem` species = Gen.frequency [(3, pure "shedinja"), (7, Gen.element species)]
       | otherwise = Gen.element species
     pickMove
+      | pivotHeavy && not (null pivots) && not (null dragKit) = Gen.frequency [(3, Gen.element pivots), (3, Gen.element dragKit), (2, Gen.element moves)]
       | pivotHeavy && not (null pivots) = Gen.frequency [(3, Gen.element pivots), (2, Gen.element moves)]
       | otherwise = Gen.element moves
     pickItem
@@ -104,21 +107,23 @@ pickBoth b a1 a2 = (,) <$> pick P1 a1 <*> pick P2 a2
       pure (case drop i cs of (c : _) -> Just c; [] -> Nothing)
 
 -- | Play with random legal choices, checking every state on the way, until the battle ends (or the cap).
-playChecked :: Dex -> Team -> Team -> Sample (Either String Battle)
-playChecked dx t1 t2 = startBattle dx t1 t2 >>= go 0
+--
+-- The result carries the number of forced switches (drags) the playout went through, which 'checkStep' finds.
+playChecked :: Dex -> Team -> Team -> Sample (Either String (Battle, Int))
+playChecked dx t1 t2 = startBattle dx t1 t2 >>= go 0 0
   where
-    go :: Int -> Battle -> Sample (Either String Battle)
-    go n b
+    go :: Int -> Int -> Battle -> Sample (Either String (Battle, Int))
+    go n drags b
       | n > stepCap = pure (Left ("no result within " ++ show stepCap ++ " decision steps"))
       | Left e <- checkBattle dx b = pure (Left e)
       | otherwise = case request b of
-          Finished _ -> pure (Right b)
+          Finished _ -> pure (Right (b, drags))
           Awaiting _ a1 a2 -> do
             cs <- pickBoth b a1 a2
             r <- step dx b cs
             case r of
               Left e -> pure (Left ("step rejected legal choices " ++ show cs ++ ": " ++ show e))
-              Right b' -> either (pure . Left) (const (go (n + 1) b')) (checkStep b b')
+              Right b' -> either (pure . Left) (\d -> go (n + 1) (drags + d) b') (checkStep b b' cs)
 
 -- | What one decision step may do to a Stellar Pokemon's @stellarBoostedTypes@ (pokemon.ts 504 sets it in the constructor
 -- and nothing ever clears or removes from it, so a switch or a faint keeps it): it never loses a type, and a Pokemon that
@@ -128,21 +133,53 @@ playChecked dx t1 t2 = startBattle dx t1 t2 >>= go 0
 -- turn counter has not advanced; and a Pokemon that was flagged by a self-switch move (alive, 'SwitchMove') and whose side then
 -- chose its replacement is benched afterwards with no queued action left, except a @runSwitch@ (@queue.cancelAction@ keeps those,
 -- and none can be its own).
-checkStep :: Battle -> Battle -> Either String ()
-checkStep b b' = mapM_ one [(p, i) | (p, side) <- [(P1, bP1), (P2, bP2)], i <- [0 .. SV.length (sMons (side b)) - 1]] >> turnOk >> pivotsOk
+--
+-- Forced switches (slice 6b): a side whose active Pokemon, after the step, is not the one its choice put there (the one it had, or the
+-- target of its @switch@) was dragged out by a Roar, Whirlwind, Dragon Tail or Circle Throw, which no other effect does yet. The one it
+-- had is then benched, without a flag or queued action (@queue.cancelAction@), and the one that replaced it was on the bench before the
+-- step (or the one the side's own switch benched during it), unfainted and not active (@getRandomSwitchable@ lists only those). Returns the number of drags.
+checkStep :: Battle -> Battle -> (Maybe Choice, Maybe Choice) -> Either String Int
+checkStep b b' (c1, c2) = mapM_ one [(p, i) | (p, side) <- [(P1, bP1), (P2, bP2)], i <- [0 .. SV.length (sMons (side b)) - 1]] >> turnOk >> (((,) <$> drag (P1, c1) <*> drag (P2, c2)) >>= \ds -> pivotsOk ds >> pure (length (filter id [fst ds, snd ds])))
   where
+    drag (p, c) = do
+      let s = sideOf p b
+          s' = sideOf p b'
+          expected = case c of
+            Just (Switch k) -> sSlots s U.!? (k - 1)
+            Just _ | sHasActive s -> sSlots s U.!? 0
+            _ -> Nothing
+          actual = if sHasActive s' then sSlots s' U.!? 0 else Nothing
+      case (expected, actual) of
+        (Just e, Just a) | e /= a -> do
+          let who = show p ++ " dragged-out member " ++ show e ++ ": "
+              out = monOf b' (Actor p e)
+              queued = [x | x <- SV.toList (bQueue b'), acActor x == Just (Actor p e), acKind x /= KRunSwitch]
+              inn = monOf b (Actor p a)
+          if monActive out then Left (who ++ "still active") else Right ()
+          if monForceSwitchFlag out then Left (who ++ "still has its force-switch flag") else Right ()
+          if monHp out <= 0 then Left (who ++ "has no HP") else Right ()
+          if null queued then Right () else Left (who ++ "has queued actions: " ++ show queued)
+          -- (a side that chose a switch had its old active benched during the step, and the drag may bring that one back)
+          let switched = case c of Just (Switch _) -> True; _ -> False
+          if monFainted inn || monHp inn <= 0 || (monActive inn && not switched)
+            then Left (show p ++ " member " ++ show a ++ " was dragged in but was active or fainted before the step")
+            else Right ()
+          pure True
+        _ -> pure False
     turnOk = case request b' of
       Awaiting SwitchRequest _ _ | bTurn b' /= bTurn b -> Left ("the turn counter went from " ++ show (bTurn b) ++ " to " ++ show (bTurn b') ++ " across a switch request")
       _ -> Right ()
-    pivotsOk = case request b of
-      Awaiting SwitchRequest _ _ -> mapM_ pivoted [(p, o) | p <- [P1, P2], o <- activeOrigs p]
+    pivotsOk ds = case request b of
+      Awaiting SwitchRequest _ _ -> mapM_ (pivoted ds) [(p, o) | p <- [P1, P2], o <- activeOrigs p]
       _ -> Right ()
     activeOrigs p = [i | (i, m) <- zip [0 ..] (SV.toList (sMons (sideOf p b))), monActive m, monSwitchFlag m == SwitchMove, monHp m > 0]
-    pivoted (p, o) =
+    -- (a drag later in the step can bring the pivoted Pokemon back, a bench member like any other, and a hazard can then faint it)
+    pivoted ds (p, o) =
       let m' = monOf b' (Actor p o)
           queued = [a | a <- SV.toList (bQueue b'), acActor a == Just (Actor p o), acKind a /= KRunSwitch]
-       in if monActive m' then Left (show p ++ " member " ++ show o ++ " is still active after its self-switch")
-          else if monHp m' <= 0 then Left (show p ++ " member " ++ show o ++ " has no HP after its self-switch")
+          dragged = (if p == P1 then fst else snd) ds
+       in if monActive m' && not dragged then Left (show p ++ " member " ++ show o ++ " is still active after its self-switch")
+          else if monHp m' <= 0 && not dragged then Left (show p ++ " member " ++ show o ++ " has no HP after its self-switch")
           else if not (null queued) then Left (show p ++ " member " ++ show o ++ " has queued actions after its self-switch: " ++ show queued)
           else Right ()
     side' p = if p == P1 then bP1 b' else bP2 b'
@@ -179,6 +216,9 @@ checkBattle dx b = do
     Finished _ -> mapM_ (\p -> if null (legalChoices b p) then Right () else Left ("choices after the end for " ++ show p)) [P1, P2]
   mapM_ side [(P1, bP1 b), (P2, bP2 b)]
   switchFlags
+  -- the force-switch flag (slice 6b) is set by a forceSwitch move and consumed by the action tail of the same action
+  mapM_ (\(p, s) -> if any monForceSwitchFlag (SV.toList (sMons s)) then Left (show p ++ ": a force-switch flag at a decision point") else Right ())
+    [(P1, bP1 b), (P2, bP2 b)]
   conditions
   where
     -- The switch flag (slice 6a): only the Pokemon in the active slot has one (a fainted one is no longer 'isActive' there: faintMessages

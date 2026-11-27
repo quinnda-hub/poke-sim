@@ -21,6 +21,7 @@ module Engine.Dispatch
   , moveTry
   , movePriorityCharge
   , canSwitch
+  , switchCandidates
   , moveTryImmunity
   , moveTryHit
   , moveAfterHit
@@ -1985,13 +1986,17 @@ movePriorityCharge dx user mv = case moveSpec mv POwn EvPriorityChargeCallback >
   Just (BNative NChillyReceptionCharge) -> void (addVolatile dx user CChillyReception)
   _ -> pure ()
 
--- | @battle.canSwitch(side)@ (battle.ts 1580, @possibleSwitches@ 1589-1602): the number of unfainted Pokemon in the back slots that
--- are not already queued to switch in.
+-- | @battle.canSwitch(side)@ (battle.ts 1580): the number of 'switchCandidates'.
 canSwitch :: Battle -> Player -> Int
-canSwitch b p
-  | sLeft s == 0 = 0
-  | otherwise = length
-      [ ()
+canSwitch b p = length (switchCandidates b p)
+
+-- | @possibleSwitches(side)@ (battle.ts 1589-1602): the origs of the unfainted Pokemon in the back slots that are not already
+-- queued to switch in, in slot order (the order @getRandomSwitchable@'s @sample@ indexes).
+switchCandidates :: Battle -> Player -> [Int]
+switchCandidates b p
+  | sLeft s == 0 = []
+  | otherwise =
+      [ o
       | i <- [1 .. U.length (sSlots s) - 1]
       , Just o <- [sSlots s U.!? i]
       , not (monFainted (monOf b (Actor p o)))

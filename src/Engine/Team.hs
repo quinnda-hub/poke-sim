@@ -206,6 +206,7 @@ buildMon fmt dx s = do
     , monFaintQueued = False
     , monActive = False
     , monSwitchFlag = NoSwitch
+    , monForceSwitchFlag = False
     , monStatus = StatusNone
     , monAbility = ssAbility s
     , monBaseAbility = ssAbility s

@@ -297,7 +297,7 @@ startAction dx = do
     modify' (modifySide p (\s -> if sLeft s > 0 then s {sLeft = SV.length (sMons s)} else s))
   forM_ [P1, P2] $ \p -> do
     s <- gets (sideOf p)
-    switchIn dx True p (activeOrig s)
+    switchIn dx HowSwitch p (activeOrig s)
   modify' (\b -> b {bMidTurn = True})
 
 -- | @case 'switch'@ / @'instaswitch'@: switch the target in at the actor's position. A live Pokemon replaced by an instaswitch is
@@ -307,13 +307,15 @@ startAction dx = do
 {-# INLINABLE switchAction #-}
 switchAction :: MonadChance m => Dex -> Action -> Eng m ()
 switchAction dx ac = case acActor ac of
-  Just (Actor p _) -> switchIn dx (acKind ac == KSwitch) p (acArg ac)
+  Just (Actor p _) -> switchIn dx (if acKind ac == KSwitch then HowSwitch else HowInsta) p (acArg ac)
   Nothing -> pure ()
 
 -- | The part of @runAction@ after the action's own work.
 {-# INLINABLE afterAction #-}
 afterAction :: MonadChance m => Dex -> Action -> Eng m ()
 afterAction dx ac = do
+  -- phazing (battle.ts 2866-2873): after the action and before the faints are resolved, whether or not the battle has ended
+  phazing dx
   -- fainting: resolveFaints({ checkWinIfNoFaints: true, checkWin: true })
   resolveFaints dx True True
   ended <- gets ((/= Ongoing) . bResult)
@@ -337,6 +339,41 @@ afterAction dx ac = do
           modify' (\b' -> b' {bQueue = sorted})
   where
     peekQueue q = q SV.!? 0
+
+-- | The action tail's phazing step (battle.ts 2866-2873): for each side in order, an active Pokemon with @forceSwitchFlag@ is dragged
+-- out when it still has HP, and the flag is cleared either way. It follows the action's own work (the residual branch included) and
+-- precedes @resolveFaints@, and Showdown does not test @ended@ first: a battle that a Rocky Helmet has just ended still drags.
+{-# INLINABLE phazing #-}
+phazing :: MonadChance m => Dex -> Eng m ()
+phazing dx = forM_ [P1, P2] $ \p -> do
+  b <- get
+  let s = sideOf p b
+  when (sHasActive s) $ do
+    let a = activeActor p b
+        m = monOf b a
+    when (monForceSwitchFlag m) $ do
+      when (monHp m > 0) (dragIn dx p)
+      modify' (modifyMon a (\x -> x {monForceSwitchFlag = False}))
+
+-- | @actions.dragIn@ (battle-actions.ts 216-227) for singles position 0. @getRandomSwitchable@ (battle.ts 1584-1587) draws first:
+-- `sample` is @random(n)@ over 'switchCandidates', and it draws even for one candidate; no candidate means no draw and no drag.
+-- Only then the HP check (`!oldActive.hp`; the phazing step has already tested it, so the order is not observable), the second
+-- @DragOut@ event with no source or move, and the drag-mode 'switchIn'.
+{-# INLINABLE dragIn #-}
+dragIn :: MonadChance m => Dex -> Player -> Eng m ()
+dragIn dx p = do
+  b <- get
+  let cands = switchCandidates b p
+  unless (null cands) $ do
+    i <- roll 0 (length cands)
+    case drop i cands of
+      target : _ -> do
+        b' <- get
+        let old = activeActor p b'
+        when (monHp (monOf b' old) > 0) $ do
+          ok <- relayTruthy <$> runEvent dx EvDragOut old Nothing Nothing RNone
+          when ok (switchIn dx HowDrag p target)
+      [] -> pure ()
 
 -- | Which sides have a pending switch (battle.ts 2937-2967). A side that cannot switch has its flag cleared. For a side that can, each
 -- flagged Pokemon with HP runs @runPursuitActivation@ (battle-actions.ts 69-80): `eachEvent('Update')` (gen >= 5), whose speed sort
@@ -375,15 +412,19 @@ checkFainted = forM_ [P1, P2] $ \p -> do
 -- ---------------------------------------------------------------------------
 -- Switching
 
--- | @actions.switchIn@ (battle-actions.ts) for singles position 0, without messages. The Bool says whether @runPursuitActivation@
--- runs for a live Pokemon being replaced (false after an instaswitch: see 'switchAction'; a drag skips it too, slice 6b).
+-- | How @switchIn@ is called: a plain @switch@ choice (and the start's leads), an @instaswitch@, or a drag ('dragIn').
+data SwitchHow = HowSwitch | HowInsta | HowDrag
+  deriving (Eq)
+
+-- | @actions.switchIn@ (battle-actions.ts) for singles position 0, without messages. @runPursuitActivation@ runs for a live Pokemon
+-- being replaced only for a plain switch (battle-actions.ts 97-98: not after an instaswitch, see 'switchAction', and not for a
+-- drag, @isDrag@). A drag runs @runSwitch@ at once (208-212) instead of inserting a @runSwitch@ action: no @updateSpeed@ of the
+-- incoming Pokemon (that is @insertChoice@'s), so it keeps the speed cached when it last left the field.
 --
--- LATENT: a drag (Roar, Whirlwind, Dragon Tail) skips @runPursuitActivation@ and runs @runSwitch@ at once
--- (battle-actions.ts ~97, ~208), and @isStarted@ (battle-actions.ts ~241) is not modelled; both matter
--- once forced switches and switch-in effects exist.
+-- LATENT: @isStarted@ (battle-actions.ts ~241) is not modelled; it matters once an effect reads it.
 {-# INLINABLE switchIn #-}
-switchIn :: MonadChance m => Dex -> Bool -> Player -> Int -> Eng m ()
-switchIn dx pursuit p target = do
+switchIn :: MonadChance m => Dex -> SwitchHow -> Player -> Int -> Eng m ()
+switchIn dx how p target = do
   b0 <- get
   let s0 = sideOf p b0
       tgt = Actor p target
@@ -393,7 +434,7 @@ switchIn dx pursuit p target = do
       Just o | monHp (monOf b0 o) > 0 -> do
         -- runPursuitActivation(oldActive): eachEvent('Update') (the BeforeSwitchOut event has no handlers). It returns at once for a
         -- Pokemon whose `skipPursuit` is set, which a flagged one has ('switchRequests'): not for an instaswitch
-        when pursuit (eachEvent dx EvUpdate)
+        when (how == HowSwitch) (eachEvent dx EvUpdate)
         -- battle-actions.ts 100: `if (!this.battle.runEvent('SwitchOut', oldActive)) return false` (no handler exists today: Regenerator
         -- and Natural Cure are 6c; custom formats are the only thing that can refuse)
         void (runEvent dx EvSwitchOut o Nothing Nothing RNone)
@@ -402,7 +443,7 @@ switchIn dx pursuit p target = do
         endAbilityAndItem dx o
         -- queue.cancelAction(oldActive) (battle-actions.ts 124-127: a Pokemon forced out or switching by its own move cannot use its
         -- chosen move; the actions it still has queued go, except a runSwitch); oldActive.clearVolatile() (resets the stat stages, the volatiles and the cached speed; the status, and toxic's stage, stay)
-        modify' (\b -> modifyMon o (\m -> m {monSpeed = stSpe (monStats m), monBoosts = noBoosts, monVolatiles = SV.empty, monAbility = monBaseAbility m}) b {bQueue = cancelAction o (bQueue b)})
+        modify' (\b -> modifyMon o (\m -> m {monSpeed = stSpe (monStats m), monBoosts = noBoosts, monVolatiles = SV.empty, monAbility = monBaseAbility m, monForceSwitchFlag = False}) b {bQueue = cancelAction o (bQueue b)})
       _ -> pure ()
     case old of
       Just o -> do
@@ -419,13 +460,17 @@ switchIn dx pursuit p target = do
     abilityOrder <- nextEffectOrder (abilityId dx (monAbility monT) /= "")
     itemOrder <- nextEffectOrder (monItem monT /= noItem)
     modify' (modifyMon tgt (\m -> m {monAbilityState = noEffectState {esOrder = abilityOrder}, monItemState = noEffectState {esOrder = itemOrder}}))
-    -- queue.insertChoice({ choice: 'runSwitch', pokemon }): updateSpeed first, then a tie-aware insert
-    getActionSpeed dx tgt >>= \sp -> modify' (modifyMon tgt (\m -> m {monSpeed = sp}))
-    new <- resolveAction dx Action
-      { acKind = KRunSwitch, acOrder = 0, acPriority = 0, acSpeed = 0, acActor = Just tgt, acArg = 0 }
-    q <- gets bQueue
-    q' <- insertChoice new q
-    modify' (\b -> b {bQueue = q'})
+    if how == HowDrag
+      -- `if (isDrag) this.runSwitch(pokemon)` (battle-actions.ts 208-209), which also takes the runSwitch actions at the queue's head
+      then runSwitch dx tgt
+      else do
+        -- queue.insertChoice({ choice: 'runSwitch', pokemon }): updateSpeed first, then a tie-aware insert
+        getActionSpeed dx tgt >>= \sp -> modify' (modifyMon tgt (\m -> m {monSpeed = sp}))
+        new <- resolveAction dx Action
+          { acKind = KRunSwitch, acOrder = 0, acPriority = 0, acSpeed = 0, acActor = Just tgt, acArg = 0 }
+        q <- gets bQueue
+        q' <- insertChoice new q
+        modify' (\b -> b {bQueue = q'})
   where
     swapSlot0 o slots = case U.elemIndex o slots of
       Just i | i /= 0 -> slots U.// [(0, slots U.! i), (i, slots U.! 0)]
@@ -677,6 +722,9 @@ statusMove dx user tgt mv0 = do
     [EOwnHit] -> (\(r, m) -> (r /= HitFail, m)) <$> moveOwnHit dx user tgt mv0
     -- `target.trySetStatus(moveData.status, ...)`; `!hitResult && move.status` fails the move
     [EStatus st] -> (\r -> (r, mv0)) <$> trySetStatus dx tgt st
+    -- runMoveEffects (battle-actions.ts 1319-1322): `if (moveData.forceSwitch) hitResult = !!canSwitch(target.side)`, the move's only
+    -- effect (Roar, Whirlwind), so it did something only if the target's side can switch
+    [] | mrForceSwitch (mvRule mv0) -> (\bb -> (canSwitch bb (playerOfActor tgt) > 0, mv0)) <$> get
     _ -> pure (False, mv0) -- not executable ('Engine.Rule.executable' admits one effect)
   -- runMoveEffects (battle-actions.ts 1349-1353, 1369-1372) for a selfSwitch move: `if (canSwitch(source.side)) didSomething = true;
   -- else didSomething = combineResults(didSomething, false)`. With a switch target the hit did something, whatever the effects
@@ -692,6 +740,8 @@ statusMove dx user tgt mv0 = do
       pure (can || done0)
     else pure done0
   when done $ do
+    -- spreadMoveHit step 6 (battle-actions.ts 1165), before the hit loop's first Update
+    forceSwitchStep dx user tgt mv
     eachEvent dx EvUpdate -- eachEvent('Update') after the hit
     -- resolveFaints({ checkWin: !pokemon.hp }); the user is alive
     userDown <- gets (\bb -> monHp (monOf bb user) <= 0)
@@ -781,6 +831,8 @@ hitEffects dx user target mv = do
     when (r < secChance sec) $ do
       forM_ (secTarget sec) (applyEffect dx target)
       forM_ (secSelf sec) (applyEffect dx user)
+  -- spreadMoveHit step 6 (battle-actions.ts 1165): after the secondaries, before DamagingHit
+  forceSwitchStep dx user target mv
   -- runEvent('DamagingHit') (after the secondaries, per hit): frz.onDamagingHit cures a frozen target hit by
   -- a damaging Fire move. The target and the damage are one-element arrays in Showdown.
   void (runEvent dx EvDamagingHit target (Just user) (Just mv) RNone)
@@ -789,6 +841,18 @@ hitEffects dx user target mv = do
   -- Helmet or Rough Skin that has just brought it to 0 stops the move's AfterHit (its faint is only queued).
   userAlive <- gets (\b -> monHp (monOf b user) > 0)
   when userAlive (moveAfterHit dx user target mv)
+
+-- | @spreadMoveHit@ step 6, @forceSwitch@ (battle-actions.ts 1165, 1413-1428): when the target and the user have HP and the target's
+-- side can switch, @runEvent('DragOut', target, source, move)@; a truthy result sets the target's @forceSwitchFlag@, which the
+-- action tail's 'phazing' consumes. The @canSwitch@ test comes before the event, so a flag is never set for a side with no one to
+-- bring in.
+-- LATENT: a @false@ result fails a Status move (`-fail`, damage false); no supported effect listens to @DragOut@, so none returns it.
+forceSwitchStep :: MonadChance m => Dex -> Actor -> Actor -> MoveData -> Eng m ()
+forceSwitchStep dx user target mv = when (mrForceSwitch (mvRule mv)) $ do
+  b <- get
+  when (monHp (monOf b target) > 0 && monHp (monOf b user) > 0 && canSwitch b (playerOfActor target) > 0) $ do
+    r <- runEvent dx EvDragOut target (Just user) (Just mv) RNone
+    when (relayTruthy r) (modify' (modifyMon target (\m -> m {monForceSwitchFlag = True})))
 
 -- | One effect of a secondary on a Pokemon (@moveHit@ with @isSecondary@ -> @runMoveEffects@).
 applyEffect :: MonadChance m => Dex -> Actor -> Effect -> Eng m ()

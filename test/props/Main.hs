@@ -117,21 +117,24 @@ playouts dex = property $ do
   seed <- forAll (Gen.word64 Range.linearBounded)
   case fst (runSample (mkSMGen seed) (playChecked dex t1 t2)) of
     Left e -> footnote e >> failure
-    Right b -> case request b of
+    Right (b, _) -> case request b of
       Finished _ -> success
       Awaiting {} -> footnote "playout ended without a result" >> failure
 
--- | 'playouts' over 'genPivotTeams': the switch-flag invariants of 'checkBattle' and the mid-turn ones of 'checkStep' (slice 6a) are checked at
--- every state and step, and these teams reach the requests they are about at every few turns.
+-- | 'playouts' over 'genPivotTeams': the switch-flag invariants of 'checkBattle' and the mid-turn ones of 'checkStep' (slice 6a), and the
+-- force-switch ones (slice 6b), are checked at every state and step, and these teams reach the requests and drags they are about at every
+-- few turns (the coverage statement fails the property if they stop doing so).
 pivotPlayouts :: Dex -> Property
 pivotPlayouts dex = property $ do
   (t1, t2) <- forAll (genPivotTeams dex)
   seed <- forAll (Gen.word64 Range.linearBounded)
   case fst (runSample (mkSMGen seed) (playChecked dex t1 t2)) of
     Left e -> footnote e >> failure
-    Right b -> case request b of
-      Finished _ -> success
-      Awaiting {} -> footnote "playout ended without a result" >> failure
+    Right (b, drags) -> do
+      cover 10 "a forced switch (drag) happened" (drags > 0)
+      case request b of
+        Finished _ -> success
+        Awaiting {} -> footnote "playout ended without a result" >> failure
 
 data BadKind = Illegal | Missing | Unexpected
   deriving (Eq, Show, Enum, Bounded)

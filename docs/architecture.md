@@ -99,6 +99,16 @@ starts.
 Showdown also makes draws that cannot affect the outcome, such as the accuracy
 roll for a 100%-accurate move. They cost nanoseconds when sampling. Search that
 enumerates outcomes will need them labelled so it can collapse them.
+Skipping them would break draw-for-draw parity. If search needs that speed,
+it comes as a separate, labelled fast mode outside the parity contract, never
+as a change to the exact engine, and only by the owner's decision.
+
+The engine knows nothing about search: no algorithm, evaluation, policy,
+belief or opponent model. It provides what any search needs: cheap copies
+of a pure state, controllable chance, legal choices and steps to the next
+decision, a per-player view of what each side has seen, equality and
+hashing, and speed. Bot code lives in its own module tree and uses only that
+interface.
 
 ### 6. Rules as data
 
@@ -176,6 +186,76 @@ the 1695 rating cutoff:
 Showdown's handler names, which makes it the to-do list for mechanics. Teams
 are not yet rejected for being outside the whitelist, because the slice 0
 traces use species from outside it.
+
+### 9. The engine monad
+
+Designed 2026-11-26; the representation is chosen by benchmark (below).
+
+Engine code runs in `Eng m`, a state monad over the battle on top of a chance
+monad `m`. Today it is `type Eng m = StateT Battle m`. With the engine
+specialised to `Sample`, profiling puts much of what is left in its binds:
+every bind that is not inlined allocates a lazy `(a, Battle)` pair, and 55%
+of all allocation is thunks.
+
+**Constraint.** `m` stays a parameter. Decision 2 needs an Enumerate
+interpreter for search that branches on every outcome, and a monad fused
+with one generator (`Battle -> SMGen -> (# a, Battle, SMGen #)`) cannot
+branch. The public interface does not change: `newBattle` and `step` keep
+their `MonadChance m =>` types, and `MonadChance` keeps its one method.
+
+This constraint is cheap insurance, not a hard requirement. Exact
+enumeration may rarely be practical (one damage calculation has 16 damage
+rolls, a crit roll, an accuracy roll and secondaries), and enumeration can
+also be done by re-running `step` with a forced prefix of draws and
+branching where it asks for the next one, which works with any deterministic
+interpreter. If keeping `m` a parameter turns out to cost real speed, the
+fallback is a fused monad plus prefix-replay enumeration. That narrows this
+document's promise, so it is the owner's decision when it arises.
+
+**Shape.**
+- A new module, `Engine.Monad`, owns `Eng`. It exports `Eng`, `runEng`,
+  `execEng` and `evalEng`, the state operations `get`, `gets`, `put` and
+  `modify'` under the names the engine uses now, and
+  `instance MonadChance m => MonadChance (Eng m)`.
+- Every Functor, Applicative and Monad method is `INLINE`.
+- `Eng` is a newtype, so nothing outside `Engine.Monad` can depend on its
+  representation.
+- The engine modules change only their imports. The tests that run single
+  handlers change `runStateT` and `evalStateT` to `runEng` and `evalEng`.
+
+**Candidates**, both able to branch over `m`:
+1. Strict result: `newtype Eng m a = Eng (Battle -> m (Res a))` with
+   `data Res a = Res a !Battle`. This is `StateT` without the lazy pair: the
+   battle is forced at every bind, and `a` stays lazy, as now.
+2. Continuation-passing:
+   `newtype Eng m a = Eng (forall r. Battle -> (a -> Battle -> m r) -> m r)`.
+   With the engine specialised, binds become known calls and no pair is
+   built. It costs a continuation closure where a bind is not inlined.
+
+**Decision rule.** Build both on the same base, interleave them with the base
+on one core over the slice 3, slice 5 and slice 6 teams, and compare
+steps/s, allocation per step and build memory. Keep the faster candidate if it
+beats `StateT` beyond noise. Otherwise keep `StateT`, and record the numbers
+here. Either way the long-tier parity run must pass: the representation
+changes no draw and no state.
+
+**Result (2026-11-26): `StateT` stays.** Both candidates were built on main
+after the specialisation work (c16bcbd) and passed the long-tier parity run
+with identical draw counts. Interleaved on one core of blueberry:
+
+| Teams | Candidate | Steps/s against `StateT` | Bytes allocated per step |
+|---|---|---|---|
+| slice 3 | `StateT` | 1 | 121-125k |
+| slice 3 | strict result | 0.76-0.92 | 134-135k |
+| slice 3 | continuation-passing | 0.82-1.01 (a tie) | 118-121k |
+| slice 5 | `StateT` | 1 | 121-125k |
+| slice 5 | strict result | 0.67-0.91 | 133-138k |
+| slice 5 | continuation-passing | 0.92-1.05 (a tie) | 117-123k |
+
+Once the engine is specialised, GHC already compiles `StateT`'s binds well,
+so the representation is not where the time goes. It also means keeping `m`
+a parameter costs no measurable speed here, so the fallback above is not
+needed. Handler collection, about 65% of allocation, is the next target.
 
 ## Data
 

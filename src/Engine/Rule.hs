@@ -161,6 +161,9 @@ data MoveRule = MoveRule
   -- ^ @move.selfSwitch === true@ (U-turn, Flip Turn, Volt Switch, Teleport, Parting Shot, Chilly Reception): after the hit the
   -- user switches out when its side can (battle-actions.ts 1349-1353, 1369-1372). The string values (Baton Pass's
   -- @copyvolatile@, Shed Tail's @shedtail@) are rejected.
+  , mrForceSwitch :: !Bool
+  -- ^ @move.forceSwitch === true@ (Roar, Whirlwind, Dragon Tail, Circle Throw): the target is dragged out when its side can
+  -- switch (battle-actions.ts 1319-1322, 1165, 1413-1428; battle.ts 2866-2873).
   }
   deriving (Eq, Show)
 
@@ -192,6 +195,7 @@ plainRule = MoveRule
   , mrIgnoreEvasion = False
   , mrSelfBoost = []
   , mrSelfSwitch = False
+  , mrForceSwitch = False
   }
 
 -- | The part of the vocabulary the engine can run in the current phase (phases 1 to 3: HP effects, stat stages
@@ -224,6 +228,8 @@ executable r =
               ([], [EOwnHit], t, Nothing, Nothing, Nothing, Nothing) -> t == TargetFoe || t == TargetSelf
               -- a selfSwitch move on the user with nothing else (Teleport: its onTry is its only handler)
               ([], [], TargetSelf, Nothing, Nothing, Nothing, Nothing) -> mrSelfSwitch r
+              -- a forceSwitch move on the foe with nothing else (Roar, Whirlwind): it did something only if the foe's side can switch
+              ([], [], TargetFoe, Nothing, Nothing, Nothing, Nothing) -> mrForceSwitch r
               -- the move's own onHitField alone (Court Change, Haze)
               ([], [EOwnHitField], TargetAll, Nothing, Nothing, Nothing, Nothing) -> True
               ([], [], t, Just _, Nothing, Nothing, Nothing) -> t == TargetFoeSide || t == TargetAllySide
@@ -263,7 +269,7 @@ ruleKeys =
   , "secondaries", "status", "thawsTarget", "ignoreImmunity"
   , "sideCondition", "weather", "terrain", "pseudoWeather"
   , "damage", "overrideOffensiveStat", "overrideDefensiveStat", "overrideOffensivePokemon", "ignoreDefensive", "ignoreEvasion"
-  , "selfBoost", "selfSwitch"
+  , "selfBoost", "selfSwitch", "forceSwitch"
   ]
 
 -- | Keys that are truthy on moves the engine accepts but cannot change the outcome, and why.
@@ -430,6 +436,11 @@ moveRule condOf ownRejected (Object o) = do
     Nothing -> Right False
     Just (Bool True) -> Right True
     Just v -> Left ("selfSwitch " <> showV v)
+  -- `forceSwitch: true` only
+  forceSwitch <- case look "forceSwitch" of
+    Nothing -> Right False
+    Just (Bool True) -> Right True
+    Just v -> Left ("forceSwitch " <> showV v)
   pure MoveRule
     { mrDamaging = damaging
     , mrHits = hits
@@ -456,6 +467,7 @@ moveRule condOf ownRejected (Object o) = do
     , mrIgnoreEvasion = ignoreEva
     , mrSelfBoost = selfBoost
     , mrSelfSwitch = selfSwitch
+    , mrForceSwitch = forceSwitch
     }
   where
     -- a flag that is true or absent
