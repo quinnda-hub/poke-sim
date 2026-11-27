@@ -2,8 +2,8 @@
 
 -- | Reports how much of the usage whitelist (data/usage/gen9ou.json, from
 -- tools/usage/gen-whitelist.js) the engine supports, as Markdown on stdout.
--- Support is whatever 'supportedSpecies', 'supportedMoves', 'supportedAbilities' and 'supportedItems' say; the
--- engine has no Terastallization yet, so tera types are all unsupported.
+-- Support is whatever 'supportedSpecies', 'supportedMoves', 'supportedAbilities' and 'supportedItems' say. The
+-- engine terastallizes (slice 5) to every type, Stellar included, so every tera type is supported.
 --
 -- Usage: whitelist-report [usageFile=data/usage/gen9ou.json] [dexDir=data/gen9]
 module Main (main) where
@@ -19,7 +19,7 @@ import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import qualified Data.Vector as V
-import Engine.Dex (loadDex, supportedAbilities, supportedItems, supportedMoves, supportedSpecies)
+import Engine.Dex (Dex (..), loadDex, supportedAbilities, supportedItems, supportedMoves, supportedSpecies)
 import System.Environment (getArgs)
 import Text.Printf (printf)
 
@@ -43,7 +43,7 @@ main = do
         , ("moves", Set.fromList (supportedMoves dex))
         , ("abilities", Set.fromList (supportedAbilities dex))
         , ("items", Set.fromList (supportedItems dex))
-        , ("teraTypes", Set.empty)
+        , ("teraTypes", Set.fromList (map T.toLower (V.toList (dxTypeNames dex)) ++ ["stellar"]))
         ] :: [(T.Text, Set.Set T.Text)]
       cats =
         [ ("species", speciesW), ("moves", weights "moves"), ("abilities", weights "abilities")
