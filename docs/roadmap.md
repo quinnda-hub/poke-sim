@@ -465,6 +465,13 @@ Gen 9 OU battles simulated sooner, and each makes the later ones cheaper.
    accepted (74.7% by usage), 22 of 85 abilities (30.0%), 31 of 71 items
    (68.2%) and 88 of 102 species (85.3%), at slice 4c.
 
+   **Abilities: done 2026-11-27** (slices 8a-8g, six phases built in parallel
+   and an integration set; see handlers.md, "Abilities (slice 8)"). 82 of the
+   whitelist's 85 abilities are accepted (24 before, 58 added). The other
+   three wait for a mechanic the engine lacks: Poison Puppeteer (confusion),
+   Cute Charm (Attract) and Disguise (a forme change). 8g's combined set of
+   2,000 battles crossed the six phases and found no divergence.
+
    Beyond the catalog, Gen 9 OU also needs the format's own rules, wherever
    no trace has exercised them yet (its clauses, such as Sleep Clause Mod and
    the Endless Battle Clause). Other singles tiers (Ubers, UU and below) then
@@ -512,6 +519,7 @@ Gen 9 OU battles simulated sooner, and each makes the later ones cheaper.
    | 2026-11-26 | Slice 6c | Ahead: step 3 all but Eject Pack (6d) |
    | 2026-11-27 | Slice 6d | Ahead: step 3 done, about 2-4 days before the steps 1-4 milestone window |
    | 2026-11-27 | Slices 7a-7f | Ahead: step 4 done the same day, with five phases built in parallel, so steps 1-4 are done 2-4 days before their milestone window. Real OU teams still need step 5's abilities and items. |
+| 2026-11-27 | Slices 8a-8g | Ahead: step 5's abilities (the largest part of its estimate, 20-25 phases) done the same day as step 4, with six phases built in parallel. Real OU teams still need step 5's items and moves. |
 
 6. **Per-player view.** What each side can observe, as a first-class value.
 7. **Showdown seed compatibility.** Implement Showdown's own generators so a
