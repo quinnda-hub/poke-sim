@@ -36,7 +36,7 @@ import Engine.Chance (runSample, speedSortWith)
 import Engine.Dex (Condition (..), Dex (..), EvMask (..), MoveData (..), SpeciesData (..), abilityId, evBit, evMaskHas, moveSpec, prefixMask, dexCondLookup, itemId, supportedAbilities, supportedItems, supportedMoves, supportedSpecies)
 import Engine.Dispatch (HitResult (..), addSideCondition, basePowerCallback, damageMon, moveAfterHit, moveFieldHit, moveOwnHit, moveTry)
 import Engine.Effects (abilityBodies, fieldCondBodies, itemBodies, moveBodies)
-import Engine.Damage (moveTypeMod, typeIsNamed)
+import Engine.Damage (hasAbility, moveTypeMod, typeIsNamed)
 import Engine.Event (CondId (..), EffectKey (..), EffectKind (..), EventId (..), HandlerSpec (..), Prefix (..), condName, parseHandlerName)
 import Engine.Format (trunc, truncBits)
 import Engine.Rule (BoostStat (..), DamageKind (..), MoveRule (..), RuleTarget (..), executable, moveRule)
@@ -101,6 +101,9 @@ main = do
             withTests (fromIntegral n) (fieldMoves dex))
         , ("Knock Off, Thief and Trick: an item removal never creates an item, a refusal keeps it, and a swap hands each item over whole",
             withTests (fromIntegral n) (itemMoves dex))
+        -- slice 8f
+        , ("Magic Bounce: a reflectable status move aimed at an unsuppressed holder changes nothing on the holder or its side, and does land on the user",
+            withTests (fromIntegral nCover) (magicBounceHolds dex))
         -- slice 7d
         , ("Sucker Punch and Thunderclap: other queued actions never change whether onTry passes, and a failed move makes no accuracy, crit or damage draw and changes no HP",
             withTests (fromIntegral n) (punchMoves dex))
@@ -184,6 +187,11 @@ pivotPlayouts dex = property $ do
       -- slice 8e: a Pokemon lost 2 PP to one move (a Pressure holder on the other side), and a Libero or Protean holder had changed its type
       cover 10 "a move cost 2 PP (Pressure)" (seenPressure seen > 0)
       cover 10 "a Libero or Protean holder changed its type" (seenTypeChange seen > 0)
+      -- slice 8f: suppression and reflection
+      cover 15 "an unfainted Neutralizing Gas holder was in play beside a foe at the end of a step" (seenGasOn seen > 0)
+      cover 8 "a Neutralizing Gas holder left play" (seenGasLeft seen > 0)
+      cover 5 "a reflectable status move was chosen into an unsuppressed Magic Bounce holder" (seenBounceTried seen > 0)
+      cover 3 "a Mold Breaker user chose a move against an unsuppressed breakable ability" (seenBreaker seen > 0)
       case request b of
         Finished _ -> success
         Awaiting {} -> footnote "playout ended without a result" >> failure
@@ -939,6 +947,38 @@ itemMoves dex = property $ do
           if res == HitOk && itemOf b' user /= noItem && itemOf b' target /= noItem
             then assert (esOrder (monItemState (monOf b' target)) < esOrder (monItemState (monOf b' user)))
             else pure ()) ["trick", "switcheroo"]
+
+-- | ESCAPE HATCH: magicbounce (slice 8f). A move from 'bounceMoves' (reflectable, a status move whose effect is only on its target) that the
+-- user of a one-Pokemon team uses against a Magic Bounce holder whose ability nothing suppresses (the user has neither Mold Breaker nor
+-- Neutralizing Gas) is sent back at its user: the holder, and the conditions on its side, are exactly as they were (a bounced use
+-- never reaches it, and the move cannot bounce twice), whichever side is the user. The bounced use changes the user (a status, a stage, a
+-- volatile, a hazard on its side) in a good share of the cases; a move that fails on the user (an immune type, no last move for Encore)
+-- changes nothing.
+magicBounceHolds :: Dex -> Property
+magicBounceHolds dex = property $ do
+  (tu, th) <- forAll (genBounceTeams dex)
+  seed <- forAll (Gen.word64 Range.linearBounded)
+  who <- forAll Gen.enumBounded
+  let (t1, t2) = if who == P1 then (tu, th) else (th, tu)
+  b0 <- evalEither (fst (runSample (mkSMGen seed) (startBattle dex t1 t2 >>= advanceWhile dex 1 (const True))))
+  let user = activeActor who b0
+      holder = activeActor (other who) b0
+      slot0 = monMoves (monOf b0 user) SV.!? 0
+  case (request b0, slot0) of
+    (Awaiting MoveRequest _ _, Just ms)
+      | monActive (monOf b0 user) && monActive (monOf b0 holder) && monHp (monOf b0 user) > 0 && monHp (monOf b0 holder) > 0
+      , hasAbility dex b0 holder "magicbounce", msMove ms /= -1 -> do
+          let (((), b'), _) = runSample (mkSMGen seed) (runStateT (runMove (bFormat b0) dex user 0) b0)
+              holderSide x = sConds (sideOf (other who) x)
+              userSide x = sConds (sideOf who x)
+              m0 = monOf b0 user
+              m' = monOf b' user
+              landed = monStatus m' /= monStatus m0 || monBoosts m' /= monBoosts m0 || monVolatiles m' /= monVolatiles m0 || userSide b' /= userSide b0
+                || not (monActive m') || monHp m' /= monHp m0
+          monOf b' holder === monOf b0 holder
+          holderSide b' === holderSide b0
+          cover 20 "the bounced move changed the user or its side" landed
+    _ -> success
 
 -- | Sucker Punch and Thunderclap (slice 7d). The move's @onTry@ reads only the target's queued @move@ actions (@queue.willMove@), so the
 -- result of 'moveTry' is the same whatever else the queue holds: the user's own actions, the target's switch or Terastallization, a

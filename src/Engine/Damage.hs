@@ -38,7 +38,7 @@ import Engine.Event (Body (..), CondId, EventId (..), HandlerSpec (..), NativeId
 import Engine.Format (Format, trunc, truncBits)
 import Engine.Modifier (modify)
 import Engine.Rule (Hits (..), MoveRule (..), StatusId (..))
-import Engine.State (Actor, Battle (..), Mon (..), MonStatus (..), MoveInUse (..), Volatile (..), monOf, noItem)
+import Engine.State (Actor (..), Battle (..), EffectState (..), Mon (..), MonStatus (..), MoveInUse (..), Player (..), Side (..), Volatile (..), activeOrig, monOf, noItem, sideOf)
 
 -- | Denominator of the crit chance for a crit stage, or 'Nothing' when the move cannot crit
 -- (gen 7+ table @[0, 24, 8, 2, 1]@ indexed by the clamped @critRatio@).
@@ -141,13 +141,33 @@ typeIdNamed dx name = V.findIndex (== name) (dxTypeNames dx)
 isGrounded :: Dex -> Battle -> Actor -> Bool
 isGrounded dx b a = not (hasTypeNamed dx "Flying" (monOf b a)) && not (hasAbility dx b a "levitate" && not (suppressingAbility dx b a))
 
--- | @pokemon.ignoringAbility()@ (pokemon.ts 879-895): a Pokemon not in play (gen >= 5). It is the one function that 'hasAbility' and
--- the dispatcher's ability gate ('Engine.Dispatch.runEvent', battle.ts 884-891) consult.
--- LATENT(8f): Gastro Acid, Neutralizing Gas (and the Ability Shield and @cantsuppress@ exceptions) and a transformed Pokemon's
--- @notransform@ ability are not modelled: no effect suppresses an ability yet.
-ignoringAbility :: Battle -> Actor -> Bool
-ignoringAbility b a = not (monActive (monOf b a))
+-- | @pokemon.ignoringAbility()@ (pokemon.ts 879-895), clause by clause in its order. It is the one function that 'hasAbility' and the
+-- dispatcher's ability gates ('Engine.Dispatch.skipped', @singleEvent@) consult.
+--
+-- 1. a Pokemon not in play (gen >= 5): ignored;
+-- 2. LATENT: @notransform@ and @transformed@: Transform is not supported, so no Pokemon is transformed;
+-- 3. a @cantsuppress@ ability is never ignored from here on (Comatose, Disguise, Zen Mode; none is supported yet, the flag is read from the data);
+-- 4. LATENT: Gastro Acid (@volatiles['gastroacid']@) is not supported;
+-- 5. an Ability Shield holder, or a Neutralizing Gas holder, is not ignored (a gas does not suppress itself, so 'hasAbility' of the
+--    holder is true while the gas is up);
+-- 6. else ignored when a Pokemon in play (not fainted: @getAllActive@) has the ability Neutralizing Gas and that ability is not ending
+--    (@abilityState.ending@: 'esA' of its ability state is 1; set when the gas leaves, before its @onEnd@ restarts the others' abilities).
+--    The gastroacid, @transformed@ and @commanding@ qualifiers of the clause are LATENT (none of them exists).
+ignoringAbility :: Dex -> Battle -> Actor -> Bool
+ignoringAbility dx b a
+  | not (monActive m) = True
+  | cantSuppress = False
+  | otherwise = any gas [Actor p (activeOrig s) | p <- [P1, P2], let s = sideOf p b, sHasActive s] && not (isGas m) && not (hasItemNamed dx "abilityshield" m)
+  where
+    m = monOf b a
+    cantSuppress = maybe False cnCantSuppress (dxAbilities dx V.!? monAbility m)
+    isGas x = abilityId dx (monAbility x) == "neutralizinggas"
+    gas o = let x = monOf b o in isGas x && not (monFainted x) && esA (monAbilityState x) /= 1
 
+-- LATENT(8g): outside @runEvent@ Showdown asks @suppressingAbility@ in @Pokemon#isGrounded@ (Levitate: 'isGrounded', above), in
+-- @runEffectiveness@ (pokemon.ts 2241: Tera Shell), in Heal Bell's and Aromatherapy's @onHit@ (data/moves.ts 571, 8260) and in six
+-- abilities' own handlers (the four Ruin abilities, Dark Aura and Fairy Aura: data/abilities.ts 386, 838, 1269, 4823, 4876, 5289). Only Levitate is
+-- supported; each of the others calls this function when it arrives.
 -- | @battle.suppressingAbility(target)@ (battle.ts 366-369): the move in use (Mold Breaker and its kin set @ignoreAbility@) while its
 -- user is in play and is not the target, and the target has no Ability Shield. 'bActiveMove' holds @ignoreAbility@, always False
 -- until a phase sets it, so this is False.
@@ -160,7 +180,7 @@ suppressingAbility dx b a = case bActiveMove b of
 -- Pokemon's ability outside the dispatcher's handler collection goes through here.
 -- LATENT: Showdown's version takes a list and compares @this.ability@ only; 'monAbility' is that.
 hasAbility :: Dex -> Battle -> Actor -> T.Text -> Bool
-hasAbility dx b a name = not (ignoringAbility b a) && abilityId dx (monAbility (monOf b a)) == name
+hasAbility dx b a name = not (ignoringAbility dx b a) && abilityId dx (monAbility (monOf b a)) == name
 
 -- | @pokemon.isSemiInvulnerable()@ (pokemon.ts 2184): the @fly@, @bounce@, @dive@, @dig@, @phantomforce@, @shadowforce@
 -- and @skydrop@ volatiles.

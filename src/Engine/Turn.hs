@@ -705,7 +705,12 @@ useMoveWith fmt dx user target mv = case mrTarget rule of
      tried <- moveTry dx user target mv
      when tried (void (singleMoveEvent dx EvPrepareHit target (Just user) mv))
      prepared <- if tried then relayTruthy <$> runEvent dx EvPrepareHit user (Just target) (Just mv) RNone else pure False
-     tryHit <- if prepared then relayTruthy <$> runEvent dx EvTryHit target (Just user) (Just mv) RNone else pure False
+     hitRelay <- if prepared then runEvent dx EvTryHit target (Just user) (Just mv) RNone else pure (RBool False)
+     -- ESCAPE HATCH: magicbounce (slice 8f). The handler stopped the event with `null` after calling `useMove(newMove, target, { target: source })`
+     -- inside it; the nested use runs here, after the event returned, which changes nothing it could observe (the event's handlers after a
+     -- falsy result do not run). The failed hit then ends this move (`!moveResult`, no `-fail` for null).
+     when (hitRelay == RBounce) (bounceMove dx target user mv)
+     let tryHit = relayTruthy hitRelay
      when tryHit $
       -- hitStepTypeImmunity (before accuracy: an immune target consumes no draws); a move with
       -- ignoreImmunity (every status move but a few) skips it
@@ -754,6 +759,25 @@ useMoveWith fmt dx user target mv = case mrTarget rule of
     -- used by a Poison-type skips the accuracy check (`accuracy = true`), so it draws nothing
     isToxic = mrOnHit rule == [EStatus Tox] && mvId mv == "toxic"
 
+-- | ESCAPE HATCH: magicbounce (slice 8f). The nested @useMove(newMove, target, { target: source })@ of Magic Bounce's @onTryHit@ and
+-- @onAllyTryHitSide@ (data/abilities.ts 2444-2447, 2454-2457): the bouncer uses the move again on the Pokemon that used it.
+--
+-- - @newMove = this.dex.getActiveMove(move.id)@ is a fresh copy from the dex, so nothing Mold Breaker or another ModifyMove handler
+--   did to the first use carries over; @hasBounced@ is set and @pranksterBoosted@ cleared. @useMoveInner@ then gives it the priority of
+--   the move in use (battle-actions.ts 475: `move.priority = this.battle.activeMove.priority`), here the first use's.
+-- - @sourceEffect@ is the running effect, Magic Bounce (@this.battle.effect@, 451): it has no @pp@, so there is no @DeductPP@ for
+--   Pressure, and the move's @ignoreAbility@ is the ability's (none). The use costs the bouncer no PP either: this is @useMove@, not @runMove@.
+--   LATENT(8e): Pressure's @DeductPP@ (@!sourceEffect || callerMoveForPressure@, 540-552) is skipped for the same reason.
+-- - The nested use sets the active move and nothing restores it in Gen 9 (battle-actions.ts 414-416 is for @gen <= 4@), so the first
+--   use finishes with the bounced move active ('runMove' reads @activeMove@ for @AfterMove@).
+--   LATENT(8e): 'runMove' passes the first use's move to @AfterMove@; no handler reads a field that differs.
+-- - The move can bounce only once (@hasBounced@), so a second Magic Bounce on the original user lets it through.
+bounceMove :: MonadChance m => Dex -> Actor -> Actor -> MoveData -> Eng m ()
+bounceMove dx bouncer source mv = do
+  fmt <- gets bFormat
+  forM_ (M.lookup (mvId mv) (dxMoveIx dx)) $ \ix ->
+    useMove fmt dx bouncer source ((moveData dx ix) {mvPriority = mvPriority mv, mvHasBounced = True, mvPranksterBoosted = False})
+
 -- | @tryMoveHit@ (battle-actions.ts 883-919) of a move on a side or the field (@foeSide@, @allySide@, @all@): no
 -- type immunity, accuracy or crit draw. The event points are @singleEvent('Try')@ (Aurora Veil's @onTry@: it needs snow),
 -- @singleEvent('PrepareHit')@, @runEvent('PrepareHit')@, then @runEvent('TryHitField')@ for @all@ or @runEvent('TryHitSide')@, then
@@ -775,8 +799,11 @@ sideMove dx user target mv = do
   prepared <- if tried then relayTruthy <$> runEvent dx EvPrepareHit user (Just target) (Just mv) RNone else pure False
   when prepared $ do
     let tryHit = if mrTarget (mvRule mv) == TargetAll then EvTryHitField else EvTryHitSide
-    ok <- relayTruthy <$> runEvent dx tryHit target (Just user) (Just mv) RNone
-    when ok (moveHitSide dx user target mv)
+    hitRelay <- runEvent dx tryHit target (Just user) (Just mv) RNone
+    -- ESCAPE HATCH: magicbounce (slice 8f). onAllyTryHitSide returned null after `useMove(newMove, this.effectState.target, { target: source })`;
+    -- the Pokemon the hazard was aimed at is the bouncer in singles (the foe the target names), and the move's user is its target.
+    when (hitRelay == RBounce) (bounceMove dx target user mv)
+    when (relayTruthy hitRelay) (moveHitSide dx user target mv)
 
 -- | @moveHit@ -> @spreadMoveHit@ -> @runMoveEffects@ (battle-actions.ts 1430, 1175, 1330) of a side-targeted move:
 -- the damage is @undefined@ (basePower 0), so only the effect on the target's side runs.
