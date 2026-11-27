@@ -16,6 +16,8 @@ module Engine.Dispatch
   , HitResult (..)
   , moveOwnHit
   , moveTry
+  , movePriorityCharge
+  , canSwitch
   , moveTryImmunity
   , moveTryHit
   , moveAfterHit
@@ -1243,6 +1245,10 @@ runNative dx n c relay = do
     NScreenBreakTryHit -> keep
     NRagingBullType -> keep
     NAuroraVeilTry -> keep
+    -- slice 6a: run by 'moveTry', 'moveOwnHit' and 'movePriorityCharge'
+    NTeleportTry -> keep
+    NPartingShotHit -> keep
+    NChillyReceptionCharge -> keep
     -- leftovers.onResidual: this.heal(pokemon.baseMaxhp / 16); battle.heal turns an amount in (0, 1] into 1 and
     -- truncates, so the amount is floor(maxhp / 16), at least 1
     NLeftovers -> modify' (healMon holder (max 1 (monMaxHp m `quot` 16))) >> keep
@@ -1791,8 +1797,24 @@ battleHeal a amount = do
 -- no listener.
 -- LATENT: Heal Block (@TryHeal@), Substitute, Dynamax and the abilities that change a drop (@TryBoost@, @ChangeBoost@:
 -- Contrary, Clear Body, Defiant, Mirror Armor) have no supported user, so the bodies read none of them.
-moveOwnHit :: MonadChance m => Dex -> Actor -> Actor -> MoveData -> Eng m HitResult
+--
+-- It also returns the move in use, which a body may change (Showdown's handlers mutate the ActiveMove): Parting Shot deletes its
+-- @selfSwitch@ (see 'NPartingShotHit').
+moveOwnHit :: MonadChance m => Dex -> Actor -> Actor -> MoveData -> Eng m (HitResult, MoveData)
 moveOwnHit dx user target mv = case moveSpec mv POwn EvHit >>= hsBody of
+  -- partingshot.onHit(target, source, move): `const success = this.boost({atk: -1, spa: -1}, target, source)`; `if (!success &&
+  -- !target.hasAbility('mirrorarmor')) delete move.selfSwitch` (data/moves.ts 13179-13184). It returns nothing, so the hit did
+  -- whatever the rest of runMoveEffects says ('HitOk').
+  -- LATENT: Mirror Armor is not a supported ability, so `!target.hasAbility('mirrorarmor')` always holds; and no supported ability
+  -- changes the drop (Clear Body, White Smoke, Hyper Cutter, Contrary, Defiant, Competitive), so a drop fails only at -6 on both.
+  Just (BNative NPartingShotHit) -> do
+    boosted <- boostMon target [(BAtk, -1), (BSpa, -1)]
+    pure (HitOk, if boosted then mv else mv {mvSelfSwitch = False})
+  _ -> (\r -> (r, mv)) <$> moveOwnHitResult dx user target mv
+
+-- | The result of a move's @onHit@ body, for every body that changes nothing in the move in use.
+moveOwnHitResult :: MonadChance m => Dex -> Actor -> Actor -> MoveData -> Eng m HitResult
+moveOwnHitResult dx user target mv = case moveSpec mv POwn EvHit >>= hsBody of
   Just (BNative n) -> do
     b <- get
     let fmt = bFormat b
@@ -1914,13 +1936,43 @@ defogTargetOnly = ["reflect", "lightscreen", "auroraveil", "safeguard", "mist"]
 -- | @singleEvent('Try', move, null, pokemon, target, move)@ (battle-actions.ts 889, @tryMoveHit@: a move on a side or the field):
 -- the move's own @onTry@, whose falsy result fails the move. Aurora Veil needs snow (`this.field.isWeather(['hail',
 -- 'snowscape'])`, which reads the effective weather).
--- The same event opens @trySpreadMoveHit@ (656); no supported move on a Pokemon has an @onTry@.
-moveTry :: Monad m => Dex -> Actor -> MoveData -> Eng m Bool
-moveTry dx target mv = case moveSpec mv POwn EvTry >>= hsBody of
+-- The same event opens @trySpreadMoveHit@ (656): Teleport's, on the user.
+moveTry :: Monad m => Dex -> Actor -> Actor -> MoveData -> Eng m Bool
+moveTry dx user target mv = case moveSpec mv POwn EvTry >>= hsBody of
+  -- teleport.onTry(source): `return !!this.canSwitch(source.side)`
+  Just (BNative NTeleportTry) -> gets (\b -> canSwitch b (playerOf user) > 0)
   Just (BNative NAuroraVeilTry) -> gets (maybe False (`elem` fieldIds dx ["hail", "snowscape"]) . effectiveWeather)
   -- poltergeist.onTry(source, target): `return !!target.item`
   Just (BNative NPoltergeistTry) -> gets (\b -> monItem (monOf b target) /= noItem)
   _ -> pure True
+
+-- | The @priorityChargeMove@ action (battle.ts 2793-2798): `action.move.priorityChargeCallback.call(this, action.pokemon)`, a direct
+-- call. Chilly Reception: `source.addVolatile('chillyreception')`.
+movePriorityCharge :: MonadChance m => Dex -> Actor -> MoveData -> Eng m ()
+movePriorityCharge dx user mv = case moveSpec mv POwn EvPriorityChargeCallback >>= hsBody of
+  Just (BNative NChillyReceptionCharge) -> void (addVolatile dx user CChillyReception)
+  _ -> pure ()
+
+-- | @battle.canSwitch(side)@ (battle.ts 1580, @possibleSwitches@ 1589-1602): the number of unfainted Pokemon in the back slots that
+-- are not already queued to switch in.
+canSwitch :: Battle -> Player -> Int
+canSwitch b p
+  | sLeft s == 0 = 0
+  | otherwise = length
+      [ ()
+      | i <- [1 .. U.length (sSlots s) - 1]
+      , Just o <- [sSlots s U.!? i]
+      , not (monFainted (monOf b (Actor p o)))
+      , o `notElem` queued
+      ]
+  where
+    s = sideOf p b
+    queued =
+      [ acArg a
+      | a <- SV.toList (bQueue b)
+      , acKind a `elem` [KSwitch, KInstaSwitch]
+      , fmap (\(Actor q _) -> q) (acActor a) == Just p
+      ]
 
 -- | @singleEvent('TryImmunity', move, {}, target, pokemon, move)@ (battle-actions.ts 739, @hitStepTryImmunity@, after the powder
 -- check): the move's own @onTryImmunity@, whose falsy result makes the target immune. Trick and Switcheroo: `!target.hasAbility('stickyhold')`.
@@ -2114,7 +2166,7 @@ applyDamage :: Actor -> Int -> Battle -> Battle
 applyDamage a d b
   | monHp m <= 0 || d <= 0 = b
   | monHp m - d <= 0 =
-      (modifyMon a (\x -> x {monHp = 0, monSwitchFlag = False, monFaintQueued = True}) b)
+      (modifyMon a (\x -> x {monHp = 0, monSwitchFlag = NoSwitch, monFaintQueued = True}) b)
         {bFaintQueue = if monFainted m || monFaintQueued m then bFaintQueue b else SV.snoc (bFaintQueue b) a}
   | otherwise = modifyMon a (\x -> x {monHp = monHp x - d}) b
   where

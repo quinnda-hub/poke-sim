@@ -210,6 +210,13 @@ Last updated 2026-11-25.
   boosted types are never cleared. Slice 5 is re-recorded at 1,200 battles
   with about a quarter of sets Stellar. Parity checks 6,500 traces, 492,063
   decision points and 983,270 draws.
+- **Slice 6a: moves that switch the user out.** U-turn, Flip Turn, Volt
+  Switch, Teleport, Parting Shot and Chilly Reception (405 moves accepted).
+  A move's `selfSwitch` sets a three-way switch flag; the turn pauses for a
+  switch request and resumes with the saved queue. New: the `SwitchOut`
+  event point and the priority-charge action. A new set, slice 6, of 1,000
+  battles. Parity checks 7,500 traces, 594,043 decision points and
+  1,147,453 draws.
 - **Test tiers.** The fast tier (`POKESIM_TIER=fast`) replays every 10th trace
   and runs the hedgehog properties at 100 tests each, in about 35 s. The long
   tier, which gates merges into main, replays everything and runs the
@@ -285,6 +292,13 @@ core:
 |---|---|---|---|---|
 | slice 3 | 9,200-11,000 | 800-990 | 118-139 | 9.9-12.4 |
 | slice 4 | 11,400-11,600 | 1,110-1,120 | 115-117 | 10.6-10.7 |
+
+On 2026-11-26, after slice 5b (Terastallization done), the same method gave:
+
+| Teams | Engine steps/s | Showdown steps/s | Engine battles/s | Showdown battles/s |
+|---|---|---|---|---|
+| slice 3 | 11,200-11,400 | 1,080 | 147-149 | 13.8 |
+| slice 5 | 11,400-11,800 | 860 | 150-156 | 11.2 |
 
 The engine is about 10-12 times faster per step. Showdown builds a battle in
 about 0.9 ms, so its time goes into the turns, at about 1 ms per decision
@@ -399,6 +413,8 @@ Gen 9 OU battles simulated sooner, and each makes the later ones cheaper.
    | 2026-11-26 | Slice 4d | On pace: step 1 done the day it was estimated |
    | 2026-11-26 | Slice 5a | Ahead: most of step 2 done the same day |
    | 2026-11-26 | Slice 5b | Ahead: step 2 done, about 3 days before its milestone window |
+   | 2026-11-26 | Slice 6a | Ahead: first of step 3's three phases done the same day |
+
 6. **Per-player view.** What each side can observe, as a first-class value.
 7. **Showdown seed compatibility.** Implement Showdown's own generators so a
    battle can be reproduced from its seed alone.
@@ -446,7 +462,7 @@ Alongside:
 - **Scenario generation from rules.** For each rule, generate battles that
   exercise it with each random outcome forced both ways, and report coverage
   per rule.
-- **Trace size.** 6,500 battles take about 3.7 GB. The long tier now takes about 325 s,
+- **Trace size.** 7,500 battles take about 4.5 GB. The long tier now takes about 325 s,
   growing with every set: delta snapshots and a faster replay are due before
   the catalog work. Snapshots should become
   deltas.

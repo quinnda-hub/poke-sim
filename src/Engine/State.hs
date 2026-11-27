@@ -23,6 +23,7 @@ module Engine.State
   , Field (..)
   , noField
   , noCond
+  , SwitchFlag (..)
   , Mon (..)
   , Side (..)
   , RequestState (..)
@@ -218,7 +219,8 @@ data Mon = Mon
   , monFaintQueued :: !Bool
   , monActive :: !Bool
   -- ^ @isActive@.
-  , monSwitchFlag :: !Bool
+  , monSwitchFlag :: !SwitchFlag
+  -- ^ @pokemon.switchFlag@ (pokemon.ts 162: @ID | boolean@).
   , monStatus :: !MonStatus
   -- ^ @pokemon.status@: 'StatusFainted' (@fnt@) from @checkFainted@ until the Pokemon is replaced. A Pokemon
   -- that faints keeps its status until then (@faint@ does not touch it).
@@ -272,6 +274,18 @@ data RequestState = ReqNone | ReqTeamPreview | ReqMove | ReqSwitch
 data Result = Ongoing | Won !Player | Tied
   deriving (Eq, Show)
 
+-- | @pokemon.switchFlag@: whether the Pokemon is to be replaced at the next switch request. Showdown's value is @true@ after a
+-- faint (@checkFainted@, battle.ts 2546) or an item, and the move's id after a self-switch (battle-actions.ts 1372); Eject Button,
+-- Eject Pack and Emergency Exit test @=== true@ (slice 6c). Nothing else reads the id: @queue.resolveAction@ turns it into the
+-- switch's @sourceEffect@ (battle-queue.ts 251), which only a string @selfSwitch@ (Baton Pass, Shed Tail: not supported) uses.
+data SwitchFlag
+  = NoSwitch
+  | -- | @true@: a faint (and, in 6c, an item or ability).
+    SwitchForced
+  | -- | the move's id: a @selfSwitch@ move (U-turn, Flip Turn, Volt Switch, Teleport, Parting Shot, Chilly Reception).
+    SwitchMove
+  deriving (Eq, Show)
+
 -- | A Pokemon identified by owner and orig.
 data Actor = Actor !Player !Int
   deriving (Eq, Show)
@@ -285,6 +299,8 @@ data ActionKind
   | KRunSwitch
   | KSwitch
   | KTerastallize
+  | KPriorityChargeMove
+  -- ^ @priorityChargeMove@ (order 107): a move's @priorityChargeCallback@, queued ahead of the move (battle-queue.ts 242-247).
   | KMove
   | KResidual
   deriving (Eq, Show)

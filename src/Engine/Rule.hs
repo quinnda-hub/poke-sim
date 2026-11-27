@@ -157,6 +157,10 @@ data MoveRule = MoveRule
   -- ^ @move.ignoreEvasion@: the accuracy check ignores the target's evasion stage (hitStepAccuracy 785).
   , mrSelfBoost :: ![(BoostStat, Int)]
   -- ^ @move.selfBoost.boosts@: applied to the user once, after the hit steps, when the move succeeded (battle-actions.ts 588).
+  , mrSelfSwitch :: !Bool
+  -- ^ @move.selfSwitch === true@ (U-turn, Flip Turn, Volt Switch, Teleport, Parting Shot, Chilly Reception): after the hit the
+  -- user switches out when its side can (battle-actions.ts 1349-1353, 1369-1372). The string values (Baton Pass's
+  -- @copyvolatile@, Shed Tail's @shedtail@) are rejected.
   }
   deriving (Eq, Show)
 
@@ -187,6 +191,7 @@ plainRule = MoveRule
   , mrIgnoreDefensive = False
   , mrIgnoreEvasion = False
   , mrSelfBoost = []
+  , mrSelfSwitch = False
   }
 
 -- | The part of the vocabulary the engine can run in the current phase (phases 1 to 3: HP effects, stat stages
@@ -217,6 +222,8 @@ executable r =
               ([], [EStatus _], TargetFoe, Nothing, Nothing, Nothing, Nothing) -> True
               -- the move's own onHit alone, on the user or the foe
               ([], [EOwnHit], t, Nothing, Nothing, Nothing, Nothing) -> t == TargetFoe || t == TargetSelf
+              -- a selfSwitch move on the user with nothing else (Teleport: its onTry is its only handler)
+              ([], [], TargetSelf, Nothing, Nothing, Nothing, Nothing) -> mrSelfSwitch r
               -- the move's own onHitField alone (Court Change, Haze)
               ([], [EOwnHitField], TargetAll, Nothing, Nothing, Nothing, Nothing) -> True
               ([], [], t, Just _, Nothing, Nothing, Nothing) -> t == TargetFoeSide || t == TargetAllySide
@@ -256,7 +263,7 @@ ruleKeys =
   , "secondaries", "status", "thawsTarget", "ignoreImmunity"
   , "sideCondition", "weather", "terrain", "pseudoWeather"
   , "damage", "overrideOffensiveStat", "overrideDefensiveStat", "overrideOffensivePokemon", "ignoreDefensive", "ignoreEvasion"
-  , "selfBoost"
+  , "selfBoost", "selfSwitch"
   ]
 
 -- | Keys that are truthy on moves the engine accepts but cannot change the outcome, and why.
@@ -336,7 +343,9 @@ moveRule condOf ownRejected (Object o) = do
       -- supported before it accepts the move.
       ownVolatile = case KM.lookup "self" o of
         Just (Object s) | Just (String v) <- KM.lookup "volatileStatus" s -> v == moveId && moveId == "roost"
-        _ -> False
+        -- chillyreception: its priorityChargeCallback adds the volatile named for the move, so the move's @condition@ block is
+        -- that volatile's ('Engine.Dex' checks it is supported)
+        _ -> moveId == "chillyreception"
       hasCondField = conditionField moveId o /= Nothing || ownVolatile
   when (not (null conditionNames) && not hasCondField) $
     Left ("has handler code " <> showHandlers (Array (V.fromList (map String conditionNames))))
@@ -416,6 +425,11 @@ moveRule condOf ownRejected (Object o) = do
         Just v | truthy v -> boostTable v
         _ -> Right []
     Just v -> Left ("selfBoost " <> showV v)
+  -- `selfSwitch: true` only (the strings are Baton Pass and Shed Tail, which copy state to the replacement)
+  selfSwitch <- case look "selfSwitch" of
+    Nothing -> Right False
+    Just (Bool True) -> Right True
+    Just v -> Left ("selfSwitch " <> showV v)
   pure MoveRule
     { mrDamaging = damaging
     , mrHits = hits
@@ -441,6 +455,7 @@ moveRule condOf ownRejected (Object o) = do
     , mrIgnoreDefensive = ignoreDef
     , mrIgnoreEvasion = ignoreEva
     , mrSelfBoost = selfBoost
+    , mrSelfSwitch = selfSwitch
     }
   where
     -- a flag that is true or absent

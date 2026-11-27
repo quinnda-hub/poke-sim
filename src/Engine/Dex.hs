@@ -105,6 +105,10 @@ data MoveData = MoveData
   -- with the metadata of the export and the bodies of "Engine.Effects" @moveBodies@. Empty when the move has none or
   -- when a handler has no body ('cnReject').
   --
+  , mvSelfSwitch :: !Bool
+  -- ^ @move.selfSwitch@ of this use (a copy of the dex move's 'mrSelfSwitch'): Parting Shot's @onHit@ deletes it from the move in
+  -- use (data/moves.ts 13182), so only the per-use copy changes. 'Engine.Turn' reads it where @runMoveEffects@ does (battle-actions.ts
+  -- 1349, 1369).
   , mvStellarBoosted :: !Bool
   -- ^ @move.stellarBoosted@ (sim/dex-moves.ts 339): a Stellar Pokemon's boost was spent on this use of the move, so its later hits
   -- keep it. Always 'False' in the dex; 'Engine.Turn' sets it on the copy in use.
@@ -400,6 +404,7 @@ conditionFor conditionsV abilitiesV movesV c = do
       _ -> Nothing
     moveOf' x = case x of
       CRoost -> Just "roost"
+      CChillyReception -> Just "chillyreception"
       _ -> Nothing
 
 -- | A move's field condition by key, if the engine runs it ('Engine.Rule.CondLookup').
@@ -575,11 +580,14 @@ moveOf tix condLookup conds v = do
         Right r -> (r, Nothing)
       -- a move that adds the roost volatile is supported when the volatile is (every handler the export lists for it has a body)
       roost = conds V.! fromEnum CRoost
+      -- Chilly Reception's priorityChargeCallback adds its own volatile: the same
+      chilly = conds V.! fromEnum CChillyReception
       rejected = case rejected0 of
         Nothing | ERoost `elem` mrSelf rule, not (cnSupported roost) -> Just ("condition roost is not supported: " <> fromMaybe "" (cnReject roost))
+        Nothing | ident == "chillyreception", not (cnSupported chilly) -> Just ("condition chillyreception is not supported: " <> fromMaybe "" (cnReject chilly))
         _ -> rejected0
       supported = isNothing rejected && executable rule
-  pure (MoveData ident ty (cat == "Physical") (cat == "Status") bp acc prio crit pp noBoost (truthyField "struggleRecoil" v) rule rejected supported effect False)
+  pure (MoveData ident ty (cat == "Physical") (cat == "Status") bp acc prio crit pp noBoost (truthyField "struggleRecoil" v) rule rejected supported effect (mrSelfSwitch rule) False)
 
 natureOf :: Value -> Either String NatureData
 natureOf v = do

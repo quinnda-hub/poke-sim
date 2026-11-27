@@ -31,6 +31,8 @@ orderOf k = case k of
   KRunSwitch -> 101
   KSwitch -> 103
   KTerastallize -> 106
+  -- battle-queue.ts 189: priorityChargeMove: 107
+  KPriorityChargeMove -> 107
   KMove -> 200
   KResidual -> 300
 
@@ -78,7 +80,7 @@ resolveAction :: MonadChance m => Dex -> Action -> Eng m Action
 resolveAction dx ac0 = do
   let ac = ac0 {acOrder = orderOf (acKind ac0)}
   case (acKind ac, acActor ac) of
-    (k, Just a) | k == KSwitch || k == KInstaSwitch -> modify' (modifyMon a (\m -> m {monSwitchFlag = False}))
+    (k, Just a) | k == KSwitch || k == KInstaSwitch -> modify' (modifyMon a (\m -> m {monSwitchFlag = NoSwitch}))
     _ -> pure ()
   actionSpeedOf dx ac
 
