@@ -139,6 +139,11 @@ data EventId
   -- ^ @runEvent('SwitchOut', oldActive)@ in @switchIn@ (battle-actions.ts 100): every switch-out of a Pokemon with HP, after
   -- @runPursuitActivation@. No supported effect listens until Regenerator and Natural Cure (slice 6c), but the event point keeps
   -- its (draw-free, with fewer than two handlers) sort.
+  | EvDragOut
+  -- ^ @runEvent('DragOut', target, source, move)@ in @forceSwitch@ (battle-actions.ts 1418, @spreadMoveHit@ step 6), and
+  -- @runEvent('DragOut', oldActive)@ in @dragIn@ (battle-actions.ts 222), with no source or move. No supported effect listens
+  -- (Suction Cups, Guard Dog and Ingrain are not supported), but the event points keep their (draw-free, with fewer than two
+  -- handlers) sort.
   | EvPriorityChargeCallback
   -- ^ Not an event: a move's @priorityChargeCallback@, called directly by the @priorityChargeMove@ action (battle.ts 2793-2798).
   -- The export lists it as the handler @priorityChargeCallback@ and the engine keeps it as @(POwn, EvPriorityChargeCallback)@,
@@ -236,6 +241,7 @@ eventName e = case e of
   EvHitField -> "HitField"
   EvAfterTerastallization -> "AfterTerastallization"
   EvSwitchOut -> "SwitchOut"
+  EvDragOut -> "DragOut"
   EvPriorityChargeCallback -> "PriorityChargeCallback"
 
 -- | Which Pokemon a handler reacts to: the holder (@onX@), its allies (@onAllyX@), its foes (@onFoeX@), the

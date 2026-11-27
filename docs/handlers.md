@@ -737,14 +737,51 @@ What is missing is anything that sets the switch flag from a move.
 ### Forced switch (6b)
 
 - `forceSwitch: true` becomes a rule field. It has 3 whitelisted users,
-  Roar, Whirlwind and Dragon Tail, plus Circle Throw.
-- The move sets the target's `forceSwitchFlag` after `runEvent('DragOut')`
-  (battle-actions.ts 1413-1428). The action tail then drags in a random
-  replacement before anything else (battle.ts 2866-2873).
-- `dragIn` (battle-actions.ts 216-227) draws one `random(n)` over the
-  benched Pokémon that are not fainted, in roster order (`possibleSwitches`,
-  battle.ts 1589-1602). The switch-in runs at once rather than through the
-  queue, and skips Pursuit's activation.
+  Roar, Whirlwind and Dragon Tail (all priority -6), plus Circle Throw,
+  which the dex has and the engine will accept with them.
+- The flag is Showdown's `forceSwitchFlag`, a Bool of its own beside
+  `switchFlag` (`monForceSwitchFlag`). Red Card (6c) sets it too, and Eject
+  Button and Emergency Exit read it.
+- In `runMoveEffects` (battle-actions.ts 1319-1322) a forceSwitch move did
+  something only if the target's side can switch, so Roar or Whirlwind with
+  no switch target fails.
+- Step 6 of `spreadMoveHit` (1165), after the self drops and secondaries,
+  is `forceSwitch` (1413-1428): for each target with HP, if the user has HP
+  and the target's side can switch, `runEvent('DragOut', target, source,
+  move)`. A truthy result sets the flag. `false` on a Status move fails it.
+  No supported effect listens to `DragOut` (Suction Cups, Guard Dog and
+  Ingrain are not supported), but the event point goes in.
+- The action tail (battle.ts 2866-2873), after the residual branch and
+  before faints are resolved: for each side in order, an active Pokémon with
+  the flag is dragged out if it still has HP, and the flag is cleared either
+  way.
+- `dragIn` (battle-actions.ts 216-227):
+  1. `getRandomSwitchable`: `possibleSwitches` (battle.ts 1589-1602) lists
+     the benched Pokémon that are not fainted and not already queued to
+     switch in, in roster order, and `sample` draws `random(n)` over it.
+     The draw happens even when n is 1. With no candidate there is no draw
+     and no drag.
+  2. Only after the draw: no drag if the old active has no HP, then a
+     second `runEvent('DragOut', oldActive)`, with no source or move.
+  3. `switchIn(pokemon, pos, null, isDrag = true)`: it skips
+     `runPursuitActivation` (no Update), and it runs `runSwitch` at once
+     instead of queueing it (battle-actions.ts 208-212). That `runSwitch`
+     also takes any `runSwitch` actions at the head of the queue.
+- The dragged-out Pokémon's queued actions are cancelled, as for any
+  switch-out, so a slower Roar user dragged out by a faster Roar loses its
+  move.
+- Found while building it:
+  - The phazing step does not check `battle.ended`: a Dragon Tail user that a
+    Rocky Helmet has just knocked out as its side's last Pokémon still drags
+    the target in before the faint ends the battle.
+  - The HP check inside `dragIn` is redundant, because the phazing step has
+    just checked the same HP.
+  - A drag never calls `insertChoice`, which is where a queued switch-in
+    refreshes its cached speed (battle-queue.ts 385). The dragged-in Pokémon
+    keeps its old cached speed for `runSwitch`'s speed sort.
+  - Phazing before or after faint resolution, a flag set with no candidate,
+    and not cancelling the dragged-out Pokémon's actions cannot be told
+    apart by any 6b trace. The engine follows Showdown's code for each.
 
 ### Items and abilities (6c)
 

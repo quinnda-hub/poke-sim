@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 'use strict';
-// Generates battles for "slice 6" (mid-turn switching; phase 6a: moves that switch their user out) and records each on Showdown.
+// Generates battles for "slice 6" (mid-turn switching; phase 6a: moves that switch their user out, 6b: moves that force the target
+// out) and records each on Showdown.
 //
 // Slice 6a lets in U-turn, Flip Turn, Volt Switch (damaging), Teleport (`onTry`), Parting Shot (`onHit`) and Chilly Reception (snow and
 // a `priorityChargeMove` action): a move with `selfSwitch: true` sets the user's `switchFlag` to its id at the end of
@@ -31,6 +32,27 @@
 //             tie on speed)
 //   effects   a pivot whose replacement has switch-in effects at once: a surge, a weather setter, a seed in its terrain, Protosynthesis
 //             or Quark Drive in the field or with Booster Energy, Unburden after a seed
+//
+// Slice 6b lets in Roar and Whirlwind (Status, priority -6), Dragon Tail and Circle Throw (damaging, priority -6): a move with `forceSwitch:
+// true` sets the target's `forceSwitchFlag` in `spreadMoveHit` step 6 (battle-actions.ts 1413-1428), and the action tail's phazing step
+// (battle.ts 2866-2873) calls `dragIn`: `getRandomSwitchable` draws `random(n)` over the target side's benched Pokemon that can switch
+// (even for n = 1; no candidate, no draw), and `switchIn(..., isDrag)` runs `runSwitch` at once, with no Pursuit Update.
+// A seed's 6b scenario comes from a generator of its own (the 6b share of the seeds replaces the 6a kind the seed would have had; every
+// other seed is exactly the 6a scenario, plus the 6b sprinkle of forcing moves and hazards into its sets), and it is one of:
+//   dhazards  a hazard setter that also forces (the seed picks the pair: the 4 moves into the 4 hazards, 16 combinations), the hazard(s)
+//             first, then the forcing move: the dragged-in Pokemon (one of several candidates) meets the hazards
+//   dfaint    a Shedinja forces its copy in onto Stealth Rock: the dragged-in Pokemon faints on arrival (resolved inside `runSwitch`'s
+//             `fieldEvent`) with the same speed as the user, so the tail's Update sort must not count it
+//   dtspikes  Toxic Spikes against a lone benched grounded Poison type (n = 1): the drag absorbs them
+//   dsingle   the target side has two Pokemon: one candidate, and the draw with n = 1
+//   dnone     the target side has one Pokemon: Roar and Whirlwind fail, Dragon Tail and Circle Throw only damage
+//   dko       Dragon Tail knocks out a Shedinja (no drag; the end-of-turn replacement is the only request)
+//   dhelmet   a Shedinja forces into a Rocky Helmet: the user faints (a lone one ends the battle) and the drag still happens
+//   dtwo      both leads force: the faster drags the slower out before it moves (its move is cancelled)
+//   deffects  the dragged-in Pokemon has switch-in effects at once: a surge, a weather setter, a seed, Protosynthesis, Quark Drive,
+//             Booster Energy, Unburden
+//   dpivot    a drag in the same turn as a 6a pivot: the forcing move drags out the pivot's replacement
+//   dtera     the forcing user terastallizes on the turn it forces, or the target does on the turn it is dragged
 //
 // Usage:
 //   node gen-slice6.js <outDir> <count> <poolFile> [firstSeed=1]
@@ -70,6 +92,9 @@ function mulberry32(seed) {
 const PIVOTS = ['uturn', 'flipturn', 'voltswitch', 'teleport', 'partingshot', 'chillyreception'];
 const DAMAGING = ['uturn', 'flipturn', 'voltswitch'];
 const CONTACT = ['uturn', 'flipturn'];
+const FORCERS = ['roar', 'whirlwind', 'dragontail', 'circlethrow'];
+const STATUS_FORCERS = ['roar', 'whirlwind'];
+const DAMAGING_FORCERS = ['dragontail', 'circlethrow'];
 const HAZARDS = ['stealthrock', 'spikes', 'toxicspikes', 'stickyweb'];
 const TERRAIN_ABILITY = { electricterrain: 'electricsurge', grassyterrain: 'grassysurge', mistyterrain: 'mistysurge', psychicterrain: 'psychicsurge' };
 const SEED_OF = { electricterrain: 'electricseed', grassyterrain: 'grassyseed', mistyterrain: 'mistyseed', psychicterrain: 'psychicseed' };
@@ -80,7 +105,11 @@ const itemName = (id) => id === '' ? '' : dex.items.get(id).name;
 
 function assign(scenario0, pool, seed) {
 	const rnd = mulberry32(seed * 3141592653 + 2718281829);
-	const int = (n) => Math.floor(rnd() * n);
+	// the 6b scenarios draw from a stream of their own (`rng` points at it while they are built), so a seed that gets no 6b kind keeps
+	// exactly its 6a scenario
+	const rnd6b = mulberry32(seed * 2246822519 + 3266489917);
+	let rng = rnd;
+	const int = (n) => Math.floor(rng() * n);
 	const pick = (xs) => xs[int(xs.length)];
 	const has = (id) => pool.moves.includes(id);
 	for (const id of PIVOTS) if (!has(id)) throw new Error(`the pool has no ${id}`);
@@ -142,7 +171,145 @@ function assign(scenario0, pool, seed) {
 	for (const [k, w] of kinds) { acc += w; if (kindRoll < acc) { kind = k; break; } }
 	const TEAM = ['team 123456', 'team 123456'];
 	const step = (...pair) => pair;
-	if (kind === 'hazards') {
+
+	// ---- 6b: the forcing moves
+	let kind6b = null;
+	if (FORCERS.every(has)) {
+		rng = rnd6b;
+		for (const side of [0, 1]) for (const s of scenario.teams[side]) {
+			if (int(100) < 22) put(s, pick(FORCERS));
+			if (int(100) < 7) put(s, pick(HAZARDS));
+		}
+		const kinds6b = [
+			['dhazards', 10], ['dfaint', 3], ['dtspikes', 4], ['dsingle', 3], ['dnone', 3], ['dko', 3], ['dhelmet', 4], ['dtwo', 4], ['deffects', 6], ['dpivot', 4], ['dtera', 4],
+		];
+		const roll6b = int(100);
+		let acc6b = 0;
+		for (const [k, w] of kinds6b) { acc6b += w; if (roll6b < acc6b) { kind6b = k; break; } }
+		if (!kind6b) rng = rnd;
+	}
+	if (kind6b) {
+		const fsd = int(2); // the side that forces
+		const ts = 1 - fsd; // the side that is forced out
+		const F = lead(fsd), T = lead(ts);
+		const duo = (f, t) => { const pair = [null, null]; pair[fsd] = f; pair[ts] = t; return pair; };
+		const team = (n) => { const pair = ['team 123456', 'team 123456']; pair[ts] = n === 6 ? 'team 123456' : `team ${[1, 2, 3, 4, 5, 6].slice(0, n).join('')}`; return pair; };
+		const shrink = (n) => { scenario.teams[ts] = scenario.teams[ts].slice(0, n); };
+		const noBoots = () => { for (let i = 1; i < scenario.teams[ts].length; i++) if (bench(ts, i).item === 'Heavy-Duty Boots' && int(100) < 85) bench(ts, i).item = ''; };
+		const forcer = pick(FORCERS);
+		const hitsByType = (type) => pool.species.filter(id => id !== 'shedinja' && dex.getImmunity(type, dex.species.get(id).types));
+		steady(F); steady(T);
+		if (kind6b === 'dhazards') {
+			const combo = (seed * 7) % 16;
+			const move = FORCERS[combo % 4], hz = HAZARDS[Math.floor(combo / 4)];
+			const second = int(100) < 30 ? pick(HAZARDS.filter(h => h !== hz)) : null;
+			const hzs = second ? [hz, second] : [hz];
+			idleMoves(F, ...hzs, move);
+			idleMoves(T, 'recover');
+			noBoots();
+			const choices = [team(6)];
+			for (let i = 0; i < hzs.length; i++) choices.push(duo(`move ${i + 1}`, 'move 1'));
+			choices.push(duo(`move ${hzs.length + 1}`, 'move 1'));
+			if (int(100) < 40) choices.push(duo(`move ${hzs.length + 1}`, 'move 1'));
+			scenario.choices = choices;
+		} else if (kind6b === 'dfaint') {
+			// a Shedinja forces a copy of itself in (R: the same set, so the same speed) onto Stealth Rock: R faints on arrival, inside
+			// runSwitch's fieldEvent, so the tail's Update event sorts the Pokemon in play (a tie draws) without it
+			shrink(2);
+			F.species = 'Shedinja'; F.level = 100; F.ability = 'No Ability'; F.item = '';
+			idleMoves(F, 'stealthrock', forcer);
+			const R = bench(ts, 1);
+			Object.assign(R, JSON.parse(JSON.stringify(F)));
+			idleMoves(R, 'recover');
+			idleMoves(T, 'recover');
+			scenario.choices = [team(2), duo('move 1', 'move 1'), duo('move 2', 'move 1')];
+		} else if (kind6b === 'dtspikes') {
+			shrink(2);
+			const R = bench(ts, 1);
+			if (poison.length) R.species = speciesName(pick(poison));
+			R.item = ''; R.level = 100;
+			idleMoves(F, 'toxicspikes', forcer);
+			idleMoves(T, 'recover');
+			scenario.choices = [team(2), duo('move 1', 'move 1'), duo('move 2', 'move 1')];
+		} else if (kind6b === 'dsingle') {
+			shrink(2);
+			noBoots();
+			idleMoves(F, forcer);
+			idleMoves(T, 'recover');
+			scenario.choices = [team(2), duo('move 1', 'move 1')];
+		} else if (kind6b === 'dnone') {
+			shrink(1);
+			idleMoves(F, forcer);
+			idleMoves(T, 'recover');
+			scenario.choices = [team(1), duo('move 1', 'move 1'), duo('move 1', 'move 1')];
+		} else if (kind6b === 'dko') {
+			T.species = 'Shedinja'; T.level = 100; T.ability = 'No Ability'; T.item = '';
+			idleMoves(F, 'dragontail');
+			idleMoves(T, 'recover');
+			const repl = duo(null, 'switch 2');
+			scenario.choices = [team(6), duo('move 1', 'move 1'), repl];
+		} else if (kind6b === 'dhelmet') {
+			const move = pick(DAMAGING_FORCERS);
+			F.species = 'Shedinja'; F.level = 100; F.ability = 'No Ability'; F.item = '';
+			const types = hitsByType(dex.moves.get(move).type);
+			if (types.length) T.species = speciesName(pick(types));
+			setItem(T, 'rockyhelmet');
+			idleMoves(F, move);
+			idleMoves(T, 'recover');
+			const lone = int(100) < 25;
+			if (lone) scenario.teams[fsd] = scenario.teams[fsd].slice(0, 1);
+			const first = [null, null]; first[fsd] = lone ? 'team 1' : 'team 123456'; first[ts] = 'team 123456';
+			scenario.choices = [first, duo('move 1', 'move 1'), duo('switch 2', null)];
+		} else if (kind6b === 'dtwo') {
+			idleMoves(F, forcer);
+			idleMoves(T, pick(FORCERS));
+			if (int(100) < 40) { T.species = F.species; T.level = 100; }
+			scenario.choices = [team(6), duo('move 1', 'move 1'), duo('move 1', 'move 1')];
+		} else if (kind6b === 'deffects') {
+			shrink(2);
+			const R = bench(ts, 1);
+			R.level = 100; R.item = ''; R.ability = 'No Ability'; F.item = ''; T.item = '';
+			idleMoves(F, forcer);
+			idleMoves(T, 'recover');
+			const variant = int(7);
+			const terrains = Object.keys(TERRAIN_ABILITY).filter(t => pool.abilities.includes(TERRAIN_ABILITY[t]) && pool.items.includes(SEED_OF[t]));
+			if (variant <= 2 && terrains.length) {
+				const t = pick(terrains);
+				setAbility(F, TERRAIN_ABILITY[t]);
+				setItem(R, SEED_OF[t]);
+				if (variant === 2 && pool.abilities.includes('unburden')) setAbility(R, 'unburden');
+			} else if (variant === 3) {
+				setAbility(F, 'drought'); setAbility(R, 'protosynthesis');
+			} else if (variant === 4) {
+				setAbility(F, 'electricsurge'); setAbility(R, 'quarkdrive');
+			} else if (variant === 5) {
+				setAbility(R, pick(['protosynthesis', 'quarkdrive'])); setItem(R, 'boosterenergy');
+			} else {
+				setAbility(R, pick(SETTERS.filter(id => pool.abilities.includes(id))));
+			}
+			scenario.choices = [team(2), duo('move 1', 'move 1')];
+		} else if (kind6b === 'dpivot') {
+			// the other side pivots (priority 0, or Teleport at -6, tying with the forcing move): its replacement is then dragged out
+			const pivot = pick(PIVOTS);
+			idleMoves(F, forcer);
+			idleMoves(T, pivot);
+			noBoots();
+			const sw = [null, null]; sw[ts] = 'switch 2';
+			scenario.choices = [team(6), duo('move 1', 'move 1'), sw];
+		} else {
+			// dtera
+			idleMoves(F, forcer);
+			idleMoves(T, 'recover');
+			noBoots();
+			const v = int(3);
+			scenario.choices = [team(6), duo(v === 1 ? 'move 1' : 'move 1 terastallize', v === 0 ? 'move 1' : 'move 1 terastallize')];
+		}
+		rng = rnd;
+		kind = 'b6';
+	}
+	if (kind === 'b6') {
+		// built above
+	} else if (kind === 'hazards') {
 		// the seed picks (move, hazard): 6 x 4 = 24 combinations
 		const combo = (seed * 7) % 24;
 		const move = PIVOTS[combo % 6], hz = HAZARDS[Math.floor(combo / 6)];
@@ -328,7 +495,25 @@ function newTally() {
 		// Chilly Reception: snow, the priority charge and its volatile
 		chillySnowSetAndSwitched: 0, chillySnowAlreadyUpSwitched: 0, chillySnowSetNoTarget: 0, chillyFailedSnowUpNoTarget: 0,
 		priorityChargeMoveRan: 0, priorityChargeBothSides: 0, priorityChargeSpeedTie: 0, chillyVolatileAdded: 0,
+		// 6b: the flag (spreadMoveHit step 6), by move, and what stopped it
+		forceFlagSet: z(FORCERS),
+		forceNoTargetStatusFailed: z(STATUS_FORCERS), forceNoTargetDamaged: z(DAMAGING_FORCERS),
+		forceTargetKnockedOut: z(DAMAGING_FORCERS),
+		// the drag (the phazing step and dragIn)
+		dragged: z(FORCERS), dragOneCandidate: 0, dragSeveralCandidates: 0, dragBenchHasFainted: 0,
+		dragCancelledMove: 0, dragCancelledMinus6Move: 0,
+		dragAfterUserFainted: 0, dragAfterBattleEnded: 0,
+		dragSameTurnAsPivot: 0, dragOutPivotReplacement: 0,
+		dragTeraForcerSameTurn: 0, dragTeraTarget: 0, dragTeraTargetSameTurn: 0,
+		dragIntoHazard: cross(FORCERS, HAZARDS), dragAbsorbsToxicSpikes: z(FORCERS),
+		dragInFaintedToHazard: 0, dragInWithBoots: 0, dragInFaintedSpeedTie: 0,
+		dragInSetWeather: 0, dragInSetTerrain: 0, dragInSeedUsed: 0, dragInBoosterUsed: 0,
+		dragInProtosynthesis: 0, dragInQuarkDrive: 0, dragInUnburden: 0, dragInBoosted: 0,
 		// structurally zero
+		// - dragOutDeclined: no supported effect listens to DragOut (Suction Cups, Guard Dog, Ingrain are unsupported), so no hit
+		//   result is false and the drag is never refused
+		// - dragFlaggedTargetNoHp: the flag is set for a target with HP and consumed at the end of the same action, and nothing in
+		//   between (the user's DamagingHit and Update events) can hurt the target
 		// - selfSwitchNoTarget.teleport: with no switch target Teleport's onTry fails it before runMoveEffects, which is where the flag
 		//   (and this counter) is decided; teleportFailedNoTarget counts it
 		// - selfSwitchIntoImmunity of U-turn and Flip Turn: no type is immune to Bug or Water, and no supported ability grants it
@@ -344,11 +529,12 @@ function newTally() {
 		// - roughSkin: Rough Skin is not a supported ability, so Rocky Helmet is the only contact punisher
 		// - copyvolatile, shedtail (Baton Pass, Shed Tail: banned in gen9ou), revivalblessing, a commanding Tatsugiri
 		partingShotBlockedByAbility: 0, roughSkinFaintedUser: 0, batonPassOrShedTail: 0, revivalBlessing: 0, commandedUser: 0,
+		dragOutDeclined: 0, dragFlaggedTargetNoHp: 0,
 	};
 }
 
 const STRUCTURAL_ZERO = ['selfSwitchNoTarget.teleport', 'flaggedUserFainted.other', 'midTurnRequestBothSides', 'cancelActionRemovedSomething', 'partingShotBlockedByAbility', 'roughSkinFaintedUser', 'batonPassOrShedTail',
-	'revivalBlessing', 'commandedUser'];
+	'revivalBlessing', 'commandedUser', 'dragOutDeclined', 'dragFlaggedTargetNoHp'];
 
 function install() {
 	if (Battle.prototype.__slice6Instrumented) return;
@@ -356,7 +542,9 @@ function install() {
 	const t = () => activeTally;
 	const teraTurn = new WeakMap(); // Pokemon -> the turn it terastallized
 	const pivotIn = new WeakMap(); // Pokemon -> { move, turn, faster } for a replacement switched in by a pivot move
-	const state = { pivotSwitch: false, pivotRunSwitch: false };
+	const state = { pivotSwitch: false, pivotRunSwitch: false, drag: false, dragRunSwitch: false };
+	const forcedBy = new WeakMap(); // Pokemon -> { move, source, turn } while its forceSwitchFlag is set
+	const dragCtx = new WeakMap(); // Pokemon -> { move, turn } for the Pokemon a drag is bringing in
 
 	const terastallize = BattleActions.prototype.terastallize;
 	BattleActions.prototype.terastallize = function (pokemon) {
@@ -449,9 +637,14 @@ function install() {
 	// the switch-out (battle-actions.ts 100-127) and the replacement's arrival
 	const cancelAction = BattleQueue.prototype.cancelAction;
 	BattleQueue.prototype.cancelAction = function (pokemon) {
+		const queuedMoves = this.list.filter(a => a.pokemon === pokemon && a.choice === 'move');
 		const r = cancelAction.call(this, pokemon);
 		const c = t();
 		if (c && state.pivotSwitch && r) c.cancelActionRemovedSomething++;
+		if (c && state.drag && queuedMoves.length) {
+			c.dragCancelledMove++;
+			if (queuedMoves.some(a => a.priority === -6)) c.dragCancelledMinus6Move++;
+		}
 		return r;
 	};
 	const switchIn = BattleActions.prototype.switchIn;
@@ -460,8 +653,14 @@ function install() {
 		const pivot = !!(c && sourceEffect && sourceEffect.selfSwitch === true && PIVOTS.includes(sourceEffect.id));
 		const old = pokemon.side.active[pos];
 		state.pivotSwitch = pivot;
+		const drag = !!(c && rest[0] === true);
+		if (drag) {
+			state.drag = true;
+			dragCtx.set(pokemon, state.dragCtx);
+		}
 		const r = switchIn.call(this, pokemon, pos, sourceEffect, ...rest);
 		state.pivotSwitch = false;
+		state.drag = false;
 		if (pivot && r !== false) {
 			c.pivotSwitchIns[sourceEffect.id]++;
 			pivotIn.set(pokemon, { move: sourceEffect.id, turn: this.battle.turn, faster: !!this.battle.__pivotUserFaster });
@@ -501,6 +700,7 @@ function install() {
 		const id = this.item;
 		const r = useItem.call(this, ...args);
 		if (c && state.pivotRunSwitch && id === 'boosterenergy' && r) c.pivotInBoosterUsed++;
+		if (c && state.dragRunSwitch && id === 'boosterenergy' && r) c.dragInBoosterUsed++;
 		return r;
 	};
 	const addVolatile = Pokemon.prototype.addVolatile;
@@ -513,6 +713,11 @@ function install() {
 			if (id === 'quarkdrive') c.pivotInQuarkDrive++;
 			if (id === 'unburden') c.pivotInUnburden++;
 		}
+		if (c && state.dragRunSwitch && r) {
+			if (id === 'protosynthesis') c.dragInProtosynthesis++;
+			if (id === 'quarkdrive') c.dragInQuarkDrive++;
+			if (id === 'unburden') c.dragInUnburden++;
+		}
 		if (c && id === 'chillyreception' && r) c.chillyVolatileAdded++;
 		return r;
 	};
@@ -521,6 +726,7 @@ function install() {
 		const r = boost.call(this, boosts, target, ...rest);
 		const c = t();
 		if (c && state.pivotRunSwitch && r) c.pivotInBoosted++;
+		if (c && state.dragRunSwitch && r) c.dragInBoosted++;
 		return r;
 	};
 
@@ -554,6 +760,96 @@ function install() {
 			}
 		}
 		return speedSort.call(this, list, ...rest);
+	};
+
+	// 6b: the flag (spreadMoveHit step 6) and what stopped it
+	const forceSwitch = BattleActions.prototype.forceSwitch;
+	BattleActions.prototype.forceSwitch = function (damage, targets, source, move) {
+		const before = targets.map(x => !!(x && x.forceSwitchFlag));
+		const r = forceSwitch.call(this, damage, targets, source, move);
+		const c = t();
+		if (c && FORCERS.includes(move.id)) {
+			targets.forEach((x, i) => {
+				if (!x) return;
+				if (x.forceSwitchFlag && !before[i]) {
+					c.forceFlagSet[move.id]++;
+					forcedBy.set(x, { move: move.id, source, turn: this.battle.turn });
+				} else if (x.hp === 0 && DAMAGING_FORCERS.includes(move.id)) c.forceTargetKnockedOut[move.id]++;
+			});
+		}
+		return r;
+	};
+	// the move's runMoveEffects: no switch target (Roar and Whirlwind fail, Dragon Tail and Circle Throw only damage)
+	const runMoveEffects2 = BattleActions.prototype.runMoveEffects;
+	BattleActions.prototype.runMoveEffects = function (damage, targets, source, move, moveData, isSecondary, isSelf) {
+		const c = t();
+		const watched = c && move.forceSwitch && moveData === move && !isSecondary && !isSelf && FORCERS.includes(move.id) && targets[0];
+		const canSwitch = watched ? !!this.battle.canSwitch(targets[0].side) : true;
+		const r = runMoveEffects2.call(this, damage, targets, source, move, moveData, isSecondary, isSelf);
+		if (watched && !canSwitch) {
+			if (STATUS_FORCERS.includes(move.id) && r[0] === false) c.forceNoTargetStatusFailed[move.id]++;
+			if (DAMAGING_FORCERS.includes(move.id) && typeof r[0] === 'number') c.forceNoTargetDamaged[move.id]++;
+		}
+		return r;
+	};
+	// the drag
+	const dragIn = BattleActions.prototype.dragIn;
+	BattleActions.prototype.dragIn = function (side, pos) {
+		const c = t();
+		if (!c) return dragIn.call(this, side, pos);
+		const battle = this.battle, old = side.active[pos];
+		const by = old && forcedBy.get(old);
+		const candidates = battle.possibleSwitches(side);
+		const info = { move: by && by.move, turn: battle.turn };
+		const turn = battle.turn;
+		const ended = battle.ended;
+		const oldTera = old.terastallized;
+		const oldPivotIn = pivotIn.get(old);
+		state.dragCtx = info;
+		const r = dragIn.call(this, side, pos);
+		const dragged = side.active[pos] !== old;
+		if (dragged && info.move) {
+			c.dragged[info.move]++;
+			if (candidates.length === 1) c.dragOneCandidate++; else c.dragSeveralCandidates++;
+			if (side.pokemon.slice(side.active.length).some(p => p.fainted)) c.dragBenchHasFainted++;
+			if (by.source.hp === 0) c.dragAfterUserFainted++;
+			if (ended) c.dragAfterBattleEnded++;
+			if (battle.__pivotMove && battle.__pivotMove.turn === turn) c.dragSameTurnAsPivot++;
+			if (oldPivotIn && oldPivotIn.turn === turn) c.dragOutPivotReplacement++;
+			if (teraTurn.get(by.source) === turn) c.dragTeraForcerSameTurn++;
+			if (oldTera) { c.dragTeraTarget++; if (teraTurn.get(old) === turn) c.dragTeraTargetSameTurn++; }
+		}
+		return r;
+	};
+	// the dragged-in Pokemon's runSwitch: hazards, abilities, seeds, Booster Energy, Unburden
+	const runSwitch2 = BattleActions.prototype.runSwitch;
+	BattleActions.prototype.runSwitch = function (pokemon) {
+		const c = t();
+		const info = c && dragCtx.get(pokemon);
+		if (!info || !info.move) return runSwitch2.call(this, pokemon);
+		dragCtx.delete(pokemon);
+		const conds = pokemon.side.sideConditions;
+		const had = Object.fromEntries(HAZARDS.map(h => [h, h in conds]));
+		const types = pokemon.types.slice();
+		const weather = this.battle.field.weather, terrain = this.battle.field.terrain;
+		const item = pokemon.item;
+		state.dragRunSwitch = true;
+		const r = runSwitch2.call(this, pokemon);
+		state.dragRunSwitch = false;
+		for (const h of HAZARDS) if (had[h]) c.dragIntoHazard[`${info.move}.${h}`]++;
+		if (had.toxicspikes && types.includes('Poison') && !types.includes('Flying') && !('toxicspikes' in pokemon.side.sideConditions)) {
+			c.dragAbsorbsToxicSpikes[info.move]++;
+		}
+		if (pokemon.hp === 0 && (had.stealthrock || had.spikes || had.toxicspikes)) {
+			c.dragInFaintedToHazard++;
+			const foe = pokemon.side.foe.active[0];
+			if (foe && foe.hp > 0 && foe.speed === pokemon.speed) c.dragInFaintedSpeedTie++;
+		}
+		if (item === 'heavydutyboots' && Object.values(had).some(Boolean)) c.dragInWithBoots++;
+		if (this.battle.field.weather !== weather) c.dragInSetWeather++;
+		if (this.battle.field.terrain !== terrain) c.dragInSetTerrain++;
+		if (item && !pokemon.item && item.endsWith('seed')) c.dragInSeedUsed++;
+		return r;
 	};
 
 	// the requests

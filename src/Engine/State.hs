@@ -221,6 +221,10 @@ data Mon = Mon
   -- ^ @isActive@.
   , monSwitchFlag :: !SwitchFlag
   -- ^ @pokemon.switchFlag@ (pokemon.ts 162: @ID | boolean@).
+  , monForceSwitchFlag :: !Bool
+  -- ^ @pokemon.forceSwitchFlag@ (pokemon.ts 163): set on the target of a @forceSwitch@ move by @spreadMoveHit@ step 6
+  -- (battle-actions.ts 1418-1420), consumed by the action tail's phazing step (battle.ts 2866-2873) in the same action, so it is
+  -- never set at a decision point. Red Card (slice 6c) sets it too.
   , monStatus :: !MonStatus
   -- ^ @pokemon.status@: 'StatusFainted' (@fnt@) from @checkFainted@ until the Pokemon is replaced. A Pokemon
   -- that faints keeps its status until then (@faint@ does not touch it).
