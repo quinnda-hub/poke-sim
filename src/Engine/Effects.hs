@@ -434,6 +434,9 @@ moveBodies name = case name of
   "spikyshield" -> Just stallingMove
   "banefulbunker" -> Just stallingMove
   "endure" -> Just stallingMove
+  -- slice 7d. suckerpunch (18403), thunderclap (19504): onTry reads queue.willMove(target)
+  "suckerpunch" -> Just [(POwn, EvTry, BNative NSuckerPunchTry)]
+  "thunderclap" -> Just [(POwn, EvTry, BNative NSuckerPunchTry)]
   _ -> Nothing
   where
     -- slice 7a: the handlers the four moves share

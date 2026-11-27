@@ -65,9 +65,13 @@ genTeamsWith dx pivotHeavy = (,) <$> genTeam <*> genTeam
       | otherwise = Gen.element species
     -- slice 7a: the protect family, which the heavy teams carry on many sets (a repeated protect move climbs the stall counter and fails)
     protectKit = [m | m <- ["protect", "spikyshield", "banefulbunker", "endure"], m `elem` moves]
+    -- slice 7d: Sucker Punch and Thunderclap, against a mix of status and attacking moves
+    punches = [m | m <- ["suckerpunch", "thunderclap"], m `elem` moves]
+    -- the step-4 kits (slice 7): each one that is supported joins the pivot-heavy mix with weight 3
+    step4Kits = [(3, Gen.element k) | k <- [protectKit, punches], not (null k)]
     pickMove
-      | pivotHeavy && not (null protectKit) && not (null pivots) && not (null dragKit) =
-          Gen.frequency [(3, Gen.element pivots), (3, Gen.element dragKit), (3, Gen.element protectKit), (2, Gen.element moves)]
+      | pivotHeavy && not (null step4Kits) && not (null pivots) && not (null dragKit) =
+          Gen.frequency ([(3, Gen.element pivots), (3, Gen.element dragKit), (2, Gen.element moves)] ++ step4Kits)
       | pivotHeavy && not (null pivots) && not (null dragKit) = Gen.frequency [(3, Gen.element pivots), (3, Gen.element dragKit), (2, Gen.element moves)]
       | pivotHeavy && not (null pivots) = Gen.frequency [(3, Gen.element pivots), (2, Gen.element moves)]
       | otherwise = Gen.element moves

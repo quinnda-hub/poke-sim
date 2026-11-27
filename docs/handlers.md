@@ -1078,7 +1078,43 @@ Protect, Spiky Shield, Baneful Bunker and Endure are accepted, with the `stall` 
 
 ### 7d findings
 
-(to be written by 7d)
+Sucker Punch and Thunderclap have priority 1 and one handler, `onTry`
+(data/moves.ts 18412 and 19513). Both bodies are `NSuckerPunchTry`, run by
+`moveTry`. It reads `queue.willMove(target)` and fails the move unless
+the target has a queued move action whose move is not a Status move (Me
+First aside) and has no `mustrecharge`.
+
+- **Where Try runs.** In `trySpreadMoveHit` (battle-actions.ts 656), before
+  `PrepareHit`, `TryHit`, the immunity checks and the accuracy roll. A
+  failed move therefore makes no accuracy, crit or damage draw. PP is
+  already spent, and the speed-tie shuffles of the events before Try
+  (BeforeMove and the like) still happen.
+- **No move action.** The target moved already (its action left the queue),
+  is switching (a `switch` action is not a `move` action), has fainted
+  (`willMove` returns null). All of these fail.
+- **Struggle.** The queued action is a move action for Struggle, whose
+  category is Physical, so the move works.
+- **Tera.** The Tera action is a separate queue entry. The move action is
+  still there, so Tera does not change the result.
+- **Category.** `action.move` is `getActiveMove` of the chosen move
+  (battle-queue.ts 261), so the category is the base one. Showdown changes a
+  move's category only later, in `onModifyMove`, for moves like Shell Side
+  Arm. None of them changes what the queue holds.
+- **Status.** Me First is not accepted, so every queued status move fails
+  the move.
+- **Order.** Priority 1 is the generic action priority. Two priority-1 moves
+  tie on speed and draw, as any tie does. A switch has a lower order
+  number than any move, so it always runs first.
+- The engine's slot lookup is inlined in `moveTry`, because `Engine.Queue`
+  imports `Engine.Dispatch`.
+- `runMove` is now exported from `Engine.Turn`, for the property.
+- LATENT: no recharge move is accepted, so `mustrecharge` never holds.
+- LATENT(7c): Encore swaps the move at `runAction` (`onOverrideAction`), not
+  in the queue, so the queued move stays the one chosen.
+- Property: whatever else is in the queue, `moveTry` gives the result that
+  the target's own move actions alone give, and a failed move makes no accuracy,
+  crit or damage draw and changes no HP.
+- Set: `slice7d`, 600 battles.
 
 ### 7e findings
 
