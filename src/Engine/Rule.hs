@@ -170,6 +170,9 @@ data MoveRule = MoveRule
   , mrForceSwitch :: !Bool
   -- ^ @move.forceSwitch === true@ (Roar, Whirlwind, Dragon Tail, Circle Throw): the target is dragged out when its side can
   -- switch (battle-actions.ts 1319-1322, 1165, 1413-1428; battle.ts 2866-2873).
+  -- slice 7c
+  , mrFailEncore :: !Bool
+  -- ^ @flags.failencore@: Encore's @onStart@ fails when the target's last move has it (data/moves.ts 4750).
   }
   deriving (Eq, Show)
 
@@ -203,6 +206,8 @@ plainRule = MoveRule
   , mrSelfBoost = []
   , mrSelfSwitch = False
   , mrForceSwitch = False
+  -- slice 7c
+  , mrFailEncore = False
   }
 
 -- | The part of the vocabulary the engine can run in the current phase (phases 1 to 3: HP effects, stat stages
@@ -235,6 +240,8 @@ executable r =
               ([], [EOwnVolatile, EOwnHit], TargetSelf, Nothing, Nothing, Nothing, Nothing) -> True
               -- the move's own onHit alone, on the user or the foe
               ([], [EOwnHit], t, Nothing, Nothing, Nothing, Nothing) -> t == TargetFoe || t == TargetSelf
+              -- slice 7c: encore, taunt: the move's own volatile on the foe and nothing else
+              ([], [EOwnVolatile], TargetFoe, Nothing, Nothing, Nothing, Nothing) -> True
               -- a selfSwitch move on the user with nothing else (Teleport: its onTry is its only handler)
               ([], [], TargetSelf, Nothing, Nothing, Nothing, Nothing) -> mrSelfSwitch r
               -- a forceSwitch move on the foe with nothing else (Roar, Whirlwind): it did something only if the foe's side can switch
@@ -312,7 +319,6 @@ inertFlags =
   , ("failmefirst", "read by Me First, which is rejected")
   , ("nosleeptalk", "read by Sleep Talk, which is rejected")
   , ("failinstruct", "read by Instruct, which is rejected")
-  , ("failencore", "read by Encore, which is rejected")
   , ("failmimic", "read by Mimic, which is rejected")
   , ("nosketch", "read by Sketch, which is rejected")
   , ("noparentalbond", "read by Parental Bond only")
@@ -368,7 +374,7 @@ moveRule condOf ownRejected (Object o) = do
       hasCondField = conditionField moveId o /= Nothing || ownVolatile
   when (not (null conditionNames) && not hasCondField) $
     Left ("has handler code " <> showHandlers (Array (V.fromList (map String conditionNames))))
-  mapM_ (checkKey hasCondField) [(K.toText k, v) | (k, v) <- KM.toList o, truthy v]
+  mapM_ (checkKey hasCondField) [(K.toText k, v) | (k, v) <- KM.toList o, truthy v, not (moveId `elem` ownVolatileMoves && K.toText k == "volatileStatus")]
   flags <- case KM.lookup "flags" o of
     Just (Object fl) -> Right [K.toText k | (k, v) <- KM.toList fl, truthy v]
     _ -> Right []
@@ -489,6 +495,8 @@ moveRule condOf ownRejected (Object o) = do
     , mrSelfBoost = selfBoost
     , mrSelfSwitch = selfSwitch
     , mrForceSwitch = forceSwitch
+    -- slice 7c
+    , mrFailEncore = "failencore" `elem` flags
     }
   where
     -- a flag that is true or absent
@@ -519,7 +527,7 @@ moveRule _ _ _ = Left "move is not an object"
 
 -- | The moves whose top-level @volatileStatus@ is their own id and is translated (slice 7a).
 ownVolatileMoves :: [T.Text]
-ownVolatileMoves = ["protect", "spikyshield", "banefulbunker", "endure"]
+ownVolatileMoves = ["protect", "spikyshield", "banefulbunker", "endure", "encore", "taunt" {- slice 7c -}]
 
 -- | A key of the move is accounted for. @condition@ is the block of the field condition that the move's
 -- @sideCondition@, @weather@, @terrain@ or @pseudoWeather@ names; it is translated into the condition table.
@@ -537,6 +545,7 @@ checkFlag f
   | f == "contact" = Right () -- translated: 'mrContact'
   | f == "powder" = Right () -- translated: 'mrPowder'
   | f == "protect" = Right () -- translated: 'mrProtect'
+  | f == "failencore" = Right () -- translated: 'mrFailEncore' (slice 7c)
   | Just _ <- lookup f inertFlags = Right ()
   | otherwise = Left ("not modelled: flag " <> f)
 

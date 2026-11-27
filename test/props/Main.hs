@@ -148,6 +148,9 @@ pivotPlayouts dex = property $ do
       -- slice 7e
       cover 20 "a Pokemon was locked by a Choice item at a move request" (seenLocked seen > 0)
       cover 1 "a locked Pokemon had no PP left in its move (Struggle)" (seenLockStruggle seen > 0)
+      -- slice 7c
+      cover 10 "a move request came with an active Pokemon encored" (seenEncore seen > 0)
+      cover 10 "a move request came with an active Pokemon taunted" (seenTaunt seen > 0)
       case request b of
         Finished _ -> success
         Awaiting {} -> footnote "playout ended without a result" >> failure
@@ -367,6 +370,9 @@ conditionsSupported dex conditionsV abilitiesV movesV = withTests 1 $ property $
         CSpikyShield -> lookupKey "condition" (lookupKey "spikyshield" movesV)
         CBanefulBunker -> lookupKey "condition" (lookupKey "banefulbunker" movesV)
         CEndure -> lookupKey "condition" (lookupKey "endure" movesV)
+        -- slice 7c
+        CEncore -> lookupKey "condition" (lookupKey "encore" movesV)
+        CTaunt -> lookupKey "condition" (lookupKey "taunt" movesV)
         _ -> lookupKey (condName c) conditionsV
       abilityCondition name = lookupKey "condition" (lookupKey name abilitiesV)
       lookupKey k v = case v of

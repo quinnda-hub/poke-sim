@@ -69,8 +69,10 @@ genTeamsWith dx pivotHeavy = (,) <$> genTeam <*> genTeam
     protectKit = [m | m <- ["protect", "spikyshield", "banefulbunker", "endure"], m `elem` moves]
     -- slice 7d: Sucker Punch and Thunderclap, against a mix of status and attacking moves
     punches = [m | m <- ["suckerpunch", "thunderclap"], m `elem` moves]
+    -- slice 7c: Encore and Taunt, with the status moves they stop and the pivots that switch an encored or taunted Pokemon out
+    encoreKit = [m | m <- ["encore", "taunt"], m `elem` moves]
     -- the step-4 kits (slice 7): each one that is supported joins the pivot-heavy mix with weight 3
-    step4Kits = [(3, Gen.element k) | k <- [protectKit, punches], not (null k)]
+    step4Kits = [(3, Gen.element k) | k <- [protectKit, punches, encoreKit], not (null k)]
     pickMove
       | pivotHeavy && not (null step4Kits) && not (null pivots) && not (null dragKit) =
           Gen.frequency ([(3, Gen.element pivots), (3, Gen.element dragKit), (2, Gen.element moves)] ++ step4Kits)
@@ -163,6 +165,11 @@ data Seen = Seen
   -- ^ a Pokemon with a live choicelock at a move request
   , seenLockStruggle :: !Int
   -- ^ one of those with no usable move left (the locked move out of PP): Struggle
+  -- slice 7c
+  , seenEncore :: !Int
+  -- ^ a step that ends at a move request with an active Pokemon encored
+  , seenTaunt :: !Int
+  -- ^ the same with an active Pokemon taunted
   }
   deriving (Eq, Show)
 
@@ -183,6 +190,9 @@ instance Semigroup Seen where
       -- slice 7e
       , seenLocked = f seenLocked
       , seenLockStruggle = f seenLockStruggle
+      -- slice 7c
+      , seenEncore = f seenEncore
+      , seenTaunt = f seenTaunt
       }
     where
       f g = g x + g y
@@ -203,6 +213,9 @@ instance Monoid Seen where
       -- slice 7e
       , seenLocked = 0
       , seenLockStruggle = 0
+      -- slice 7c
+      , seenEncore = 0
+      , seenTaunt = 0
       }
 
 -- | Play with random legal choices, checking every state on the way, until the battle ends (or the cap).
@@ -248,8 +261,12 @@ playChecked dx t1 t2 = startBattle dx t1 t2 >>= go 0 mempty
 -- could bring it back.
 -- Returns what the step went through.
 checkStep :: Dex -> Battle -> Battle -> (Maybe Choice, Maybe Choice) -> Either String Seen
-checkStep dx b b' (c1, c2) = (mappend stallSeen <$>) $ mapM_ one [(p, i) | (p, side) <- [(P1, bP1), (P2, bP2)], i <- [0 .. SV.length (sMons (side b)) - 1]] >> turnOk >> (((,) <$> drag (P1, c1) <*> drag (P2, c2)) >>= \ds -> pivotsOk ds >> switchOuts >>= \so -> pure (so <> mempty {seenDrags = length (filter id [fst ds, snd ds]), seenLocked = length lockedNow, seenLockStruggle = length (filter (mustStruggle b) lockedNow)}))
+checkStep dx b b' (c1, c2) = (mappend stallSeen <$>) $ mapM_ one [(p, i) | (p, side) <- [(P1, bP1), (P2, bP2)], i <- [0 .. SV.length (sMons (side b)) - 1]] >> turnOk >> (((,) <$> drag (P1, c1) <*> drag (P2, c2)) >>= \ds -> pivotsOk ds >> switchOuts >>= \so -> pure (so <> mempty {seenDrags = length (filter id [fst ds, snd ds]), seenEncore = volatileAtRequest CEncore, seenTaunt = volatileAtRequest CTaunt, seenLocked = length lockedNow, seenLockStruggle = length (filter (mustStruggle b) lockedNow)}))
   where
+    -- slice 7c: the step ended at a move request with an active Pokemon that has the volatile
+    volatileAtRequest c = case request b' of
+      Awaiting MoveRequest _ _ | or [fromEnum c `elem` [i | Volatile i _ <- SV.toList (monVolatiles (monOf b' (activeActor p b')))] | p <- [P1, P2], sHasActive (sideOf p b')] -> 1
+      _ -> 0
     chose p = if p == P1 then c1 else c2
     -- slice 7a: the stall volatiles after the step (the protect volatiles themselves end with the turn, so only stall shows)
     stalls = [st | p <- [P1, P2], m <- SV.toList (sMons (sideOf p b')), Volatile i st <- SV.toList (monVolatiles m), i == fromEnum CStall]
@@ -542,6 +559,10 @@ checkBattle dx b = do
             | i `elem` map fromEnum [CProtect, CSpikyShield, CBanefulBunker, CEndure] = esDuration st == 1 && (midTurnRequest || finished)
             -- slice 7e: choicelock has no duration; its state is the locked move (a Dex move index, or -1 for Struggle)
             | i == fromEnum CChoiceLock = esDuration st == 0 && esA st >= (-1) && esA st < V.length (dxMoves dx)
+            -- slice 7c. encore: 3 turns, or 4 when the target had no move queued, counting down; esA is the encored move, one of
+            -- the Pokemon's own slots. taunt: 3 or 4 turns.
+            | i == fromEnum CEncore = esDuration st >= 1 && esDuration st <= 4 && any ((== esA st) . msMove) (monMoves m)
+            | i == fromEnum CTaunt = esDuration st >= 1 && esDuration st <= 4
             | otherwise = False
           -- a live Pokemon flagged to switch out (a pivot's or an Eject Button's switch request) means the turn is not over
           -- (a battle that ends mid-turn, on Spiky Shield's damage for one, never reaches the Residual that removes them)
@@ -603,6 +624,29 @@ checkBattle dx b = do
       if chilled && (not (monActive m) || monFainted m || monHp m <= 0) then bad "chilly reception on a Pokemon that is not active or has no HP" else Right ()
       case request b of
         Awaiting MoveRequest _ _ | chilled -> bad "chilly reception at a move request"
+        _ -> Right ()
+      -- slice 7c: lastMove, Encore and Taunt. (3) A Pokemon that is not active has no last move and neither volatile (switching out and
+      -- fainting are clearVolatile); a last move, when there is one, is one of the dex's moves; activeTurns counts the turns on the field.
+      let encored = [st | Volatile i st <- SV.toList (monVolatiles m), i == fromEnum CEncore]
+          taunted = not (null [() | Volatile i _ <- SV.toList (monVolatiles m), i == fromEnum CTaunt])
+          legalSlots = [n | c <- legalChoices b p, n <- case c of Move k -> [k]; MoveTera k -> [k]; _ -> []]
+          slotMove n = msMove <$> (monMoves m SV.!? (n - 1))
+      if not (monActive m) && (monLastMove m /= -1 || not (null encored) || taunted)
+        then bad "a Pokemon that is not active with a last move, an encore or a taunt" else Right ()
+      if monLastMove m < -1 || monLastMove m >= V.length (dxMoves dx) then bad ("last move " ++ show (monLastMove m) ++ " is no move") else Right ()
+      if monActiveTurns m < 0 || monActiveTurns m > bTurn b then bad ("active turns " ++ show (monActiveTurns m)) else Right ()
+      case request b of
+        Awaiting MoveRequest _ _ | monActive m, not (monFainted m) -> do
+          -- (1) an encored Pokemon whose encored move can be used is offered no other move (a Tera variant of it aside, and switches
+          -- are not moves)
+          case encored of
+            st : _ | any (\ms -> msMove ms == esA st && msPP ms > 0 && not (msDisabled ms)) (monMoves m)
+                   , any (\n -> slotMove n /= Just (esA st)) legalSlots -> bad "an encored Pokemon is offered a move other than the encored one"
+            _ -> Right ()
+          -- (2) a taunted Pokemon is offered no Status move other than Me First (unless every move is disabled: Struggle)
+          if taunted && not (mustStruggle b p)
+               && any (\n -> maybe False (\mv -> mvStatus mv && mvId mv /= "mefirst") ((dxMoves dx V.!?) =<< slotMove n)) legalSlots
+            then bad "a taunted Pokemon is offered a Status move" else Right ()
         _ -> Right ()
       -- flinch (duration 1) lives only on an active Pokemon with HP, and never survives to a move request
       -- (Residual removes it); the one exception is a battle that ends mid-residual
