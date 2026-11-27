@@ -12,6 +12,7 @@ module Engine.Dex
   , Condition (..)
   , conditionOf
   , condSpec
+  , eventBits
   , dexCondLookup
   , moveSpec
   , effectOf
@@ -35,13 +36,16 @@ module Engine.Dex
 import Data.Aeson (Value (..), eitherDecodeFileStrict)
 import qualified Data.Aeson.Key as K
 import qualified Data.Aeson.KeyMap as KM
+import Data.Bits (setBit, testBit)
 import Data.Char (isAlphaNum, toLower)
+import Data.List (foldl')
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe, isNothing)
 import Data.Scientific (toBoundedInteger)
 import qualified Data.Text as T
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as U
+import Data.Word (Word64)
 import System.FilePath ((</>))
 
 import Engine.Effects
@@ -142,6 +146,9 @@ data Condition = Condition
   , cnId :: !T.Text
   , cnItemBoosts :: ![(BoostStat, Int)]
   -- ^ An item's @boosts@ (the seeds): the stages @useItem@ raises (pokemon.ts 1857).
+  , cnEvents :: !Word64
+  -- ^ The events 'cnHandlers' has an entry for, under any prefix, as a bit set over 'fromEnum' of the 'EventId'
+  -- ('eventBits'). Derived from 'cnHandlers'; it lets 'condSpec' and the dispatcher answer "no handler" with one bit test.
   }
   deriving (Show)
 
@@ -242,13 +249,20 @@ supportedItems dx = "" : [cnId a | a <- V.toList (dxItems dx), cnSupported a]
 
 -- | The handler of a condition for a prefix and event (@on<Prefix><Event>@), if the engine has one.
 condSpec :: Condition -> Prefix -> EventId -> Maybe HandlerSpec
-condSpec cn p e = go (cnHandlers cn)
+condSpec cn p e
+  | not (testBit (cnEvents cn) (fromEnum e)) = Nothing
+  | otherwise = go (cnHandlers cn)
   where
     go [] = Nothing
     go ((p', e', h) : rest)
       | p' == p && e' == e = Just h
       | otherwise = go rest
 {-# INLINE condSpec #-}
+
+-- | The 'cnEvents' of a handler list: bit @fromEnum e@ for every event @e@ with an entry. 'EventId' has fewer than 64
+-- constructors (a property checks it).
+eventBits :: [(Prefix, EventId, HandlerSpec)] -> Word64
+eventBits = foldl' (\w (_, e, _) -> setBit w (fromEnum e)) 0
 
 -- | Showdown's effectiveness code of an attacking type against a defending type.
 typeEffect :: Dex -> Int -> Int -> Int
@@ -507,7 +521,8 @@ effectFor ident typeOrder ownPfx startAsSwitchIn v mbodies = do
   let breakable = case v of
         Object o | Just (Object fl) <- KM.lookup "flags" o -> maybe False truthy (KM.lookup "breakable" fl)
         _ -> False
-  pure (Condition duration (specs ++ startSwitchIn ++ residual) (reject == Nothing) reject breakable ident boosts)
+  let handlers = specs ++ startSwitchIn ++ residual
+  pure (Condition duration handlers (reject == Nothing) reject breakable ident boosts (eventBits handlers))
 
 speciesOf :: M.Map T.Text Int -> Value -> Either String SpeciesData
 speciesOf tix v = do

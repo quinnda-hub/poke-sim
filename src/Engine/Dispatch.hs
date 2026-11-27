@@ -1,3 +1,6 @@
+{-# OPTIONS_GHC -fexpose-all-unfoldings #-}
+-- Unfoldings are exposed so that "Engine.Turn" can specialise every engine function to the concrete chance monads
+-- ('Engine.Chance.Sample', 'Engine.Chance.Replay'); without them each call here passes a Monad dictionary.
 {-# LANGUAGE OverloadedStrings #-}
 -- | The event dispatcher (docs/handlers.md section 4), after Showdown's @sim/battle.ts@: @runEvent@,
 -- @singleEvent@, @fieldEvent@ and @eachEvent@, with the handler collection (@findEventHandlers@), the sort keys
@@ -57,6 +60,7 @@ module Engine.Dispatch
 
 import Control.Monad (forM, forM_, unless, void, when)
 import Control.Monad.Trans.State.Strict (StateT, get, gets, modify')
+import Data.Bits (testBit)
 import Data.List (sortBy)
 import qualified Data.Map.Strict as M
 import qualified Data.Text as T
@@ -741,6 +745,29 @@ findEventHandlers dx b ev target source =
             ]
       | otherwise = []
 
+-- | Whether 'findEventHandlers' can find anything: whether any effect it reads (those of the target, of the source and of
+-- the Pokemon in play, the side conditions of both sides and the field's conditions) has a handler for the event under
+-- any prefix ('cnEvents'). False means the list is empty; true only means it has to be built.
+eventHeard :: Dex -> Battle -> EventId -> Actor -> Maybe Actor -> Bool
+eventHeard dx b ev target source = mon target || maybe False mon source || side P1 || side P2 || fieldPart
+  where
+    bit = fromEnum ev
+    has key = maybe False (\cn -> testBit (cnEvents cn) bit) (effectOf dx key)
+    mon a =
+      let m = monOf b a
+       in maybe False (has . EffectKey EffStatus . fromEnum) (statusCond (monStatus m))
+            || SV.any (\(Volatile i _) -> has (EffectKey EffVolatile i)) (monVolatiles m)
+            || has (EffectKey EffAbility (monAbility m))
+            || (monItem m /= noItem && has (EffectKey EffItem (monItem m)))
+    side p =
+      let s = sideOf p b
+       in (sHasActive s && mon (activeActor p b)) || SV.any (\(CondEntry i _) -> has (EffectKey EffSideCond i)) (sConds s)
+    fieldPart =
+      let f = bField b
+       in SV.any (\(CondEntry i _) -> has (EffectKey EffPseudoWeather i)) (fPseudo f)
+            || (fWeather f /= noCond && has (EffectKey EffWeather (fWeather f)))
+            || (fTerrain f /= noCond && has (EffectKey EffTerrain (fTerrain f)))
+
 -- | Sort handlers by the event's sort kind (battle.ts 797-803). A @speedSort@ draws only for tie runs.
 sortHandlers :: MonadChance m => EventId -> [Handler] -> m [Handler]
 sortHandlers ev hs = case eventSort ev of
@@ -823,8 +850,13 @@ runEventFull dx crit onEffect ev target source mv relay0 = do
   let fmt = bFormat b
       own = [ Handler (EffectKey EffMove 0) (OwnMon target) (Just target) spec (sortKey ev spec (monSpeedKey b ev target) noEffectState) 0 False 0 False
             | onEffect, Just m <- [mv], Just spec <- [moveSpec m POwn ev] ]
-  sorted <- sortHandlers ev (own ++ findEventHandlers dx b ev target source)
-  go fmt sorted relay0 baseMod
+  -- No effect in reach has a handler for the event: the list is empty, the sort of an empty list draws nothing and the
+  -- relay value comes back as it went in. This is what the collection below finds, without building it.
+  if null own && not (eventHeard dx b ev target source)
+    then pure (finish fmt relay0 baseMod)
+    else do
+      sorted <- sortHandlers ev (own ++ findEventHandlers dx b ev target source)
+      go fmt sorted relay0 baseMod
   where
     -- after the handlers: `typeof relayVar === 'number' && relayVar === Math.abs(Math.floor(relayVar))`
     finish fmt r md = case r of

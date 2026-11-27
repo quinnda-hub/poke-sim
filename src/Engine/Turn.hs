@@ -1,3 +1,6 @@
+{-# OPTIONS_GHC -fexpose-all-unfoldings -fspecialise-aggressively #-}
+-- The SPECIALIZE pragmas of 'newBattle' and 'step' below make this module compile the whole engine once for each concrete
+-- chance monad; -fspecialise-aggressively lets that reach the functions of "Engine.Dispatch" and "Engine.Queue".
 {-# LANGUAGE OverloadedStrings #-}
 -- | The turn loop, structured after Showdown's sim/battle.ts and sim/battle-actions.ts.
 --
@@ -43,6 +46,8 @@ import Engine.Team
 -- | Showdown @new Battle@ + @setPlayer@ x2 + @start()@: build both sides (drawing genders in
 -- team order, p1 first), queue the @start@ action and stop at the team-preview request.
 {-# INLINABLE newBattle #-}
+{-# SPECIALIZE newBattle :: Dex -> Format -> Team -> Team -> Sample Battle #-}
+{-# SPECIALIZE newBattle :: Dex -> Format -> Team -> Team -> Replay Battle #-}
 newBattle :: MonadChance m => Dex -> Format -> Team -> Team -> m Battle
 newBattle dx fmt t1 t2 = do
   s1 <- buildSide fmt dx t1
@@ -90,6 +95,8 @@ step dx b (c1, c2) = case request b of
         | isLegal b p c, Just as <- choiceActions dx b kind p c = Right as
         | otherwise = Left (IllegalChoice p c)
 {-# INLINABLE step #-}
+{-# SPECIALIZE step :: Dex -> Battle -> (Maybe Choice, Maybe Choice) -> Sample (Either StepError Battle) #-}
+{-# SPECIALIZE step :: Dex -> Battle -> (Maybe Choice, Maybe Choice) -> Replay (Either StepError Battle) #-}
 
 -- | Build the actions of a legal choice (Showdown @side.choose@ -> @choice.actions@).
 choiceActions :: Dex -> Battle -> RequestKind -> Player -> Choice -> Maybe [Action]
