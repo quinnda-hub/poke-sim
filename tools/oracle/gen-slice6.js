@@ -54,6 +54,22 @@
 //   dpivot    a drag in the same turn as a 6a pivot: the forcing move drags out the pivot's replacement
 //   dtera     the forcing user terastallizes on the turn it forces, or the target does on the turn it is dragged
 //
+// Slice 6c lets in Regenerator and Natural Cure (`onSwitchOut`, run by every switch-out of a Pokemon with HP: `battle-actions.ts` 100) and
+// Eject Button and Red Card (`onAfterMoveSecondary`, after the hit loop, so the pivot's and the forcing move's flags are already set).
+// Eject Button flags its holder (`switchFlag = true`) and clears the user's flag, Red Card sets the attacker's `forceSwitchFlag`. Every
+// seed's sets may get a 6c ability or item (from a stream of their own), and the 6c share of the seeds replaces the 6a or 6b kind the seed
+// would have had; each is one of:
+//   csw       a Regenerator or Natural Cure holder (damaged, or with a status from each of brn par psn tox frz) switches out by a choice
+//   cpivot    the same, switching out with its own pivot move
+//   cplain    a plain strike, or a damaging pivot, or Dragon Tail / Circle Throw, into an Eject Button or Red Card holder (the holder or the
+//             attacker may have Regenerator or Natural Cure, the holder may be statused first)
+//   cnotarget the same strikes with the relevant side down to one Pokemon: Eject Button's holder side, Red Card's attacker side
+//   cko       the strikes into a Shedinja holder: no holder HP, no use
+//   cboth     a Red Card holder and a faster attacker whose replacement holds an Eject Button: both items go off in one turn
+//   cfaint    a level-1 Regenerator or Natural Cure holder (statused first) faints: no switch-out, no cure
+//   cdrag     Roar, Whirlwind, Dragon Tail or Circle Throw drags out a damaged or statused Regenerator or Natural Cure holder
+// Each of csw, cpivot and cplain also takes the Tera variant of a move on some seeds.
+//
 // Usage:
 //   node gen-slice6.js <outDir> <count> <poolFile> [firstSeed=1]
 //
@@ -100,6 +116,7 @@ const TERRAIN_ABILITY = { electricterrain: 'electricsurge', grassyterrain: 'gras
 const SEED_OF = { electricterrain: 'electricseed', grassyterrain: 'grassyseed', mistyterrain: 'mistyseed', psychicterrain: 'psychicseed' };
 const SETTERS = ['drought', 'drizzle', 'sandstream', 'snowwarning', 'electricsurge', 'grassysurge', 'mistysurge', 'psychicsurge'];
 
+const abilityIs = (set, id) => set.ability === (id === 'noability' ? 'No Ability' : dex.abilities.get(id).name);
 const abilityName = (id) => id === 'noability' ? 'No Ability' : dex.abilities.get(id).name;
 const itemName = (id) => id === '' ? '' : dex.items.get(id).name;
 
@@ -108,6 +125,7 @@ function assign(scenario0, pool, seed) {
 	// the 6b scenarios draw from a stream of their own (`rng` points at it while they are built), so a seed that gets no 6b kind keeps
 	// exactly its 6a scenario
 	const rnd6b = mulberry32(seed * 2246822519 + 3266489917);
+	const rnd6c = mulberry32(seed * 3730488107 + 668265263);
 	let rng = rnd;
 	const int = (n) => Math.floor(rng() * n);
 	const pick = (xs) => xs[int(xs.length)];
@@ -188,7 +206,26 @@ function assign(scenario0, pool, seed) {
 		for (const [k, w] of kinds6b) { acc6b += w; if (roll6b < acc6b) { kind6b = k; break; } }
 		if (!kind6b) rng = rnd;
 	}
-	if (kind6b) {
+	// ---- 6c: Regenerator, Natural Cure, Eject Button, Red Card (a stream of its own; a seed without a 6c kind keeps its scenario, bar the
+	// sprinkle: abilities and items on the sets that no script depends on)
+	let kind6c = null;
+	const SWITCH_ABILITIES = ['regenerator', 'naturalcure'], CARDS = ['ejectbutton', 'redcard'];
+	if (SWITCH_ABILITIES.every(id => pool.abilities.includes(id)) && CARDS.every(id => pool.items.includes(id))) {
+		rng = rnd6c;
+		const kinds6c = [['csw', 7], ['cpivot', 5], ['cplain', 12], ['cnotarget', 4], ['cko', 3], ['cboth', 3], ['cfaint', 3], ['cdrag', 4]];
+		const roll6c = int(100);
+		let acc6c = 0;
+		for (const [k, w] of kinds6c) { acc6c += w; if (roll6c < acc6c) { kind6c = k; break; } }
+		// the sprinkle: every bench member, and the leads of a plain random battle (a scripted one needs its leads as built)
+		for (const side of [0, 1]) scenario.teams[side].forEach((s, i) => {
+			const a = int(100), b = int(100), which = pick(SWITCH_ABILITIES), card = pick(CARDS);
+			if (i === 0 && (kind6c || kind !== 'random' || kind6b)) return;
+			if (a < 14) setAbility(s, which);
+			if (b < 9) setItem(s, card);
+		});
+		if (!kind6c) rng = rnd;
+	}
+	if (kind6b && !kind6c) {
 		const fsd = int(2); // the side that forces
 		const ts = 1 - fsd; // the side that is forced out
 		const F = lead(fsd), T = lead(ts);
@@ -303,6 +340,156 @@ function assign(scenario0, pool, seed) {
 			noBoots();
 			const v = int(3);
 			scenario.choices = [team(6), duo(v === 1 ? 'move 1' : 'move 1 terastallize', v === 0 ? 'move 1' : 'move 1 terastallize')];
+		}
+		rng = rnd;
+		kind = 'b6';
+	}
+
+	if (kind6c) {
+		const sIdx = int(2); // the striker's side (the side whose moves hit the holder); the holder is on the other
+		const hIdx = 1 - sIdx;
+		const S = lead(sIdx), H = lead(hIdx);
+		const duo = (st, ho) => { const pair = [null, null]; pair[sIdx] = st; pair[hIdx] = ho; return pair; };
+		const teamOf = (sn, hn) => { const pair = [null, null]; pair[sIdx] = `team ${[1, 2, 3, 4, 5, 6].slice(0, sn).join('')}`; pair[hIdx] = `team ${[1, 2, 3, 4, 5, 6].slice(0, hn).join('')}`; return pair; };
+		const shrinkTo = (side, n) => { scenario.teams[side] = scenario.teams[side].slice(0, n); };
+		const clearBoots = (side) => { for (let i = 1; i < scenario.teams[side].length; i++) if (scenario.teams[side][i].item === 'Heavy-Duty Boots') scenario.teams[side][i].item = ''; };
+		const typesOf = (set) => dex.species.get(set.species).types;
+		const hit = (id, set) => dex.getImmunity(dex.moves.get(id).type, typesOf(set));
+		const STATUSES = [['brn', 'willowisp', ['Fire']], ['par', 'thunderwave', ['Electric', 'Ground']], ['psn', 'poisonpowder', ['Poison', 'Steel']],
+			['tox', 'toxic', ['Poison', 'Steel']], ['frz', 'icebeam', ['Ice']]]; // (no sleep: the engine accepts no move that causes it)
+		// the slots of a holder: 1 an idle move, 2 the pivot when it has one
+		const idleHolder = (set, ...extra) => { idleMoves(set, 'swordsdance', ...extra); };
+		steady(S); steady(H);
+		for (const side of [0, 1]) clearBoots(side);
+		const strikes = (set, ...kindsOf) => {
+			const pool2 = [];
+			if (kindsOf.includes('plain')) pool2.push(...pool.moves.filter(id => { const m = dex.moves.get(id); return m.basePower >= 40 && m.accuracy === 100 && m.category !== 'Status' && !PIVOTS.includes(id) && !FORCERS.includes(id); }));
+			if (kindsOf.includes('pivot')) pool2.push(...DAMAGING.filter(has));
+			if (kindsOf.includes('forcer')) pool2.push(...DAMAGING_FORCERS.filter(has));
+			const ok = pool2.filter(id => hit(id, set));
+			return ok.length ? pick(ok) : pick(pool2);
+		};
+		const statusPick = seed % STATUSES.length;
+		const pickStatus = (set) => {
+			const [name, move, immune] = STATUSES[statusPick];
+			if (!has(move)) return null;
+			if (typesOf(set).some(t => immune.includes(t))) {
+				const fits = pool.species.filter(id => id !== 'shedinja' && !dex.species.get(id).types.some(t => immune.includes(t)));
+				set.species = speciesName(pick(fits));
+			}
+			return { name, move };
+		};
+		// the striker's level: low enough that the holder survives the strike (the KO kinds raise it)
+		const gentle = () => { S.level = 30; H.level = 100; };
+		const teraStep = (mv) => (int(100) < 25 ? `${mv} terastallize` : mv);
+		const holderAbility = () => pick(SWITCH_ABILITIES);
+		if (kind6c === 'csw' || kind6c === 'cpivot') {
+			const ability = holderAbility();
+			setAbility(H, ability); H.item = '';
+			const pivot = pick(PIVOTS.filter(has));
+			idleHolder(H);
+			if (kind6c === 'cpivot') put(H, pivot, 1);
+			if (pivot === 'voltswitch' && typesOf(S).includes('Ground')) S.species = speciesName(pick(flyingOrNot));
+			const st = ability === 'naturalcure' && int(100) < 75 ? pickStatus(H) : null;
+			const lowHp = ability === 'regenerator' && int(100) < 65;
+			const reps = st && st.name === 'frz' ? 7 : 1;
+			const choices = [teamOf(6, 6)];
+			if (st) {
+				idleMoves(S, st.move, 'recover');
+				put(S, st.move, 0);
+				for (let i = 0; i < reps; i++) choices.push(duo('move 1', 'move 1'));
+			} else if (lowHp) {
+				S.level = 100;
+				const atk = strikes(H, 'plain');
+				idleMoves(S, atk);
+				put(S, atk, 0);
+				choices.push(duo('move 1', 'move 1'));
+			} else {
+				idleMoves(S, 'recover');
+			}
+			// the holder leaves: by its choice, or by its own pivot (the request, then the switch)
+			if (kind6c === 'cpivot') choices.push(duo('move 1', teraStep('move 2')), duo(null, 'switch 2'));
+			else choices.push(duo('move 1', 'switch 2'));
+			scenario.choices = choices;
+		} else if (kind6c === 'cdrag') {
+			const ability = holderAbility();
+			setAbility(H, ability); H.item = '';
+			idleHolder(H);
+			const forcer = pick(FORCERS.filter(has));
+			const st = ability === 'naturalcure' && int(100) < 75 ? pickStatus(H) : null;
+			const choices = [teamOf(6, 6)];
+			if (st) {
+				idleMoves(S, st.move, forcer); put(S, st.move, 0); put(S, forcer, 1);
+				for (let i = 0; i < (st.name === 'frz' ? 7 : 1); i++) choices.push(duo('move 1', 'move 1'));
+				choices.push(duo('move 2', 'move 1'));
+			} else {
+				const atk = strikes(H, 'plain');
+				S.level = 100;
+				idleMoves(S, atk, forcer); put(S, atk, 0); put(S, forcer, 1);
+				if (ability === 'regenerator' && int(100) < 70) choices.push(duo('move 1', 'move 1'));
+				choices.push(duo('move 2', 'move 1'));
+			}
+			scenario.choices = choices;
+		} else if (kind6c === 'cfaint') {
+			const ability = holderAbility();
+			setAbility(H, ability); H.item = '';
+			H.level = 1; S.level = 100;
+			idleHolder(H);
+			const st = ability === 'naturalcure' && int(100) < 70 ? pickStatus(H) : null;
+			const atk = strikes(H, 'plain');
+			idleMoves(S, atk, st ? st.move : 'recover'); put(S, atk, 0);
+			const choices = [teamOf(6, 6)];
+			if (st) { put(S, st.move, 1); choices.push(duo('move 2', 'move 1')); }
+			choices.push(duo('move 1', 'move 1'), duo(null, 'switch 2'));
+			scenario.choices = choices;
+		} else if (kind6c === 'cboth') {
+			// a Red Card holder A, and a faster attacker B whose replacement R holds an Eject Button: B's hit drags B out for R, A's hit on R
+			// sets the Eject Button off, in the same turn
+			shrinkTo(sIdx, 2);
+			const R = bench(sIdx, 1);
+			steady(R);
+			S.species = speciesName(pick(bySpeed.slice(-third)));
+			H.species = speciesName(pick(bySpeed.slice(0, third)));
+			S.level = 100; H.level = 100; R.level = 100;
+			setItem(H, 'redcard'); setItem(R, 'ejectbutton'); S.item = '';
+			if (int(100) < 60) setAbility(R, holderAbility());
+			if (int(100) < 40) setAbility(S, holderAbility());
+			const atkS = strikes(H, 'plain'), atkH = strikes(R, 'plain');
+			idleMoves(S, atkS); put(S, atkS, 0);
+			idleMoves(H, atkH); put(H, atkH, 0);
+			scenario.choices = [teamOf(2, 6), duo('move 1', 'move 1'), duo('switch 2', null)];
+		} else {
+			// cplain, cnotarget, cko: a strike into an Eject Button or Red Card holder
+			const card = pick(CARDS);
+			const how = pick(['plain', 'plain', 'pivot', 'forcer']);
+			setItem(H, card); S.item = '';
+			if (int(100) < 50) setAbility(H, holderAbility());
+			if (int(100) < 50) setAbility(S, holderAbility());
+			const koKind = kind6c === 'cko';
+			if (koKind) {
+				H.species = 'Shedinja'; H.level = 100; H.ability = 'No Ability'; S.level = 100;
+			} else gentle();
+			const atk = strikes(H, how);
+			if (how === 'pivot' && atk === 'voltswitch' && !hit('voltswitch', H)) H.species = speciesName(pick(flyingOrNot));
+			idleHolder(H);
+			const st = !koKind && H.ability !== 'No Ability' && abilityIs(H, 'naturalcure') && int(100) < 70 ? pickStatus(H) : null;
+			// a Natural Cure attacker that a Red Card holder statuses first (the strike comes on the second turn): it is dragged out cured
+			const sst = !koKind && !st && card === 'redcard' && abilityIs(S, 'naturalcure') ? pickStatus(S) : null;
+			idleMoves(S, atk, st ? st.move : 'recover'); put(S, atk, 0);
+			if (sst) { put(H, sst.move, 1); S.level = 100; }
+			if (kind6c === 'cnotarget') {
+				// Eject Button needs a switch target on the holder's side, Red Card on the attacker's
+				if (card === 'ejectbutton') shrinkTo(hIdx, 1); else shrinkTo(sIdx, 1);
+			}
+			const choices = [teamOf(scenario.teams[sIdx].length, scenario.teams[hIdx].length)];
+			if (st) { put(S, st.move, 1); const reps = st.name === 'frz' ? 7 : 1; for (let i = 0; i < reps; i++) choices.push(duo('move 2', 'move 1')); }
+			if (sst) { const reps = sst.name === 'frz' ? 7 : 1; for (let i = 0; i < reps; i++) choices.push(duo('move 2', 'move 2')); }
+			choices.push(duo('move 1', teraStep('move 1')));
+			const ejected = card === 'ejectbutton' && !koKind && kind6c !== 'cnotarget' && how !== 'forcer';
+			if (ejected) choices.push(duo(null, 'switch 2'));
+			// a KO: the end-of-turn replacement (after a pivot's own mid-turn request, which comes first)
+			if (koKind) { if (how === 'pivot') choices.push(duo('switch 2', null)); choices.push(duo(null, 'switch 2')); }
+			scenario.choices = choices;
 		}
 		rng = rnd;
 		kind = 'b6';
@@ -509,7 +696,21 @@ function newTally() {
 		dragInFaintedToHazard: 0, dragInWithBoots: 0, dragInFaintedSpeedTie: 0,
 		dragInSetWeather: 0, dragInSetTerrain: 0, dragInSeedUsed: 0, dragInBoosterUsed: 0,
 		dragInProtosynthesis: 0, dragInQuarkDrive: 0, dragInUnburden: 0, dragInBoosted: 0,
+		// 6c: the switch-out effects, by the way the Pokemon left (choice, pivot move, Eject Button, Red Card, a drag by a move)
+		regenHealedBy: z(PATHS), regenFullHp: 0, regenLowHp: 0, regenCapped: 0, regenFainted: 0, regenTera: 0,
+		ncCuredBy: z(PATHS), ncCuredStatus: z(NC_STATUSES), ncNoStatus: 0, ncFaintedWithStatus: 0, ncTera: 0,
+		// Eject Button: used (by the move that hit the holder), and what stopped it
+		ejectUsed: 0, ejectIntoPivot: z(DAMAGING), ejectIntoPlain: 0, ejectClearedPivotFlag: 0, ejectStatusMoveIgnored: 0,
+		ejectNoTarget: 0, ejectHolderKO: 0, ejectForceFlag: z(DAMAGING_FORCERS), ejectTeraHolder: 0,
+		// Red Card
+		redUsed: 0, redIntoPivot: z(DAMAGING), redIntoPlain: 0, redDraggedAttacker: 0, redNoTarget: 0, redHolderKO: 0, redSourceKO: 0,
+		redForceFlag: z(DAMAGING_FORCERS), redStatusMoveIgnored: 0, redTeraHolder: 0,
+		bothItemsSameTurn: 0,
 		// structurally zero
+		// - ncCuredStatus.slp: the engine accepts no move that puts a Pokemon to sleep (Spore, Sleep Powder, Hypnosis ... are not in the
+		//   pool), so Natural Cure never meets a sleeping holder
+		// - ejectBlockedBySwitchFlag: Eject Button also yields to any active Pokemon whose switchFlag is `true`; outside a faint (whose
+		//   replacement is requested before the next action) no flag of that kind survives to a hit
 		// - dragOutDeclined: no supported effect listens to DragOut (Suction Cups, Guard Dog, Ingrain are unsupported), so no hit
 		//   result is false and the drag is never refused
 		// - dragFlaggedTargetNoHp: the flag is set for a target with HP and consumed at the end of the same action, and nothing in
@@ -529,12 +730,14 @@ function newTally() {
 		// - roughSkin: Rough Skin is not a supported ability, so Rocky Helmet is the only contact punisher
 		// - copyvolatile, shedtail (Baton Pass, Shed Tail: banned in gen9ou), revivalblessing, a commanding Tatsugiri
 		partingShotBlockedByAbility: 0, roughSkinFaintedUser: 0, batonPassOrShedTail: 0, revivalBlessing: 0, commandedUser: 0,
-		dragOutDeclined: 0, dragFlaggedTargetNoHp: 0,
+		dragOutDeclined: 0, dragFlaggedTargetNoHp: 0, ejectBlockedBySwitchFlag: 0,
 	};
 }
 
+const PATHS = ['choice', 'pivot', 'eject', 'redcard', 'drag'];
+const NC_STATUSES = ['brn', 'par', 'psn', 'tox', 'slp', 'frz'];
 const STRUCTURAL_ZERO = ['selfSwitchNoTarget.teleport', 'flaggedUserFainted.other', 'midTurnRequestBothSides', 'cancelActionRemovedSomething', 'partingShotBlockedByAbility', 'roughSkinFaintedUser', 'batonPassOrShedTail',
-	'revivalBlessing', 'commandedUser', 'dragOutDeclined', 'dragFlaggedTargetNoHp'];
+	'revivalBlessing', 'commandedUser', 'dragOutDeclined', 'dragFlaggedTargetNoHp', 'ncCuredStatus.slp', 'ejectBlockedBySwitchFlag'];
 
 function install() {
 	if (Battle.prototype.__slice6Instrumented) return;
@@ -849,6 +1052,97 @@ function install() {
 		if (this.battle.field.weather !== weather) c.dragInSetWeather++;
 		if (this.battle.field.terrain !== terrain) c.dragInSetTerrain++;
 		if (item && !pokemon.item && item.endsWith('seed')) c.dragInSeedUsed++;
+		return r;
+	};
+
+	// 6c: switch-outs. The way a Pokemon leaves is told from the state that leads to the switch: a drag (isDrag) after a Red Card is
+	// marked on the attacker, an Eject Button on its holder, a pivot by the source effect's selfSwitch; otherwise a choice.
+	const marks = new WeakMap(); // Pokemon -> { eject, card }
+	const mark = (p) => { let m = marks.get(p); if (!m) { m = { eject: false, card: false }; marks.set(p, m); } return m; };
+	const faint6c = Pokemon.prototype.faint;
+	Pokemon.prototype.faint = function (source, effect) {
+		if (!this.fainted && !this.faintQueued) this.__statusAtFaint = this.status;
+		return faint6c.call(this, source, effect);
+	};
+	const switchIn6c = BattleActions.prototype.switchIn;
+	BattleActions.prototype.switchIn = function (pokemon, pos, sourceEffect, ...rest) {
+		const c = t();
+		const old = pokemon.side.active[pos];
+		if (!c || !old || !old.hp || old === pokemon) {
+			// a faint is no switch-out: a fainted Regenerator or Natural Cure holder is counted when it is replaced
+			if (c && old && !old.hp && old !== pokemon) {
+				if (old.ability === 'regenerator') c.regenFainted++;
+				if (old.ability === 'naturalcure' && old.__statusAtFaint) c.ncFaintedWithStatus++;
+			}
+			return switchIn6c.call(this, pokemon, pos, sourceEffect, ...rest);
+		}
+		const m = mark(old);
+		const path = rest[0] === true ? (m.card ? 'redcard' : 'drag') : m.eject ? 'eject' : (sourceEffect && sourceEffect.selfSwitch === true) ? 'pivot' : 'choice';
+		const hp = old.hp, maxhp = old.maxhp, status = old.status, ability = old.ability, tera = old.terastallized;
+		const r = switchIn6c.call(this, pokemon, pos, sourceEffect, ...rest);
+		m.eject = false; m.card = false;
+		if (ability === 'regenerator') {
+			if (old.hp > hp) {
+				c.regenHealedBy[path]++;
+				if (hp + Math.floor(maxhp / 3) > maxhp) c.regenCapped++;
+				if (hp * 3 <= maxhp) c.regenLowHp++;
+			} else if (hp === maxhp) c.regenFullHp++;
+			if (tera) c.regenTera++;
+		}
+		if (ability === 'naturalcure') {
+			if (status && !old.status) {
+				c.ncCuredBy[path]++;
+				if (c.ncCuredStatus[status] !== undefined) c.ncCuredStatus[status]++;
+			} else if (!status) c.ncNoStatus++;
+			if (tera) c.ncTera++;
+		}
+		return r;
+	};
+	// Eject Button and Red Card: the item event
+	const afterMoveSecondaryEvent = BattleActions.prototype.afterMoveSecondaryEvent;
+	BattleActions.prototype.afterMoveSecondaryEvent = function (targets, pokemon, move) {
+		const c = t();
+		const battle = this.battle;
+		const watched = c ? targets.filter(x => x && (x.item === 'ejectbutton' || x.item === 'redcard')) : [];
+		const before = watched.map(x => ({
+			x, item: x.item, hp: x.hp, force: x.forceSwitchFlag, canSwitch: !!battle.canSwitch(x.side), srcCanSwitch: !!battle.canSwitch(pokemon.side),
+			srcHp: pokemon.hp, srcFlag: pokemon.switchFlag, srcActive: pokemon.isActive, status: move.category === 'Status',
+		}));
+		const r = afterMoveSecondaryEvent.call(this, targets, pokemon, move);
+		for (const b of before) {
+			const used = b.x.item !== b.item;
+			const pivotMove = b.srcFlag === move.id && DAMAGING.includes(move.id) ? move.id : null;
+			if (b.item === 'ejectbutton') {
+				if (used) {
+					c.ejectUsed++;
+					if (pivotMove) { c.ejectIntoPivot[pivotMove]++; if (pokemon.switchFlag === false) c.ejectClearedPivotFlag++; } else c.ejectIntoPlain++;
+					if (b.x.terastallized) c.ejectTeraHolder++;
+					mark(b.x).eject = true;
+					battle.__itemUse = battle.__itemUse || {};
+					if (battle.__itemUse.turn !== battle.turn) battle.__itemUse = { turn: battle.turn };
+					battle.__itemUse.eject = true;
+					if (battle.__itemUse.red) c.bothItemsSameTurn++;
+				} else if (b.status) c.ejectStatusMoveIgnored++;
+				else if (!b.hp) c.ejectHolderKO++;
+				else if (!b.canSwitch) c.ejectNoTarget++;
+				else if (b.force && FORCERS.includes(move.id)) c.ejectForceFlag[move.id]++;
+			} else {
+				if (used) {
+					c.redUsed++;
+					if (pivotMove) c.redIntoPivot[pivotMove]++; else c.redIntoPlain++;
+					if (b.x.terastallized) c.redTeraHolder++;
+					if (pokemon.forceSwitchFlag) { c.redDraggedAttacker++; mark(pokemon).card = true; }
+					battle.__itemUse = battle.__itemUse || {};
+					if (battle.__itemUse.turn !== battle.turn) battle.__itemUse = { turn: battle.turn };
+					battle.__itemUse.red = true;
+					if (battle.__itemUse.eject) c.bothItemsSameTurn++;
+				} else if (b.status) c.redStatusMoveIgnored++;
+				else if (!b.hp) c.redHolderKO++;
+				else if (!b.srcHp) c.redSourceKO++;
+				else if (!b.srcCanSwitch) c.redNoTarget++;
+				else if (b.force && FORCERS.includes(move.id)) c.redForceFlag[move.id]++;
+			}
+		}
 		return r;
 	};
 

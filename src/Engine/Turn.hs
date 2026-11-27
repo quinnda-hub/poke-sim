@@ -435,15 +435,15 @@ switchIn dx how p target = do
         -- runPursuitActivation(oldActive): eachEvent('Update') (the BeforeSwitchOut event has no handlers). It returns at once for a
         -- Pokemon whose `skipPursuit` is set, which a flagged one has ('switchRequests'): not for an instaswitch
         when (how == HowSwitch) (eachEvent dx EvUpdate)
-        -- battle-actions.ts 100: `if (!this.battle.runEvent('SwitchOut', oldActive)) return false` (no handler exists today: Regenerator
-        -- and Natural Cure are 6c; custom formats are the only thing that can refuse)
+        -- battle-actions.ts 100: `if (!this.battle.runEvent('SwitchOut', oldActive)) return false` (Regenerator and Natural Cure listen,
+        -- neither refuses; custom formats are the only thing that can)
         void (runEvent dx EvSwitchOut o Nothing Nothing RNone)
         -- singleEvent('End', oldActive.getAbility(), ...) and singleEvent('End', oldActive.getItem(), ...) (battle-actions.ts
         -- 142-143: Protosynthesis, Quark Drive and Unburden remove their volatile)
         endAbilityAndItem dx o
         -- queue.cancelAction(oldActive) (battle-actions.ts 124-127: a Pokemon forced out or switching by its own move cannot use its
-        -- chosen move; the actions it still has queued go, except a runSwitch); oldActive.clearVolatile() (resets the stat stages, the volatiles and the cached speed; the status, and toxic's stage, stay)
-        modify' (\b -> modifyMon o (\m -> m {monSpeed = stSpe (monStats m), monBoosts = noBoosts, monVolatiles = SV.empty, monAbility = monBaseAbility m, monForceSwitchFlag = False}) b {bQueue = cancelAction o (bQueue b)})
+        -- chosen move; the actions it still has queued go, except a runSwitch); oldActive.clearVolatile() (resets the stat stages, the volatiles, both switch flags (`includeSwitchFlags`, pokemon.ts 1530, 1558-1561: a U-turn user dragged out by Red Card keeps none) and the cached speed; the status, and toxic's stage, stay)
+        modify' (\b -> modifyMon o (\m -> m {monSpeed = stSpe (monStats m), monBoosts = noBoosts, monVolatiles = SV.empty, monAbility = monBaseAbility m, monSwitchFlag = NoSwitch, monForceSwitchFlag = False}) b {bQueue = cancelAction o (bQueue b)})
       _ -> pure ()
     case old of
       Just o -> do

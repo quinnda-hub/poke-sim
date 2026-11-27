@@ -1282,6 +1282,48 @@ runNative dx n c relay = do
     NTeleportTry -> keep
     NPartingShotHit -> keep
     NChillyReceptionCharge -> keep
+    -- regenerator.onSwitchOut(pokemon): `pokemon.heal(pokemon.baseMaxhp / 3)`. Pokemon.heal (pokemon.ts 1662-1672), not battle.heal: no
+    -- TryHeal or Heal event. It needs HP, truncates the amount and does nothing at full HP ('healMon')
+    NRegeneratorSwitchOut -> modify' (healMon holder (monMaxHp m `quot` 3)) >> keep
+    -- naturalcure.onSwitchOut(pokemon): `if (!pokemon.status) return; ... pokemon.clearStatus()` (pokemon.ts 1777: needs HP and a
+    -- status; setStatus('') runs no End event, and the sleep's Nightmare is not supported)
+    NNaturalCureSwitchOut -> modify' (cureStatus holder) >> keep
+    -- ejectbutton.onAfterMoveSecondary(target, source, move) (items.ts 1692-1716)
+    -- LATENT: `!move.flags.futuremove` is not checked, because no future move (Future Sight, Doom Desire) is accepted yet; add it with them
+    NEjectButtonAfterMoveSecondary -> do
+      b <- get
+      case (cSource c, cMove c) of
+        (Just src, Just mv)
+          | src /= holder, monHp m > 0, not (mvStatus mv)
+          , canSwitch b (playerOf holder) > 0
+          , not (monForceSwitchFlag m)
+          , not (any anySwitchForced [P1, P2]) -> do
+              -- `target.switchFlag = true; if (target.useItem()) source.switchFlag = false; else target.switchFlag = false`
+              modify' (modifyMon holder (\x -> x {monSwitchFlag = SwitchForced}))
+              used <- useItem dx holder (Just (cKey c))
+              if used
+                then modify' (modifyMon src (\x -> x {monSwitchFlag = NoSwitch}))
+                else modify' (modifyMon holder (\x -> x {monSwitchFlag = NoSwitch}))
+              keep
+          where
+            -- `for (const pokemon of this.getAllActive()) if (pokemon.switchFlag === true) return` (unfainted active Pokemon)
+            anySwitchForced p = sHasActive (sideOf p b) && let a = monOf b (activeActor p b) in not (monFainted a) && monSwitchFlag a == SwitchForced
+        _ -> keep
+    -- redcard.onAfterMoveSecondary(target, source, move) (items.ts 5170-5188)
+    NRedCardAfterMoveSecondary -> do
+      b <- get
+      case (cSource c, cMove c) of
+        (Just src, Just mv)
+          | src /= holder, let sm = monOf b src, monHp sm > 0, monHp m > 0, not (mvStatus mv)
+          , monActive sm, canSwitch b (playerOf src) > 0
+          , not (monForceSwitchFlag sm), not (monForceSwitchFlag m) -> do
+              -- the item is used up even when the attacker cannot be forced out; then `runEvent('DragOut', source, target, move)`
+              used <- useItem dx holder (Just (cKey c))
+              when used $ do
+                r <- runEvent dx EvDragOut src (Just holder) (Just mv) RNone
+                when (relayTruthy r) (modify' (modifyMon src (\x -> x {monForceSwitchFlag = True})))
+              keep
+        _ -> keep
     -- leftovers.onResidual: this.heal(pokemon.baseMaxhp / 16); battle.heal turns an amount in (0, 1] into 1 and
     -- truncates, so the amount is floor(maxhp / 16), at least 1
     NLeftovers -> modify' (healMon holder (max 1 (monMaxHp m `quot` 16))) >> keep
@@ -1292,9 +1334,10 @@ runNative dx n c relay = do
     -- lifeorb.onAfterMoveSecondarySelf(source, target, move): `source && source !== target && move &&
     -- move.category !== 'Status' && !source.forceSwitchFlag` -> this.damage(source.baseMaxhp / 10, source, source,
     -- lifeorb); the holder is the user, and the move category is never Status where the event is run (a
-    -- damaging move); forceSwitchFlag cannot be set (no force-switch moves)
+    -- damaging move). A Red Card on the target sets the user's forceSwitchFlag (slice 6c) before this event runs, and
+    -- then no recoil is taken: the user is dragged out at the action tail
     NLifeOrbRecoil
-      | Just mv <- cMove c, not (mvStatus mv), cSource c /= Just holder ->
+      | Just mv <- cMove c, not (mvStatus mv), cSource c /= Just holder, not (monForceSwitchFlag m) ->
           modify' (applyDamage holder (max 1 (monMaxHp m `quot` 10))) >> keep
       | otherwise -> keep
     -- rockyhelmet.onDamagingHit(damage, target, source, move): `this.checkMoveMakesContact(move, source, target)`

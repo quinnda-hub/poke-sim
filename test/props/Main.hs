@@ -61,7 +61,7 @@ main = do
   H.defaultMain
     [ checkSequential $ Group "engine"
         [ ("random playouts keep the decision-point and state invariants", withTests (fromIntegral n) (playouts dex))
-        , ("random playouts over teams heavy in self-switch moves, Rocky Helmet and Shedinja keep the invariants, switch flags and mid-turn requests included",
+        , ("random playouts over teams heavy in self-switch moves, Rocky Helmet, Shedinja, Regenerator, Natural Cure, Eject Button and Red Card keep the invariants, switch flags and mid-turn requests included",
             withTests (fromIntegral n) (pivotPlayouts dex))
         , ("bad input is rejected without draws", withTests (fromIntegral n) (badInput dex))
         , ("every move translates to Right or Left and supported moves are executable",
@@ -121,8 +121,8 @@ playouts dex = property $ do
       Finished _ -> success
       Awaiting {} -> footnote "playout ended without a result" >> failure
 
--- | 'playouts' over 'genPivotTeams': the switch-flag invariants of 'checkBattle' and the mid-turn ones of 'checkStep' (slice 6a), and the
--- force-switch ones (slice 6b), are checked at every state and step, and these teams reach the requests and drags they are about at every
+-- | 'playouts' over 'genPivotTeams': the switch-flag invariants of 'checkBattle' and the mid-turn ones of 'checkStep' (slice 6a), the
+-- force-switch ones (slice 6b) and the switch-out ones (slice 6c: Regenerator, Natural Cure, Eject Button, Red Card), are checked at every state and step, and these teams reach the requests and drags they are about at every
 -- few turns (the coverage statement fails the property if they stop doing so).
 pivotPlayouts :: Dex -> Property
 pivotPlayouts dex = property $ do
@@ -130,8 +130,12 @@ pivotPlayouts dex = property $ do
   seed <- forAll (Gen.word64 Range.linearBounded)
   case fst (runSample (mkSMGen seed) (playChecked dex t1 t2)) of
     Left e -> footnote e >> failure
-    Right (b, drags) -> do
-      cover 10 "a forced switch (drag) happened" (drags > 0)
+    Right (b, seen) -> do
+      cover 10 "a forced switch (drag) happened" (seenDrags seen > 0)
+      cover 5 "a Regenerator holder below max HP switched out" (seenRegen seen > 0)
+      cover 2 "a statused Natural Cure holder switched out" (seenCure seen > 0)
+      cover 2 "an Eject Button was used" (seenEject seen > 0)
+      cover 3 "a Red Card was used" (seenRedCard seen > 0)
       case request b of
         Finished _ -> success
         Awaiting {} -> footnote "playout ended without a result" >> failure
