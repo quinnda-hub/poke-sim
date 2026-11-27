@@ -127,8 +127,7 @@ data EventId
   -- damaged target after @DamagingHit@, while the user has HP. Only a move's own handler is supported.
   | EvAfterSubDamage
   -- ^ The move's @onAfterSubDamage@: Showdown runs it where a hit lands on a Substitute (@singleEvent('AfterSubDamage', ...)@ in
-  -- substitute's @onTryPrimaryHit@, data/moves.ts 18375). Substitute is not supported, so it is never run; it is an event only so
-  -- that the handlers of Rapid Spin and its kin parse.
+  -- substitute's @onTryPrimaryHit@, data/moves.ts 18375), then @runEvent('AfterSubDamage', target, source, move, damage)@ (18376).
   | EvTryImmunity
   -- ^ @singleEvent('TryImmunity', move, {}, target, pokemon, move)@ in @hitStepTryImmunity@ (battle-actions.ts 739): the move's
   -- own @onTryImmunity@ (Trick, Switcheroo), whose falsy result makes the target immune. Only a move's own handler is supported.
@@ -171,6 +170,11 @@ data EventId
   | EvOverrideAction
   -- ^ @runEvent('OverrideAction', pokemon, target, baseMove)@ at the head of @runMove@ (battle-actions.ts 278-287), for every move but
   -- Struggle: a handler returns the id of the move to use instead (Encore). The relay value is the id (@RText@), or @true@ (@RNone@).
+  -- slice 7b
+  | EvTryPrimaryHit
+  -- ^ @runEvent('TryPrimaryHit', target, pokemon, moveData)@ in @tryPrimaryHitEvent@ (battle-actions.ts 1197-1205), step 0 of
+  -- @spreadMoveHit@ (1115-1119) for a hit that is neither secondary nor on the user: its result is the damage array's entry.
+  -- Only the Substitute volatile listens (priority -1).
   deriving (Eq, Show, Enum, Bounded)
 
 -- | How @runEvent@ orders the handlers of an event (battle.ts 797-803).
@@ -273,6 +277,8 @@ eventName e = case e of
   EvDamage -> "Damage"
   -- slice 7c
   EvOverrideAction -> "OverrideAction"
+  -- slice 7b
+  EvTryPrimaryHit -> "TryPrimaryHit"
 
 -- | Which Pokemon a handler reacts to: the holder (@onX@), its allies (@onAllyX@), its foes (@onFoeX@), the
 -- source of the event (@onSourceX@) or anyone (@onAnyX@).
@@ -320,6 +326,8 @@ data CondId = CBrn | CPar | CPsn | CTox | CFrz | CFlinch | CProtosynthesis | CQu
   | CChoiceLock
   -- slice 7c
   | CEncore | CTaunt
+  -- slice 7b
+  | CSubstitute
   deriving (Eq, Show, Enum, Bounded)
 
 -- | The key of the condition in @conditions.json@ (data/conditions.ts).
@@ -348,6 +356,8 @@ condName c = case c of
   -- slice 7c
   CEncore -> "encore"
   CTaunt -> "taunt"
+  -- slice 7b
+  CSubstitute -> "substitute"
 
 -- | The condition with a key of @conditions.json@ (or a move's own volatile).
 condByName :: T.Text -> Maybe CondId
@@ -626,8 +636,8 @@ data NativeId
   -- ^ ceaselessedge @onAfterHit@: Spikes on the foe's side.
   | NStoneAxeAfterHit
   -- ^ stoneaxe @onAfterHit@: Stealth Rock on the foe's side.
-  | NInertAfterSubDamage
-  -- ^ The @onAfterSubDamage@ of the moves above: it runs only where a hit lands on a Substitute, which is not modelled.
+  | NAfterSubDamage
+  -- ^ The @onAfterSubDamage@ of the moves above: it runs where a hit lands on a Substitute ('Engine.Dispatch.moveAfterSubDamage').
   | NDefogHit
   | NTidyUpHit
   | NClearSmogHit
@@ -713,6 +723,18 @@ data NativeId
   -- ^ taunt @condition.onBeforeMove@: a Status move other than Me First fails.
   | NTauntDisable
   -- ^ taunt @condition.onDisableMove@: every Status move other than Me First is disabled.
+  -- slice 7b
+  | NSubstituteTryHit
+  -- ^ substitute @onTryHit@ (data/moves.ts 18321-18330): fails (NOT_FAIL) with a Substitute already, or with HP at most a quarter of
+  -- the maximum, or a maximum of 1.
+  | NSubstituteHit
+  -- ^ substitute @volatileStatus@ then @onHit@ (runMoveEffects adds the volatile, then @directDamage(target.maxhp / 4)@).
+  | NSubstituteStart
+  -- ^ substitute @condition.onStart@: @effectState.hp = floor(target.maxhp / 4)@ (the state's 'esA').
+  | NSubstituteTryPrimaryHit
+  -- ^ ESCAPE HATCH: substitute. @condition.onTryPrimaryHit@, the test only: the hit is the Substitute's (a result of @HIT_SUBSTITUTE@, 0)
+  -- unless the user is the target or the move has @bypasssub@ or @infiltrates@; a status move fails (the @getDamage@ of a move with no
+  -- base power is undefined, @null@ here). The damage is 'Engine.Turn.hitSubstitute', where @getDamage@ lives.
   deriving (Eq, Show)
 
 -- | The body of each handler the engine implements (written by hand: Showdown's handlers are code). A condition
@@ -777,6 +799,10 @@ nativeBody c POwn e = BNative <$> case (c, e) of
   (CTaunt, EvEnd) -> Just NLogOnly
   (CTaunt, EvDisableMove) -> Just NTauntDisable
   (CTaunt, EvBeforeMove) -> Just NTauntBeforeMove
+  -- slice 7b. substitute (data/moves.ts 18311-18381): onStart sets the hp, onTryPrimaryHit is the escape hatch, onEnd only logs
+  (CSubstitute, EvStart) -> Just NSubstituteStart
+  (CSubstitute, EvTryPrimaryHit) -> Just NSubstituteTryPrimaryHit
+  (CSubstitute, EvEnd) -> Just NLogOnly
   (_, EvModifyAtk) | paradox c -> Just NParadoxAtk
   (_, EvModifyDef) | paradox c -> Just NParadoxDef
   (_, EvModifySpA) | paradox c -> Just NParadoxSpA

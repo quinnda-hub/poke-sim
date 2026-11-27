@@ -72,7 +72,9 @@ genTeamsWith dx pivotHeavy = (,) <$> genTeam <*> genTeam
     -- slice 7c: Encore and Taunt, with the status moves they stop and the pivots that switch an encored or taunted Pokemon out
     encoreKit = [m | m <- ["encore", "taunt"], m `elem` moves]
     -- the step-4 kits (slice 7): each one that is supported joins the pivot-heavy mix with weight 3
-    step4Kits = [(3, Gen.element k) | k <- [protectKit, punches, encoreKit], not (null k)]
+    -- slice 7b: Substitute with the moves that meet one (multi-hit, recoil, drain, secondaries and self drops, pivots and forcers are in the others)
+    substituteKit = [m | m <- ["substitute", "substitute", "armthrust", "doubleedge", "drainpunch", "closecombat", "rapidspin"], m `elem` moves]
+    step4Kits = [(3, Gen.element k) | k <- [protectKit, punches, encoreKit], not (null k)] ++ [(5, Gen.element substituteKit) | not (null substituteKit)] -- (slice 7b: its own weight)
     pickMove
       | pivotHeavy && not (null step4Kits) && not (null pivots) && not (null dragKit) =
           Gen.frequency ([(3, Gen.element pivots), (3, Gen.element dragKit), (2, Gen.element moves)] ++ step4Kits)
@@ -170,6 +172,11 @@ data Seen = Seen
   -- ^ a step that ends at a move request with an active Pokemon encored
   , seenTaunt :: !Int
   -- ^ the same with an active Pokemon taunted
+  -- slice 7b
+  , seenSub :: !Int
+  -- ^ a Pokemon in play before and after the step that had no Substitute before and has one after
+  , seenSubHit :: !Int
+  -- ^ a Pokemon in play before and after the step with a Substitute at both ends, whose HP went down
   }
   deriving (Eq, Show)
 
@@ -193,6 +200,9 @@ instance Semigroup Seen where
       -- slice 7c
       , seenEncore = f seenEncore
       , seenTaunt = f seenTaunt
+      -- slice 7b
+      , seenSub = f seenSub
+      , seenSubHit = f seenSubHit
       }
     where
       f g = g x + g y
@@ -216,6 +226,9 @@ instance Monoid Seen where
       -- slice 7c
       , seenEncore = 0
       , seenTaunt = 0
+      -- slice 7b
+      , seenSub = 0
+      , seenSubHit = 0
       }
 
 -- | Play with random legal choices, checking every state on the way, until the battle ends (or the cap).
@@ -322,9 +335,14 @@ checkStep dx b b' (c1, c2) = (mappend stallSeen <$>) $ mapM_ one [(p, i) | (p, s
           , seenRedCard = fromEnum carded
           , seenPack = fromEnum packed
           , seenPackIn = fromEnum (packed && not (monActive m0))
+          -- slice 7b
+          , seenSub = fromEnum (monActive m0 && monActive m1 && monHp m1 > 0 && not (subOf m0) && subOf m1)
+          , seenSubHit = fromEnum (monActive m0 && monActive m1 && subOf m0 && subOf m1 && subHp m1 < subHp m0)
           }
       _ -> Right mempty
     isSwitch c = case c of Just (Switch _) -> True; _ -> False
+    subOf m = any (\(Volatile i _) -> i == fromEnum CSubstitute) (SV.toList (monVolatiles m))
+    subHp m = sum [esA st | Volatile i st <- SV.toList (monVolatiles m), i == fromEnum CSubstitute]
     otherP p = if p == P1 then P2 else P1
     drag (p, c) = do
       let s = sideOf p b
@@ -563,6 +581,10 @@ checkBattle dx b = do
             -- the Pokemon's own slots. taunt: 3 or 4 turns.
             | i == fromEnum CEncore = esDuration st >= 1 && esDuration st <= 4 && any ((== esA st) . msMove) (monMoves m)
             | i == fromEnum CTaunt = esDuration st >= 1 && esDuration st <= 4
+            -- substitute (slice 7b): only an active Pokemon with HP has one, it has no duration, and its HP is in 1..floor(maxhp / 4): it
+            -- starts at the quarter (onStart) and the cost of making it leaves the holder with more than that, and a hit takes it down
+            -- to 0, where it goes
+            | i == fromEnum CSubstitute = monActive m && not (monFainted m) && monHp m > 0 && esDuration st == 0 && esA st >= 1 && esA st <= monMaxHp m `quot` 4
             | otherwise = False
           -- a live Pokemon flagged to switch out (a pivot's or an Eject Button's switch request) means the turn is not over
           -- (a battle that ends mid-turn, on Spiky Shield's damage for one, never reaches the Residual that removes them)

@@ -173,6 +173,10 @@ data MoveRule = MoveRule
   -- slice 7c
   , mrFailEncore :: !Bool
   -- ^ @flags.failencore@: Encore's @onStart@ fails when the target's last move has it (data/moves.ts 4750).
+  -- slice 7b
+  , mrBypassSub :: !Bool
+  -- ^ @flags.bypasssub@ (every sound move, Defog, Roar, Taunt, ...): the Substitute's @onTryPrimaryHit@ lets the move through
+  -- (data/moves.ts 18349). @move.infiltrates@ does the same; no supported effect sets it.
   }
   deriving (Eq, Show)
 
@@ -208,6 +212,8 @@ plainRule = MoveRule
   , mrForceSwitch = False
   -- slice 7c
   , mrFailEncore = False
+  -- slice 7b
+  , mrBypassSub = False
   }
 
 -- | The part of the vocabulary the engine can run in the current phase (phases 1 to 3: HP effects, stat stages
@@ -311,7 +317,7 @@ inertFlags =
   , ("bullet", "read by Bulletproof only")
   , ("pulse", "read by Mega Launcher only")
   , ("wind", "read by Wind Rider and Wind Power only")
-  , ("sound", "read by Soundproof, and sound moves ignoring Substitute; neither exists")
+  , ("sound", "read by Soundproof only (a sound move ignores Substitute by its bypasssub flag)")
   , ("distance", "only matters for the target choice in triples")
   , ("allyanim", "animation hint")
   , ("noassist", "read by Assist, which is rejected")
@@ -327,7 +333,6 @@ inertFlags =
   , ("nonsky", "only blocks hitting a Pokemon held by Sky Drop, which is rejected")
   , ("heal", "only blocked by Heal Block, which is rejected")
   , ("reflectable", "read by Magic Bounce and Magic Coat only")
-  , ("bypasssub", "only matters with a Substitute, which is rejected")
   , ("minimize", "only matters against a Pokemon that used Minimize, which is rejected")
   , ("gravity", "only matters under Gravity, which is rejected")
   , ("mustpressure", "read by getMoveTargets for Pressure only (DeductPP), and no Pressure exists")
@@ -497,6 +502,8 @@ moveRule condOf ownRejected (Object o) = do
     , mrForceSwitch = forceSwitch
     -- slice 7c
     , mrFailEncore = "failencore" `elem` flags
+    -- slice 7b
+    , mrBypassSub = "bypasssub" `elem` flags
     }
   where
     -- a flag that is true or absent
@@ -527,7 +534,7 @@ moveRule _ _ _ = Left "move is not an object"
 
 -- | The moves whose top-level @volatileStatus@ is their own id and is translated (slice 7a).
 ownVolatileMoves :: [T.Text]
-ownVolatileMoves = ["protect", "spikyshield", "banefulbunker", "endure", "encore", "taunt" {- slice 7c -}]
+ownVolatileMoves = ["protect", "spikyshield", "banefulbunker", "endure", "encore", "taunt" {- slice 7c -}, "substitute" {- slice 7b -}]
 
 -- | A key of the move is accounted for. @condition@ is the block of the field condition that the move's
 -- @sideCondition@, @weather@, @terrain@ or @pseudoWeather@ names; it is translated into the condition table.
@@ -546,6 +553,7 @@ checkFlag f
   | f == "powder" = Right () -- translated: 'mrPowder'
   | f == "protect" = Right () -- translated: 'mrProtect'
   | f == "failencore" = Right () -- translated: 'mrFailEncore' (slice 7c)
+  | f == "bypasssub" = Right () -- translated: 'mrBypassSub' (slice 7b)
   | Just _ <- lookup f inertFlags = Right ()
   | otherwise = Left ("not modelled: flag " <> f)
 

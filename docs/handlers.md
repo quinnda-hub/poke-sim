@@ -1070,7 +1070,111 @@ Protect, Spiky Shield, Baneful Bunker and Endure are accepted, with the `stall` 
 
 ### 7b findings
 
-(to be written by 7b)
+Substitute is accepted. Its set is `local/traces/slice7b` (1000 battles).
+
+What the code does, in Showdown's order:
+
+- `spreadMoveHit` step 0 (battle-actions.ts 1115-1119) runs
+  `runEvent('TryPrimaryHit')` for a hit that is not secondary and not on the
+  user. The engine runs it in `hitMove` (damaging moves) and `statusMoveHit`
+  (status moves on the foe). `EvTryPrimaryHit` is the new event; only the
+  Substitute volatile listens.
+- The volatile's HP is the state's `esA`. `onStart` sets it to
+  `floor(maxhp / 4)`. A Substitute has no duration.
+- The test is `NSubstituteTryPrimaryHit` (Dispatch.hs). It lets the move
+  through when the target is the user or the move has `bypasssub`
+  (`mrBypassSub`, now live and off the inert list). `infiltrates` is
+  LATENT: no accepted ability or move sets it (Infiltrator, Pollen Puff
+  and Present are not accepted).
+- The damage is `hitSubstitute` (Turn.hs), because `getDamage` lives there:
+  `getDamage` as usual (crit and random draws), capped at the Substitute's
+  HP, taken off it. At 0 the volatile goes.
+- Recoil is `max 1 (round (damage * n / d))` of the capped damage, taken at
+  once. Struggle's is a quarter of max HP. Drain heals
+  `ceil (damage * n / d)`: the Substitute path rounds up, where
+  `spreadDamage` rounds.
+- The hit loop's total counts only hits on the Pokemon, so each hit on a
+  Substitute has its own recoil, and a Struggle whose last hit was on a
+  Substitute takes no second recoil.
+- A status move on the foe finds `getDamage` undefined and fails (`-fail`).
+  Its result is `null`, not `false`, so the hit loop still counts the hit:
+  the Update events run and the move counts as succeeded.
+- The cost: `substitute.onTryHit` fails with a Substitute already, with
+  `hp <= maxhp / 4` (`4 * hp <= maxhp`), or with a max HP of 1. Then
+  `runMoveEffects` adds the volatile before `onHit` pays
+  `directDamage(maxhp / 4)`: floor, at least 1, no Damage event. Both are
+  in `NSubstituteHit`.
+
+What a hit on a Substitute skips, and what it keeps (spreadMoveHit leaves
+a null target after `HIT_SUBSTITUTE`):
+
+- Skipped: the target's damage (spreadDamage gives 0), every
+  `runMoveEffects` step on the target (onHit, status, boosts, items taken),
+  the force switch (`target &&`), `DamagingHit` (Rocky Helmet, frz),
+  `onAfterHit` (Knock Off, Thief, Rapid Spin's own), `EmergencyExit`, and
+  `AfterMoveSecondary` when the last hit was on a Substitute (the target
+  array is empty: Eject Button and Red Card do not act).
+- Kept: `onAfterSubDamage` (Rapid Spin, Mortal Spin, Ice Spinner,
+  Ceaseless Edge, Stone Axe: their `onAfterHit` body behind `source.hp`),
+  the `selfSwitch` flag (U-turn, Volt Switch and Flip Turn still switch:
+  the damage is 0, a number, so the hit "did something"), the self drops
+  (the `random(100)` and the drop), and the secondaries: the roll is
+  drawn, the effect on the target is lost, a `secondary.self` still
+  applies.
+- Defog's evasion drop needs no Substitute on the target. Tidy Up removes
+  every active Substitute and counts it as a success. Brick Break's screen
+  shatter runs before the Substitute (the `TryHit` of the move comes first).
+- Moves with `bypasssub` (sound moves, Defog, Roar, Whirlwind, Parting
+  Shot, Confide, Growl, Haze ...) act on a Substitute holder as usual.
+- No accepted item or ability tests `volatiles['substitute']` (the berries,
+  Disguise, Ice Face, Intimidate, Air Balloon are not accepted), so none
+  has code.
+
+Properties (test/props): every Substitute has an active holder with HP, no
+duration and HP in 1..floor(maxhp / 4) (`checkBattle`); `substituteCost`
+(a use in isolation costs exactly a quarter and leaves a Substitute of that
+size, a failed one changes nothing; the foe switches so that nothing else
+hits the user, and the case is dropped when a status, an item, weather or
+terrain could change its HP); the pivot-heavy playouts now carry Substitute,
+and must make and hit Substitutes often (`cover`). A step-level "HP drops by
+exactly a quarter" is not stated for ordinary playouts: the user's HP also
+moves with residuals, drain, recoil and other hits in the same step.
+
+What the escape hatch does that no rule could:
+
+- It answers a hit with a different target: the later steps of the hit read
+  a null target (`HIT_SUBSTITUTE`), which no rule slot expresses.
+- It runs `getDamage` (with its draws) from inside an event handler and
+  caps the result at state held by the target's volatile.
+- It computes recoil and drain from that capped damage, and a different
+  rounding for drain, outside the hit loop's total.
+- It keeps some later steps (self drops, selfSwitch flag, secondary draws)
+  and drops others (force switch, `DamagingHit`, `onAfterHit`,
+  `AfterMoveSecondary`).
+- It makes a status move fail through `getDamage`'s undefined, with a hit
+  that still counts.
+- One volatile start adds a volatile and pays HP in a fixed order.
+
+The escape hatch is in two places: the test (a `NativeId` body, so the
+event is real) and the damage (`hitSubstitute`, in Turn.hs, because
+`getDamage` is there and Dispatch cannot import it).
+
+Interactions with the other step-4 phases (checked against the stacked
+sets; no new traces):
+
+- 7a: Protect, Spiky Shield and Baneful Bunker block in the hit steps
+  (`TryHit`, priority 3), before the first `spreadMoveHit`, so before
+  `TryPrimaryHit`: a blocked move never reaches a Substitute. Endure's
+  `Damage` event runs only in `hitTarget`: a hit on a Substitute is not
+  `spreadDamage`, so Endure does not act on it.
+- 7c: Encore and Taunt are `bypasssub`; they reach a Substitute holder.
+- 7d: Sucker Punch and Thunderclap are damaging moves; their `onTry` runs
+  before the hit, and a hit on a Substitute is as any other.
+- 7e: a Choice-locked attacker locks on the move in use whatever it hits;
+  Trick and Thief on a Substitute fail or are skipped as above.
+- Substitute is `[EOwnVolatile, EOwnHit]` on the user, like the protect
+  family: the volatile is added, then `onHit` pays the cost; `onTryHit`
+  (`moveStatusTryHit`) runs first, after `PrepareHit`.
 
 ### 7c findings
 
