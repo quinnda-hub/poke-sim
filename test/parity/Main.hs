@@ -11,37 +11,35 @@ import Control.Concurrent.MVar (MVar, modifyMVar, newEmptyMVar, newMVar, putMVar
 import Control.Exception (SomeException, evaluate, throwIO, try)
 import Control.Monad (filterM, forM, forM_, replicateM, replicateM_, when)
 import Data.Aeson (Value (..), eitherDecodeFileStrict')
+import qualified Data.ByteString.Lazy as BL
 import qualified Data.Aeson.Key as K
 import qualified Data.Aeson.KeyMap as KM
 import Data.Char (isDigit)
 import Data.IORef
-import Data.List (nub, sort)
+import Data.List (isSuffixOf, nub, sort)
 import Data.Maybe (fromMaybe)
-import Data.Scientific (toBoundedInteger)
+import qualified Data.Map.Strict as M
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Vector as V
-import qualified Data.Vector.Strict as SV
-import qualified Data.Vector.Unboxed as U
 import System.Directory (doesDirectoryExist, doesFileExist, listDirectory)
 import GHC.Conc (getNumProcessors)
 import System.Environment (lookupEnv)
 import System.Exit (exitFailure)
-import System.FilePath (takeDirectory, takeFileName, (</>))
+import System.FilePath (dropExtension, takeDirectory, takeFileName, (</>))
 import System.IO (hFlush, hPutStrLn, stderr)
 
 import Engine
 import Engine.Chance
-import Engine.Damage (monTypes)
 import Engine.Dex
-import Engine.Event (condName)
 import Engine.State
 
+import Compare
+import CrossCheck
+import Trace
+import Trace.V2
 -- | A parity failure: where it happened, turn, draw index, message.
 data Failure = Failure String (Maybe Int) Int String
-
--- | A difference between expected (trace) and actual (engine) values: field path, expected, actual.
-type Diff = (String, String, String)
 
 main :: IO ()
 main = do
@@ -78,9 +76,20 @@ main = do
   checkPool "ability" (supportedAbilities dex) [(set, as) | (set, _, _, as, _) <- lists]
   checkPool "item" (supportedItems dex) [(set, is) | (set, _, _, _, is) <- lists]
   counts <- newIORef []
+  crossOn <- (== Just "1") <$> lookupEnv "POKESIM_PARITY_CROSSCHECK"
+  mutateEvery <- maybe 25 read <$> lookupEnv "POKESIM_PARITY_CROSSCHECK_EVERY"
+  stats <- newMutStats
   work <- fmap concat $ forM sets $ \set -> do
     names <- listDirectory (root </> set)
-    let files = sort [root </> set </> n | n <- names, isTraceName n]
+    let jsons = [n | n <- names, isTraceName ".json" n]
+        packed = [n | n <- names, isTraceName ".trace" n]
+    when (not (null jsons) && not (null packed)) $ do
+      hPutStrLn stderr
+        ("parity: trace set " ++ show set ++ " holds both v1 .json traces (" ++ show (length jsons) ++ ") and v2 .trace traces ("
+          ++ show (length packed) ++ "); a set must hold one format")
+      exitFailure
+    -- sorted by name without its extension, so the fast tier samples the same traces in either format
+    let files = [root </> set </> n | (_, n) <- sort [(dropExtension n, n) | n <- jsons ++ packed]]
     when (null files) $ do
       hPutStrLn stderr ("parity: trace set " ++ show set ++ " has no traces")
       exitFailure
@@ -92,7 +101,7 @@ main = do
   -- the results, and any failure messages, come back in the same order as a sequential run.
   jobs <- parityJobs
   putStrLn ("parity: checking traces on " ++ show jobs ++ " thread(s)")
-  results <- inOrder jobs (\(_, f) -> runFile dex f) work $ \(set, f) (r, used) -> do
+  results <- inOrder jobs (\(ix, (_, f)) -> runFile dex (if crossOn then Just (stats, ix `mod` mutateEvery == 0) else Nothing) f) (zip [0 :: Int ..] work) $ \(_, (set, f)) (r, used) -> do
     case r of
       Left e -> do
         hPutStrLn stderr (render f e)
@@ -120,6 +129,11 @@ main = do
         ++ " species, " ++ show (Set.size usedAbilities) ++ " abilities and " ++ show (Set.size usedItems)
         ++ " items used by the traces' teams")
       pure (all null [unusedMoves, unusedSpecies, unusedAbilities, unusedItems])
+  when crossOn $ do
+    m <- readIORef stats
+    putStrLn ("parity: cross-check mutations applied (mutating every " ++ show mutateEvery ++ "th trace): "
+      ++ show (sum (M.elems m)) ++ " in all")
+    forM_ (M.toList m) $ \(n, c) -> putStrLn ("  " ++ show c ++ "\t" ++ n)
   forM_ sets $ \set -> do
     let rs = [r | (s, r, _) <- results, s == set]
         oks = [x | Right x <- rs]
@@ -142,10 +156,11 @@ main = do
     putStrLn "parity: trace coverage FAILED"
     exitFailure
   where
-    -- traces are named <profile>-<seed>.json; the list files (slice0-moves.json, ...) are not traces
-    isTraceName n = case reverse n of
-      ('n' : 'o' : 's' : 'j' : '.' : c : _) -> isDigit c
-      _ -> False
+    -- traces are named <profile>-<seed>.json (v1) or <profile>-<seed>.trace (v2); the list files (slice0-moves.json, ...)
+    -- and teams.json are not traces
+    isTraceName ext n = ext `isSuffixOf` n && case reverse (take (length n - length ext) n) of
+      c : _ -> isDigit c
+      [] -> False
     render f (Failure w t d m) =
       "FAIL " ++ takeFileName (takeDirectory f) ++ "/" ++ takeFileName f ++ " | " ++ w ++ maybe "" (\x -> " | turn " ++ show x) t
         ++ " | draw #" ++ show d ++ "\n    " ++ m
@@ -237,24 +252,30 @@ data Used = Used
   , usedItemsOf :: !(Set.Set T.Text)
   }
 
+-- | Load a trace, as v1 JSON or as a v2 file by its extension.
+loadTrace :: FilePath -> IO (Either String Trace)
+loadTrace f
+  | ".trace" `isSuffixOf` f = decodeV2 <$> BL.readFile f
+  | otherwise = (>>= fromV1) <$> eitherDecodeFileStrict' f
+
 -- | Load and check one trace; on success returns (decision points, draws). Also returns the ids its teams use.
-runFile :: Dex -> FilePath -> IO (Either Failure (Int, Int), Used)
-runFile dex f = do
-  r <- eitherDecodeFileStrict' f
+runFile :: Dex -> Maybe (MutStats, Bool) -> FilePath -> IO (Either Failure (Int, Int), Used)
+runFile dex cc f = do
+  r <- loadTrace f
   case r of
     Left e -> pure (Left (Failure "load" Nothing 0 e), Used Set.empty Set.empty Set.empty Set.empty)
-    Right v -> do
-      res <- checkTrace dex v
-      let sets' = concatMap arr (arr (v .: "teams"))
-          ids k = Set.fromList [toId t | s <- sets', String t <- [s .: k]]
-          moveIds = Set.fromList [toId t | s <- sets', String t <- arr (s .: "moves")]
+    Right t -> do
+      res <- checkTrace dex cc t
+      let sets' = concatMap arr (arr (trTeams t))
+          ids k = Set.fromList [toId x | s <- sets', String x <- [s .: k]]
+          moveIds = Set.fromList [toId x | s <- sets', String x <- arr (s .: "moves")]
       let forced xs = Set.foldr' seq () xs `seq` xs
       u <- evaluate (Used (forced moveIds) (forced (ids "species")) (forced (ids "ability")) (forced (ids "item")))
       res' <- evaluate (case res of Right (a, b) -> a `seq` b `seq` res; Left _ -> res)
       pure (res', u)
 
 -- ---------------------------------------------------------------------------
--- JSON helpers (missing data yields Null, which then shows up as a mismatch)
+-- JSON helpers, for the teams (kept as JSON)
 
 (.:) :: Value -> T.Text -> Value
 (.:) (Object o) k = fromMaybe Null (KM.lookup (K.fromText k) o)
@@ -264,42 +285,19 @@ arr :: Value -> [Value]
 arr (Array xs) = V.toList xs
 arr _ = []
 
-int :: Value -> Maybe Int
-int (Number n) = toBoundedInteger n
-int _ = Nothing
-
-txt :: Value -> String
-txt (String t) = T.unpack t
-txt Null = "<null>"
-txt v = show v
-
 -- ---------------------------------------------------------------------------
 -- Replaying a trace
 
--- | Strictly parse a draw list: every entry must be three integers with lo < hi.
-parseDraws :: String -> Value -> Either Failure [Draw]
-parseDraws what v = traverse one (zip [0 :: Int ..] (arr v))
-  where
-    one (i, d) = case map int (arr d) of
-      [Just lo, Just hi, Just r]
-        | lo < hi -> Right (Draw lo hi r)
-        | otherwise -> bad i ("draw has an empty range [" ++ show lo ++ "," ++ show hi ++ ")")
-      _ -> bad i ("draw is not three integers: " ++ show d)
-    bad i msg = Left (Failure ("trace shape (" ++ what ++ " draw " ++ show i ++ ")") Nothing 0 msg)
-
--- | Structural requirements on a trace.
-checkShape :: Value -> Either Failure ()
+-- | Structural requirements on a trace beyond the schema 'fromV1' and 'decodeV2' enforce.
+checkShape :: Trace -> Either Failure ()
 checkShape tr = do
-  expect "traceVersion" (int (tr .: "traceVersion") == Just 1) "traceVersion must be 1"
-  expect "format" (tr .: "format" == String "gen9ou") "format must be gen9ou"
-  mapM_ sides (zip [0 :: Int ..] (map (.: "state") (arr (tr .: "steps"))))
-  expect "final" (length (arr (tr .: "final" .: "sides")) == 2) "final snapshot must have two sides"
+  expect "traceVersion" (trVersion tr == 1) "traceVersion must be 1"
+  expect "format" (trFormat tr == "gen9ou") "format must be gen9ou"
   where
     expect w ok msg = if ok then Right () else Left (Failure ("trace shape (" ++ w ++ ")") Nothing 0 msg)
-    sides (i, st) = expect ("step " ++ show i) (length (arr (st .: "sides")) == 2) "snapshot must have exactly two sides"
 
-checkTrace :: Dex -> Value -> IO (Either Failure (Int, Int))
-checkTrace dex tr = case prepare of
+checkTrace :: Dex -> Maybe (MutStats, Bool) -> Trace -> IO (Either Failure (Int, Int))
+checkTrace dex cc tr = case prepare of
   Left e -> pure (Left e)
   Right (steps, teams, allDraws, cumulative) -> do
     ref <- newIORef ("setup" :: String)
@@ -312,13 +310,13 @@ checkTrace dex tr = case prepare of
   where
     prepare = do
       checkShape tr
-      teams <- case arr (tr .: "teams") of
+      teams <- case arr (trTeams tr) of
         [a, b] -> either (Left . Failure "teams" Nothing 0) Right ((,) <$> parseTeam dex a <*> parseTeam dex b)
         _ -> Left (Failure "teams" Nothing 0 "trace does not have two teams")
-      let steps = arr (tr .: "steps")
-      stepDraws <- traverse (\(i, s) -> parseDraws ("step " ++ show (i :: Int)) (s .: "draws")) (zip [0 ..] steps)
-      finalDraws <- parseDraws "final" (tr .: "finalDraws")
-      pure (steps, teams, concat stepDraws ++ finalDraws, scanl1 (+) (map length stepDraws))
+      let steps = trSteps tr
+          toDraw (TDraw lo hi r) = Draw lo hi r
+          stepDraws = map (map toDraw . stDraws) steps
+      pure (steps, teams, concat stepDraws ++ map toDraw (trFinalDraws tr), scanl1 (+) (map length stepDraws))
 
     drive ref steps teams allDraws cumulative = do
       let total = length allDraws
@@ -331,8 +329,9 @@ checkTrace dex tr = case prepare of
         loop total b rs _ [] _ = finish total b rs
         loop total b rs i ((s, cum) : rest) sawUnasked = do
           writeIORef ref ("step " ++ show i)
+          cx <- crossIO b (stState s)
           let one = stepOne b rs i s cum sawUnasked
-          r <- evaluate (forceE one)
+          r <- evaluate (forceE (maybe one (\m -> Left (Failure ("crosscheck step " ++ show i) (Just (bTurn b)) 0 m)) cx))
           case r of
             Left e -> pure (Left e)
             Right (b', rs', saw') -> loop total b' rs' (i + 1) rest saw'
@@ -344,17 +343,17 @@ checkTrace dex tr = case prepare of
               failWith msg = Left (Failure here (Just turn) (rsConsumed rs) msg)
           when (rsConsumed rs /= cum) $
             failWith ("draws consumed before this decision point: expected " ++ show cum ++ ", engine made " ++ show (rsConsumed rs))
-          case diffState dex b (s .: "state") ++ unmodelled (s .: "state") of
+          case diffState dex b (stState s) ++ unmodelled (stState s) of
             (d : _) -> failWith ("state differs at " ++ showDiff d)
             [] -> pure ()
-          let legalExpected = map (map txt . arr) (arr (s .: "legal"))
+          let legalExpected = [map T.unpack (fst (stLegal s)), map T.unpack (snd (stLegal s))]
               -- record.js lists `move N terastallize` only when the trace was recorded with `tera: true`; without it the
               -- policy was never offered Tera (Showdown still allowed it), so the recorded list is the engine's without those
               legalActual = [nub (map renderLegal (filter offered (legalChoices b p))) | p <- [P1, P2]]
               offered c = teraOffered || not (isTera c)
           when (legalExpected /= legalActual) $
             failWith ("legal choices differ: expected " ++ show legalExpected ++ ", engine " ++ show legalActual)
-          chosen <- case map parseChoice (arr (s .: "chosen")) of
+          chosen <- case [parseChoice (fst (stChosen s)), parseChoice (snd (stChosen s))] of
             [Right c1, Right c2] -> Right (c1, c2)
             parsed -> failWith ("cannot parse chosen " ++ show [e | Left e <- parsed])
           -- step must reject bad input without drawing
@@ -375,7 +374,7 @@ checkTrace dex tr = case prepare of
           writeIORef ref "final"
           let endFail msg = Left (Failure "final" (Just (bTurn bEnd)) (rsConsumed rsEnd) msg)
               check = do
-                case diffState dex bEnd (tr .: "final") ++ unmodelled (tr .: "final") of
+                case diffState dex bEnd (trFinal tr) ++ unmodelled (trFinal tr) of
                   (d : _) -> endFail ("final state differs at " ++ showDiff d)
                   [] -> pure ()
                 when (rsConsumed rsEnd /= total) $
@@ -384,14 +383,23 @@ checkTrace dex tr = case prepare of
                 -- the loop, before the choices): the battle is not over (`ended` is compared above), so an empty step
                 -- must be refused for the missing choice, without a draw. Otherwise the battle is over and the step is
                 -- refused as BattleFinished.
-                case (tr .: "truncated", runReplay rsEnd (step dex bEnd (Nothing, Nothing))) of
-                  (Bool True, Right (Left e, rs'))
+                case (trTruncated tr, runReplay rsEnd (step dex bEnd (Nothing, Nothing))) of
+                  (True, Right (Left e, rs'))
                     | isMissing e, rsConsumed rs' == rsConsumed rsEnd -> Right ()
-                  (Bool True, res) -> endFail ("empty step on a truncated battle: expected MissingChoice without a draw, got " ++ showStepResult res)
+                  (True, res) -> endFail ("empty step on a truncated battle: expected MissingChoice without a draw, got " ++ showStepResult res)
                   (_, Right (Left BattleFinished, _)) -> Right ()
                   (_, res) -> endFail ("step on a finished battle: expected BattleFinished, got " ++ showStepResult res)
-                Right (length (arr (tr .: "steps")), total)
-          evaluate (forceE check)
+                Right (length (trSteps tr), total)
+          cx <- crossIO bEnd (trFinal tr)
+          evaluate (forceE (maybe check (\m -> Left (Failure "crosscheck final" (Just (bTurn bEnd)) 0 m)) cx))
+
+    -- cross-check mode: the typed and the JSON comparison agree on this state, and on its mutations
+    crossIO b snap = case cc of
+      Nothing -> pure Nothing
+      Just (stats, mutate) -> case crossState dex b snap of
+        Left m -> pure (Just m)
+        Right () | mutate -> either Just (const Nothing) <$> crossMutations dex b snap stats
+                 | otherwise -> pure Nothing
 
     isMissing e = case e of
       MissingChoice _ -> True
@@ -419,192 +427,16 @@ checkTrace dex tr = case prepare of
     renderLegal c = case c of
       Team _ -> "team"
       _ -> renderChoice c
-    teraOffered = tr .: "tera" == Bool True
+    teraOffered = trTera tr == Just True
     isTera c = case c of
       MoveTera _ -> True
       _ -> False
 
-parseChoice :: Value -> Either String (Maybe Choice)
-parseChoice Null = Right Nothing
-parseChoice (String t) = case words (T.unpack t) of
+parseChoice :: Maybe T.Text -> Either String (Maybe Choice)
+parseChoice Nothing = Right Nothing
+parseChoice (Just t) = case words (T.unpack t) of
   ["team", ds] | all isDigit ds -> Right (Just (Team (map (\c -> fromEnum c - fromEnum '0') ds)))
   ["move", n] | all isDigit n -> Right (Just (Move (read n)))
   ["move", n, "terastallize"] | all isDigit n -> Right (Just (MoveTera (read n)))
   ["switch", n] | all isDigit n -> Right (Just (Switch (read n)))
   _ -> Left (T.unpack t)
-parseChoice v = Left (show v)
-
--- ---------------------------------------------------------------------------
--- State comparison
-
-showDiff :: Diff -> String
-showDiff (path, e, a) = path ++ ": expected " ++ e ++ ", engine has " ++ a
-
--- | Compare a field.
-cmp :: (Eq a, Show a) => String -> a -> a -> [Diff]
-cmp path e a = [(path, show e, show a) | e /= a]
-
--- | All differences between the engine's battle and a trace snapshot, for every field slice 0 models.
-diffState :: Dex -> Battle -> Value -> [Diff]
-diffState dex b st =
-  cmp "turn" (int (st .: "turn")) (Just (bTurn b))
-    ++ cmp "request" (txt (st .: "request")) requestName
-    ++ cmp "ended" (st .: "ended") (Bool ended)
-    ++ cmp "winner" (st .: "winner") winnerValue
-    ++ diffField dex (bField b) (st .: "field")
-    ++ concat
-      [ diffSide dex p (sideOf p b) sd
-      | (p, sd) <- zip [P1, P2] (arr (st .: "sides"))
-      ]
-  where
-    (requestName, ended, winnerValue) = case request b of
-      Finished w -> ("", True, case w of Winner P1 -> String "p1"; Winner P2 -> String "p2"; Tie -> String "tie")
-      Awaiting TeamPreview _ _ -> ("teampreview", False, Null)
-      Awaiting MoveRequest _ _ -> ("move", False, Null)
-      Awaiting SwitchRequest _ _ -> ("switch", False, Null)
-
--- | The field as the trace records it (record.js @snapshot@): the weather and terrain ids and their durations (null
--- when the state has none), and the pseudo-weathers with their duration.
-diffField :: Dex -> Field -> Value -> [Diff]
-diffField dex f ev =
-  cmp "field.weather" (txt (ev .: "weather")) (condIdName dex (fWeather f))
-    ++ cmp "field.weatherDuration" (ev .: "weatherDuration") (durationValue (fWeatherState f))
-    ++ cmp "field.terrain" (txt (ev .: "terrain")) (condIdName dex (fTerrain f))
-    ++ cmp "field.terrainDuration" (ev .: "terrainDuration") (durationValue (fTerrainState f))
-    ++ cmp "field.pseudoWeather" (ev .: "pseudoWeather") (condMap dex (fPseudo f))
-  where
-    durationValue st = if esDuration st == 0 then Null else Number (fromIntegral (esDuration st))
-
--- | A field condition's id as Showdown spells it (@''@ for none). An index with no table entry still shows up, so
--- it cannot hide from the compare.
-condIdName :: Dex -> Int -> String
-condIdName dex i
-  | i == noCond = ""
-  | otherwise = maybe ("<condition " ++ show i ++ ">") (T.unpack . cnId) (dxFieldConds dex V.!? i)
-
--- | @conditionMap@ of record.js: each condition with its @duration@ and @layers@ when its state has them.
-condMap :: Dex -> SV.Vector CondEntry -> Value
-condMap dex es = Object (KM.fromList
-  [ (K.fromText (T.pack (condIdName dex i)), Object (KM.fromList
-      ([("duration", Number (fromIntegral (esDuration st))) | esDuration st /= 0]
-        ++ [("layers", Number (fromIntegral (esA st))) | esA st /= -1])))
-  | CondEntry i st <- SV.toList es
-  ])
-
-diffSide :: Dex -> Player -> Side -> Value -> [Diff]
-diffSide dex p s sd =
-  cmp (name ++ ".pokemonLeft") (int (sd .: "pokemonLeft")) (Just (sLeft s))
-    ++ cmp (name ++ ".sideConditions") (sd .: "sideConditions") (condMap dex (sConds s))
-    ++ cmp (name ++ ".pokemon count") (length expected) (U.length (sSlots s))
-    ++ concat
-      [ diffMon dex (name ++ ".pokemon[" ++ show slot ++ "]") orig m ev
-      | (slot, ev, orig) <- zip3 [0 :: Int ..] expected (U.toList (sSlots s))
-      , let m = sMons s SV.! orig
-      ]
-  where
-    name = "sides[" ++ show (playerIx p) ++ "]"
-    expected = arr (sd .: "pokemon")
-
--- | The other @effectState@ keys record.js keeps for a volatile (@counter@, @hp@, @move@; see @snapshotPokemon@), for
--- the volatiles whose state has them, as the engine holds them (docs/handlers.md, "Volatile conditions (slice 7)",
--- the State table). The whole entry is compared, so a key Showdown writes and this table lacks is a failure, never a
--- skip. A move is its Showdown id; -1 is Struggle (@choicelock@ records the active move, which can be Struggle).
-volatileKeys :: Dex -> T.Text -> EffectState -> [(K.Key, Value)]
-volatileKeys dex name vs = case name of
-  "stall" -> [("counter", Number (fromIntegral (esA vs)))]
-  "substitute" -> [("hp", Number (fromIntegral (esA vs)))]
-  "encore" -> [("move", moveKey)]
-  "choicelock" -> [("move", moveKey)]
-  _ -> []
-  where
-    moveKey = String (if esA vs < 0 then "struggle" else mvId (moveData dex (esA vs)))
-
-diffMon :: Dex -> String -> Int -> Mon -> Value -> [Diff]
-diffMon dex path orig m ev =
-  cmp (path ++ ".orig") (int (ev .: "orig")) (Just orig)
-    ++ cmp (path ++ ".species") (txt (ev .: "species")) (T.unpack (spId (speciesData dex (monSpecies m))))
-    ++ cmp (path ++ ".level") (int (ev .: "level")) (Just (monLevel m))
-    ++ cmp (path ++ ".gender") (txt (ev .: "gender")) (genderName (monGender m))
-    ++ cmp (path ++ ".hp") (int (ev .: "hp")) (Just (monHp m))
-    ++ cmp (path ++ ".maxhp") (int (ev .: "maxhp")) (Just (monMaxHp m))
-    ++ cmp (path ++ ".status") (txt (ev .: "status")) (statusName (monStatus m))
-    -- statusState.stage (toxic's counter): present with the value, or absent
-    ++ cmp (path ++ ".statusState.stage") (int (ev .: "statusState" .: "stage")) (if esA (monStatusState m) < 0 then Nothing else Just (esA (monStatusState m)))
-    -- volatiles: every volatile the engine holds, by name, with its duration as record.js writes it (only when
-    -- Showdown's state has one: the engine's 0 is "no duration", since a duration that counts down to 0 removes the
-    -- volatile) and its other recorded keys ('volatileKeys'); every other volatile must be absent
-    ++ cmp (path ++ ".volatiles") (ev .: "volatiles")
-         (Object (KM.fromList
-           [ (K.fromText name, Object (KM.fromList ([("duration", Number (fromIntegral (esDuration vs))) | esDuration vs /= 0] ++ volatileKeys dex name vs)))
-           | Volatile i vs <- SV.toList (monVolatiles m)
-             -- an id with no condition name still shows up (as "<volatile i>"), so it cannot hide from the compare
-           , let name = case [condName c | c <- [minBound .. maxBound], fromEnum c == i] of
-                   (n : _) -> n
-                   [] -> T.pack ("<volatile " ++ show i ++ ">")
-           ]))
-    ++ cmp (path ++ ".ability") (txt (ev .: "ability")) (T.unpack (abilityId dex (monAbility m)))
-    ++ cmp (path ++ ".item") (txt (ev .: "item")) (T.unpack (itemId dex (monItem m)))
-    ++ cmp (path ++ ".fainted") (ev .: "fainted") (Bool (monFainted m))
-    ++ cmp (path ++ ".active") (ev .: "active") (Bool (monActive m))
-    ++ concat
-      [ cmp (path ++ ".stats." ++ T.unpack k) (int (ev .: "stats" .: k)) (Just v)
-      | (k, v) <- [("atk", stAtk st), ("def", stDef st), ("spa", stSpa st), ("spd", stSpd st), ("spe", stSpe st)]
-      ]
-    ++ cmp (path ++ ".speed") (int (ev .: "speed")) (Just (monSpeed m))
-    ++ concat
-      [ cmp (path ++ ".boosts." ++ T.unpack k) (int (ev .: "boosts" .: k)) (Just v)
-      | (k, v) <- [("atk", bsAtk bs), ("def", bsDef bs), ("spa", bsSpa bs), ("spd", bsSpd bs), ("spe", bsSpe bs), ("accuracy", bsAccuracy bs), ("evasion", bsEvasion bs)]
-      ]
-    ++ cmp (path ++ ".boosts key count") (length (objEntries (ev .: "boosts"))) 7
-    ++ cmp (path ++ ".types") (map txt (arr (ev .: "types"))) types
-    ++ cmp (path ++ ".teraType") (txt (ev .: "teraType")) (typeName (monTeraType m))
-    ++ cmp (path ++ ".terastallized") (txt (ev .: "terastallized")) (if monTerastallized m then typeName (monTeraType m) else "")
-    ++ cmp (path ++ ".moves.count") (length (arr (ev .: "moves"))) (SV.length (monMoves m))
-    ++ concat
-      [ cmp (mp ++ ".id") (txt (mv .: "id")) (T.unpack (mvId (moveData dex (msMove ms))))
-          ++ cmp (mp ++ ".pp") (int (mv .: "pp")) (Just (msPP ms))
-          ++ cmp (mp ++ ".maxpp") (int (mv .: "maxpp")) (Just (msMaxPP ms))
-          ++ cmp (mp ++ ".disabled") (mv .: "disabled") (Bool (msDisabled ms))
-      | (i, mv, ms) <- zip3 [0 :: Int ..] (arr (ev .: "moves")) (SV.toList (monMoves m))
-      , let mp = path ++ ".moves[" ++ show i ++ "]"
-      ]
-  where
-    st = monStats m
-    bs = monBoosts m
-    typeName t = T.unpack (dxTypeNames dex V.! t)
-    -- record.js snapshots `p.getTypes()` (the Type event applied), so the engine's getTypes is compared, not the stored types
-    (ty1, ty2) = monTypes dex m
-    types = typeName ty1 : [typeName ty2 | ty2 /= noType]
-    genderName g = case g of GenderM -> "M"; GenderF -> "F"; GenderNone -> ""
-    statusName s = case s of
-      StatusNone -> ""
-      StatusFainted -> "fnt"
-      StatusBrn -> "brn"
-      StatusPar -> "par"
-      StatusPsn -> "psn"
-      StatusTox -> "tox"
-      StatusFrz -> "frz"
-
--- | Fields of a snapshot that the engine does not model must hold their defaults, so a trace that uses an
--- out-of-slice mechanic fails loudly instead of going unchecked.
-unmodelled :: Value -> [Diff]
-unmodelled st =
-  concat
-      [ concat
-            [ let pp = sp ++ ".pokemon[" ++ show j ++ "]"
-               in isEmptyObj (pp ++ ".statusState (keys other than stage)") (dropKey "stage" (pk .: "statusState"))
-            | (j, pk) <- zip [0 :: Int ..] (arr (sd .: "pokemon"))
-            ]
-      | (i, sd) <- zip [0 :: Int ..] (arr (st .: "sides"))
-      , let sp = "sides[" ++ show i ++ "]"
-      ]
-  where
-    dropKey k (Object o) = Object (KM.delete (K.fromText k) o)
-    dropKey _ v = v
-    isEmptyObj path v = case v of
-      Object o | KM.null o -> []
-      _ -> [(path, "{}", txt v)]
-
-objEntries :: Value -> [(K.Key, Value)]
-objEntries (Object o) = KM.toList o
-objEntries _ = []

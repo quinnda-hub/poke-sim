@@ -115,6 +115,28 @@ library
 
     ghc-options: -O2
 
+-- The typed model of a recorded trace and its compact binary format (trace format v2). Test infrastructure: the
+-- parity test, the benchmark and tools/trace-pack use it; the engine does not.
+library trace
+    import:           warnings
+    default-extensions:  StrictData
+    exposed-modules:  Trace,
+                      Trace.V2
+    hs-source-dirs:   test/trace
+    default-language: Haskell2010
+    ghc-options:      -O2
+    build-depends:
+        base ^>=4.17.2.1,
+        aeson >= 2.2.3 && < 2.3,
+        binary >= 0.8.9 && < 0.9,
+        bytestring >= 0.11.5 && < 0.12,
+        containers >= 0.6.7 && < 0.7,
+        scientific >= 0.3.7 && < 0.4,
+        text >= 2.0.2 && < 2.1,
+        transformers >= 0.5.6 && <= 0.6,
+        vector >= 0.13.2 && < 0.14,
+        zlib >= 0.7.1 && < 0.8
+
 -- Property suite (hedgehog): engine invariants and agreement with JavaScript arithmetic.
 -- POKESIM_TIER=fast|long selects the number of tests (default long).
 test-suite poke-sim-test
@@ -144,11 +166,14 @@ test-suite parity
     type:             exitcode-stdio-1.0
     hs-source-dirs:   test/parity
     main-is:          Main.hs
+    other-modules:    Compare, CrossCheck, OldCompare
     ghc-options:      -O1 -threaded -rtsopts "-with-rtsopts=-A128m"
     build-depends:
         base ^>=4.17.2.1,
         poke-sim,
+        poke-sim:trace,
         aeson >= 2.2.3 && < 2.3,
+        bytestring >= 0.11.5 && < 0.12,
         containers >= 0.6.7 && < 0.7,
         directory >= 1.3 && < 1.4,
         filepath >= 1.4 && < 1.6,
@@ -167,7 +192,9 @@ benchmark playouts
     build-depends:
         base ^>=4.17.2.1,
         poke-sim,
+        poke-sim:trace,
         aeson >= 2.2.3 && < 2.3,
+        bytestring >= 0.11.5 && < 0.12,
         directory >= 1.3 && < 1.4,
         filepath >= 1.4 && < 1.6,
         splitmix >= 0.1.0.4 && < 0.2,
@@ -201,4 +228,20 @@ executable engine-pool
         bytestring >= 0.11.5 && < 0.12,
         containers >= 0.6.7 && < 0.7,
         text >= 2.0.2 && < 2.1,
+        vector >= 0.13.2 && < 0.14
+
+-- Packs recorded v1 JSON traces into trace format v2, and unpacks them back to JSON.
+executable trace-pack
+    import:           warnings
+    default-language: Haskell2010
+    main-is:          Main.hs
+    hs-source-dirs:   tools/trace-pack
+    ghc-options:      -O1 -threaded -rtsopts "-with-rtsopts=-A64m"
+    build-depends:
+        base ^>=4.17.2.1,
+        poke-sim:trace,
+        aeson >= 2.2.3 && < 2.3,
+        bytestring >= 0.11.5 && < 0.12,
+        directory >= 1.3 && < 1.4,
+        filepath >= 1.4 && < 1.6,
         vector >= 0.13.2 && < 0.14
