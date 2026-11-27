@@ -606,7 +606,7 @@ useMoveWith fmt dx user target mv = case mrTarget rule of
     tried <- moveTry dx user user mv
     prepared <- if tried then movePrepareHit dx user mv else pure False
     ran <- if prepared then relayTruthy <$> runEvent dx EvPrepareHit user (Just user) (Just mv) RNone else pure False
-    -- LATENT(7a): the hit steps of a self-targeted move (Invulnerability, TryHit, accuracy, BreakProtect) are skipped: no handler acts
+    -- LATENT: the hit steps of a self-targeted move (Invulnerability, TryHit, accuracy, BreakProtect) are skipped: no handler acts
     -- on one (a Protect user holds no protect volatile when it moves, and only the volatile's own TryHit would). Dancer, Instruct and
     -- the like, which let a Pokemon move twice in a turn, are not supported.
     when ran (statusMove dx user user mv)
@@ -1027,7 +1027,7 @@ hitTarget fmt dx user target mv tm = do
   -- at least 1 (unless 0) and before the damage is dealt, with the move as the effect: Endure's onDamage leaves the target 1 HP. The
   -- result is clamped again (`if (targetDamage !== 0) targetDamage = clampIntRange(targetDamage, 1)`). A falsy result ends the damage
   -- (`damage event failed`): no handler returns one.
-  -- LATENT(7a): the other `battle.damage` calls (residuals, recoil, Rocky Helmet, Spiky Shield, ...) run no Damage event here: their
+  -- LATENT: the other `battle.damage` calls (residuals, recoil, Rocky Helmet, Spiky Shield, ...) run no Damage event here: their
   -- effect is not a Move, and Endure is its only listener and acts on a Move alone. An effect with a Damage handler of another kind
   -- (Sturdy, Magic Guard, Focus Sash) must add the event to those paths. A hit on a Substitute ('hitSubstitute') is no spreadDamage
   -- (its target is null there: the damage is `target.volatiles['substitute'].hp -= damage`), so Endure does not act on it.

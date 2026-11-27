@@ -1497,8 +1497,9 @@ runNative dx n c relay = do
     -- otherwise a move other than the locked one and Struggle fails (`-fail`, no PP lost, returns false). The `ignoringItem` and
     -- `dynamax` exceptions cannot arise (no Klutz, Embargo, Magic Room or Dynamax is supported). The `-fail` path is not reached by any
     -- recorded trace: a locked holder is offered only its locked move, so it needs a move that the request did not offer.
-    -- LATENT(7c): Encore's onOverrideAction swaps in the encored move at move time, so a Choice holder locked into another move meets this
-    -- `-fail` (no PP lost), with Encore's own BeforeMove order and the choicelock/encore DisableMove interplay unverified.
+    -- Encore's onOverrideAction (battle-actions.ts 277-287) swaps the encored move in before BeforeMove, so this `-fail` runs for the
+    -- encored move (no PP lost, the lock kept). Slice 7f found no way to reach it with one active Pokemon a side: the lock is added in
+    -- the same ModifyMove step that records the move as `lastMove`, so the move Encore names (the last move) is the locked move.
     NChoiceLockBeforeMove
       | not (isChoiceItem dx m) -> dropLock >> keep
       | Just mv <- cMove c, mvId mv /= "struggle", M.lookup (mvId mv) (dxMoveIx dx) /= Just lockedMove -> returning stop
@@ -2265,7 +2266,9 @@ moveTry dx user target mv = case moveSpec mv POwn EvTry >>= hsBody of
   -- getActiveMove, battle-queue.ts 261), Struggle included; a Tera action is a separate action, so the move action still counts.
   -- A fainted target has no move action ('willMove'). Me First is not supported, so every status move fails it.
   -- LATENT: no recharge move is supported, so `mustrecharge` never holds.
-  -- LATENT(7c): onOverrideAction (Encore) swaps the move at runAction, not in the queue, so the queued move stays the chosen one.
+  -- Encore's onOverrideAction swaps the move at runMove, not in the queue, so the queued move stays the chosen one. In singles this never
+  -- shows (slice 7f): the only Encore that could land on a target before its queued move is the puncher's own, and a punch (priority 1)
+  -- always moves before it.
   Just (BNative NSuckerPunchTry) -> gets (\b -> case willMove b target of
     -- the move of the slot ('Engine.Queue.moveInSlot', which this module cannot import); Struggle is slot -1
     Just ac | acArg ac < 0 -> not (mvStatus (dxStruggle dx))
