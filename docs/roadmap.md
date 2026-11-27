@@ -223,6 +223,13 @@ Last updated 2026-11-25.
   draws one replacement uniformly from the bench (even from one) and
   switches it in at once. Slice 6 is re-recorded at 1,500 battles. Parity
   checks 8,000 traces, 630,135 decision points and 1,198,145 draws.
+- **Slice 6c: switch-out abilities and switching items.** Regenerator,
+  Natural Cure, Eject Button and Red Card (33 abilities, 42 items). No new
+  state or event points: native bodies on `SwitchOut` and
+  `AfterMoveSecondary`. Every switch-out now clears both switch flags, as
+  `clearVolatile` does, and Life Orb skips its recoil for an attacker that
+  Red Card forces out. Slice 6 is re-recorded at 2,000 battles. Parity
+  checks 8,500 traces, 688,609 decision points and 1,295,923 draws.
 - **Test tiers.** The fast tier (`POKESIM_TIER=fast`) replays every 10th trace
   and runs the hedgehog properties at 100 tests each, in about 10 s. The long
   tier, which gates merges into main, replays everything and runs the
@@ -436,6 +443,7 @@ Gen 9 OU battles simulated sooner, and each makes the later ones cheaper.
    | 2026-11-26 | Slice 5b | Ahead: step 2 done, about 3 days before its milestone window |
    | 2026-11-26 | Slice 6a | Ahead: first of step 3's three phases done the same day |
    | 2026-11-26 | Slice 6b | Ahead: two of step 3's three phases done the same day |
+   | 2026-11-26 | Slice 6c | Ahead: step 3 all but Eject Pack (6d) |
 
 6. **Per-player view.** What each side can observe, as a first-class value.
 7. **Showdown seed compatibility.** Implement Showdown's own generators so a
@@ -484,8 +492,8 @@ Alongside:
 - **Scenario generation from rules.** For each rule, generate battles that
   exercise it with each random outcome forced both ways, and report coverage
   per rule.
-- **Trace size.** 8,000 battles take about 4.7 GB. The long tier takes about
-  100 s since parity checks traces on several threads (it was 325 s on one,
+- **Trace size.** 8,500 battles take about 5.1 GB. The long tier takes about
+  190 s (most of the growth is the slice 6 property playouts) since parity checks traces on several threads (it was 325 s on one,
   and grows with every set). About 60% of a trace's time is decoding its
   JSON, so delta snapshots or a compact cache are the next step before the
   catalog work.

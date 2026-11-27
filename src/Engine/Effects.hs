@@ -141,6 +141,10 @@ abilityBodies ty wx name = case name of
   "embodyaspectteal" -> Just [(POwn, EvStart, BNative NEmbodyAspectTeal)]
   -- technician: onBasePower, basePower after the accumulated modifier <= 60 -> chainModify(1.5)
   "technician" -> Just [(POwn, EvBasePower, BNative NTechnician)]
+  -- Slice 6c. regenerator (abilities.ts 3834): onSwitchOut heals baseMaxhp / 3 (Pokemon.heal); naturalcure (2812): onSwitchOut clears
+  -- the status (its onCheckShow is log-only in singles and has no event point here: 'Engine.Dex.effectFor' skips it)
+  "regenerator" -> Just [(POwn, EvSwitchOut, BNative NRegeneratorSwitchOut)]
+  "naturalcure" -> Just [(POwn, EvSwitchOut, BNative NNaturalCureSwitchOut)]
   -- filter, solidrock, prismarmor: onSourceModifyDamage, `typeMod > 0` -> chainModify(0.75)
   "filter" -> Just [(PSource, EvModifyDamage, BNative NFilterLike)]
   "solidrock" -> Just [(PSource, EvModifyDamage, BNative NFilterLike)]
@@ -201,6 +205,9 @@ itemBodies ty fid name = case name of
   "grassyseed" -> seed "grassyterrain"
   "mistyseed" -> seed "mistyterrain"
   "psychicseed" -> seed "psychicterrain"
+  -- Slice 6c. ejectbutton (items.ts 1692, onAfterMoveSecondaryPriority 2), redcard (5170): onAfterMoveSecondary
+  "ejectbutton" -> Just [(POwn, EvAfterMoveSecondary, BNative NEjectButtonAfterMoveSecondary)]
+  "redcard" -> Just [(POwn, EvAfterMoveSecondary, BNative NRedCardAfterMoveSecondary)]
   -- terrainextender: no handlers (the terrains' durationCallback reads the item)
   "terrainextender" -> Just []
   _ -> case lookup name typeItems of

@@ -480,9 +480,12 @@ effectFor ident typeOrder ownPfx startAsSwitchIn v mbodies = do
     Object o | Just hs <- KM.lookup "handlers" o -> asArray hs >>= traverse asText
     _ -> Right []
   -- the @condition.on...@ handlers of these abilities belong to their volatile ('conditionFor'), not to the ability
-  let names = if ident `elem` ["protosynthesis", "quarkdrive", "unburden"] && startAsSwitchIn
+  let names1 = if ident `elem` ["protosynthesis", "quarkdrive", "unburden"] && startAsSwitchIn
         then filter (not . ("condition." `T.isPrefixOf`)) names0
         else names0
+      -- naturalcure.onCheckShow (abilities.ts 2813, run only by a plain switch action, battle.ts 2818) returns at once in singles
+      -- (`side.active.length === 1`) and its `showCure` is log-only: no event point, no body
+      names = if ident == "naturalcure" && startAsSwitchIn then filter (/= "onCheckShow") names1 else names1
   boosts <- case v of
     Object o | startAsSwitchIn, Just (Object bo) <- KM.lookup "boosts" o ->
       traverse (\(k, x) -> (,) <$> boostStatOf (K.toText k) <*> asInt x) (KM.toList bo)

@@ -592,6 +592,14 @@ data NativeId
   -- ^ partingshot @onHit@: drops the target's Attack and Special Attack; when neither drops, the move loses its @selfSwitch@.
   | NChillyReceptionCharge
   -- ^ chillyreception @priorityChargeCallback@: the user takes the move's volatile.
+  | NRegeneratorSwitchOut
+  -- ^ regenerator @onSwitchOut@: @pokemon.heal(baseMaxhp / 3)@.
+  | NNaturalCureSwitchOut
+  -- ^ naturalcure @onSwitchOut@: @pokemon.clearStatus()@.
+  | NEjectButtonAfterMoveSecondary
+  -- ^ ejectbutton @onAfterMoveSecondary@: the holder switches out.
+  | NRedCardAfterMoveSecondary
+  -- ^ redcard @onAfterMoveSecondary@: the attacker is forced out.
   deriving (Eq, Show)
 
 -- | The body of each handler the engine implements (written by hand: Showdown's handlers are code). A condition

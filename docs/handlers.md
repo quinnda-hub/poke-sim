@@ -740,7 +740,8 @@ What is missing is anything that sets the switch flag from a move.
   Roar, Whirlwind and Dragon Tail (all priority -6), plus Circle Throw,
   which the dex has and the engine will accept with them.
 - The flag is Showdown's `forceSwitchFlag`, a Bool of its own beside
-  `switchFlag` (`monForceSwitchFlag`). Red Card (6c) sets it too, and Eject
+  `switchFlag` (`monForceSwitchFlag`). Red Card (6c) sets it on the attacker,
+  and Life Orb reads it there (items.ts 3432); Eject
   Button and Emergency Exit read it.
 - In `runMoveEffects` (battle-actions.ts 1319-1322) a forceSwitch move did
   something only if the target's side can switch, so Roar or Whirlwind with
@@ -783,8 +784,79 @@ What is missing is anything that sets the switch flag from a move.
     and not cancelling the dragged-out Pokémon's actions cannot be told
     apart by any 6b trace. The engine follows Showdown's code for each.
 
-### Items and abilities (6c)
+### Items and abilities (6c and 6d)
 
-- Eject Button (0.036 of usage), Red Card (0.069) and Eject Pack (0.008),
-  through the same flags. Emergency Exit and Wimp Out are not whitelisted.
-- The SwitchOut listeners: Regenerator (0.34) and Natural Cure (0.03).
+Emergency Exit and Wimp Out are not whitelisted. Eject Pack (0.008 of usage)
+needs three event points the engine lacks (`AfterBoost`, the item's `Use`
+and `AnyAfterMove`) and state of its own, so it is phase 6d. 6c uses only
+the existing event points `SwitchOut`, `AfterMoveSecondary` and `DragOut`.
+
+**6c: Regenerator (0.34), Natural Cure (0.03), Red Card (0.069), Eject
+Button (0.036).**
+
+- `SwitchOut` runs only for an unfainted outgoing Pokémon (`unfaintedActive`,
+  battle-actions.ts 90-100), on every kind of switch: a choice, an
+  instaswitch after a pivot or an item, and a drag. A faint is not a
+  switch-out, so neither ability acts on one.
+- Regenerator (abilities.ts 3834-3843): `pokemon.heal(baseMaxhp / 3)`. This
+  is `Pokemon.heal` (pokemon.ts 1662-1672), not `battle.heal`: no `TryHeal`
+  or `Heal` event. It truncates the amount and does nothing at full HP.
+- Natural Cure (abilities.ts 2812-2890): `onSwitchOut` clears any status
+  with `clearStatus()`. Follow `clearStatus` and `setStatus('')` for any
+  `End` events they run. `onCheckShow` returns at once in singles
+  (`side.active.length === 1`), and its `showCure` is log-only.
+- `AfterMoveSecondary` runs after the hit loop (battle-actions.ts 1069), so
+  the U-turn flag (1370) and the Dragon Tail flag (1165) are already set
+  when these items look.
+- Eject Button (items.ts 1692-1716), `onAfterMoveSecondary` at priority 2,
+  on the holder (the target):
+  - It needs a source other than the holder, the holder's HP, and a move
+    that is not Status and not a future move. The source's HP is not
+    checked.
+  - It does nothing if the holder's side cannot switch, the holder has
+    `forceSwitchFlag` (Dragon Tail on the same hit) or is being called
+    back, or any active Pokémon has `switchFlag === true`. A U-turn's move-id
+    flag does not block it.
+  - It sets the holder's `switchFlag = true` (`SwitchForced`) and calls
+    `useItem()`. On success it clears the source's `switchFlag`, so a
+    U-turn into an Eject Button switches the holder, not the U-turn user.
+    On failure it clears the holder's flag.
+  - The flag then takes the 6a path: Pursuit activation, which can draw,
+    then the switch request.
+- Red Card (items.ts 5170-5188), `onAfterMoveSecondary` at default
+  priority:
+  - It needs a source other than the holder, both with HP, a move that is
+    not Status, an active source whose side can switch, and neither
+    Pokémon with `forceSwitchFlag`.
+  - It calls `target.useItem(source)`, then `runEvent('DragOut', source,
+    target, move)` on the attacker, and on a truthy result sets the
+    attacker's `forceSwitchFlag`. 6b's phazing step drags it out.
+  - Dragon Tail into Red Card keeps the card, because the holder is
+    flagged.
+- Combinations the traces must cover: U-turn into Eject Button, U-turn into
+  Red Card (both flags at the tail), Dragon Tail into either item, a KO
+  (no holder HP), no switch target on either side, and Regenerator and
+  Natural Cure through each kind of switch.
+- Found while building it:
+  - Every switch-out clears both of the outgoing Pokémon's flags
+    (`clearVolatile(includeSwitchFlags = true)`, pokemon.ts 1530,
+    1558-1561). For U-turn into Red Card, the drag at the action tail
+    clears the U-turn user's own flag, so no switch request follows.
+  - Life Orb's recoil skips an attacker with `forceSwitchFlag` (items.ts
+    3432), which Red Card now sets. A Life Orb attacker forced out by Red
+    Card takes no recoil.
+  - Natural Cure's `onCheckShow` is log-only in singles, and the engine
+    drops that handler.
+  - Natural Cure never meets sleep: no supported move causes it.
+  - Not observable in any trace, with the code following Showdown anyway:
+    Regenerator through `battle.heal` (nothing listens to `TryHeal`),
+    `SwitchOut` on a fainted holder (every body gates on HP), Red Card's
+    flag before `useItem` (`useItem` cannot fail for an active holder), and
+    the two items' handler order (a holder has one item).
+
+**6d: Eject Pack** (items.ts 1717-1769). `onAfterBoost` (battle.ts 2100,
+after the per-stat loop) sets `effectState.eject` on any drop, except during
+Parting Shot. `onAnySwitchIn` (priority -4), `onAnyAfterMove` and
+`onResidual` (order 29) then call `useItem`. Its `onUseItem` gates on
+`canSwitch` and on no active `switchFlag === true`, and its `onUse` sets the
+holder's `switchFlag = true`.

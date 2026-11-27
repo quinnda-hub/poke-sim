@@ -5,6 +5,7 @@ module Playout
   ( genTeams
   , genPivotTeams
   , playChecked
+  , Seen (..)
   , advanceWhile
   , startBattle
   , checkBattle
@@ -28,7 +29,7 @@ import qualified Hedgehog.Range as Range
 
 import Engine
 import Engine.Chance (Sample)
-import Engine.Dex (Condition (..), Dex (..), SpeciesData (..), abilityId, itemId, noType, speciesData, supportedAbilities, supportedItems, supportedMoves, supportedSpecies)
+import Engine.Dex (Condition (..), Dex (..), MoveData (..), SpeciesData (..), abilityId, itemId, noType, speciesData, supportedAbilities, supportedItems, supportedMoves, supportedSpecies)
 import Engine.Damage (monTypes)
 import Engine.Event (CondId (..))
 import Engine.State
@@ -42,7 +43,8 @@ stepCap = 5000
 genTeams :: Dex -> Gen (Team, Team)
 genTeams dx = genTeamsWith dx False
 
--- | 'genTeams' weighted toward the moves that switch their user out (U-turn, Flip Turn, Volt Switch, Teleport, Parting Shot, Chilly
+-- | 'genTeams' weighted toward Regenerator, Natural Cure, Eject Button and Red Card (slice 6c) and the status moves that give Natural Cure
+-- something to cure, and toward the moves that switch their user out (U-turn, Flip Turn, Volt Switch, Teleport, Parting Shot, Chilly
 -- Reception) and the moves that force the target out (Roar, Whirlwind, Dragon Tail, Circle Throw), the hazards they drag into, Rocky
 -- Helmet and Shedinja (1 HP: a contact pivot into a Rocky Helmet faints its user after the flag is set), so that the playouts reach the
 -- mid-turn switch requests and the drags that a uniform draw over every move seldom does.
@@ -55,7 +57,7 @@ genTeamsWith dx pivotHeavy = (,) <$> genTeam <*> genTeam
     species = supportedSpecies dx
     moves = supportedMoves dx
     pivots = [m | m <- ["uturn", "flipturn", "voltswitch", "teleport", "partingshot", "chillyreception"], m `elem` moves]
-    dragKit = [m | m <- ["roar", "whirlwind", "dragontail", "circlethrow", "stealthrock", "spikes", "toxicspikes"], m `elem` moves]
+    dragKit = [m | m <- ["roar", "whirlwind", "dragontail", "circlethrow", "stealthrock", "spikes", "toxicspikes", "toxic", "willowisp", "thunderwave", "spore"], m `elem` moves]
     pickSpecies
       | pivotHeavy && "shedinja" `elem` species = Gen.frequency [(3, pure "shedinja"), (7, Gen.element species)]
       | otherwise = Gen.element species
@@ -63,9 +65,17 @@ genTeamsWith dx pivotHeavy = (,) <$> genTeam <*> genTeam
       | pivotHeavy && not (null pivots) && not (null dragKit) = Gen.frequency [(3, Gen.element pivots), (3, Gen.element dragKit), (2, Gen.element moves)]
       | pivotHeavy && not (null pivots) = Gen.frequency [(3, Gen.element pivots), (2, Gen.element moves)]
       | otherwise = Gen.element moves
+    -- Rocky Helmet, and the two items that switch their holder out or force the attacker out (slice 6c)
     pickItem
+      | pivotHeavy && not (null switchItems) = Gen.frequency [(3, Gen.element switchItems), (2, Gen.element ("rockyhelmet" : switchItems)), (3, Gen.element items)]
       | pivotHeavy && "rockyhelmet" `elem` items = Gen.frequency [(2, pure "rockyhelmet"), (3, Gen.element items)]
       | otherwise = Gen.element items
+    switchItems = [i | i <- ["ejectbutton", "redcard"], i `elem` items]
+    -- Regenerator and Natural Cure act at every switch-out
+    pickAbility
+      | pivotHeavy && not (null switchAbilities) = Gen.frequency [(3, Gen.element switchAbilities), (3, Gen.element abilities)]
+      | otherwise = Gen.element abilities
+    switchAbilities = [a | a <- ["regenerator", "naturalcure"], a `elem` abilities]
     -- every ability and item the engine accepts ("noability" and the empty item among them)
     abilities = supportedAbilities dx
     items = supportedItems dx
@@ -84,7 +94,7 @@ genTeamsWith dx pivotHeavy = (,) <$> genTeam <*> genTeam
       nat <- Gen.element natures
       lvl <- Gen.int (Range.linear 1 100)
       evs <- Gen.list (Range.singleton 6) (Gen.int (Range.linear 0 252))
-      ab <- Gen.element abilities
+      ab <- pickAbility
       it <- pickItem
       tera <- Gen.frequency [(3, Gen.element teraTypes), (1, pure "Stellar")]
       pure (object
@@ -106,24 +116,45 @@ pickBoth b a1 a2 = (,) <$> pick P1 a1 <*> pick P2 a2
       i <- roll 0 (length cs)
       pure (case drop i cs of (c : _) -> Just c; [] -> Nothing)
 
+-- | What a playout went through, counted by 'checkStep' (the properties' coverage statements read it).
+data Seen = Seen
+  { seenDrags :: !Int
+  -- ^ forced switches (drags)
+  , seenRegen :: !Int
+  -- ^ a Regenerator holder that was below max HP and chose to switch out
+  , seenCure :: !Int
+  -- ^ a Natural Cure holder with a status that left the field
+  , seenEject :: !Int
+  -- ^ an Eject Button used up
+  , seenRedCard :: !Int
+  -- ^ a Red Card used up
+  }
+  deriving (Eq, Show)
+
+instance Semigroup Seen where
+  Seen a b c d e <> Seen a' b' c' d' e' = Seen (a + a') (b + b') (c + c') (d + d') (e + e')
+
+instance Monoid Seen where
+  mempty = Seen 0 0 0 0 0
+
 -- | Play with random legal choices, checking every state on the way, until the battle ends (or the cap).
 --
--- The result carries the number of forced switches (drags) the playout went through, which 'checkStep' finds.
-playChecked :: Dex -> Team -> Team -> Sample (Either String (Battle, Int))
-playChecked dx t1 t2 = startBattle dx t1 t2 >>= go 0 0
+-- The result carries what the playout went through ('Seen'), which 'checkStep' finds.
+playChecked :: Dex -> Team -> Team -> Sample (Either String (Battle, Seen))
+playChecked dx t1 t2 = startBattle dx t1 t2 >>= go 0 mempty
   where
-    go :: Int -> Int -> Battle -> Sample (Either String (Battle, Int))
-    go n drags b
+    go :: Int -> Seen -> Battle -> Sample (Either String (Battle, Seen))
+    go n seen b
       | n > stepCap = pure (Left ("no result within " ++ show stepCap ++ " decision steps"))
       | Left e <- checkBattle dx b = pure (Left e)
       | otherwise = case request b of
-          Finished _ -> pure (Right (b, drags))
+          Finished _ -> pure (Right (b, seen))
           Awaiting _ a1 a2 -> do
             cs <- pickBoth b a1 a2
             r <- step dx b cs
             case r of
               Left e -> pure (Left ("step rejected legal choices " ++ show cs ++ ": " ++ show e))
-              Right b' -> either (pure . Left) (\d -> go (n + 1) (drags + d) b') (checkStep b b' cs)
+              Right b' -> either (pure . Left) (\d -> go (n + 1) (seen <> d) b') (checkStep dx b b' cs)
 
 -- | What one decision step may do to a Stellar Pokemon's @stellarBoostedTypes@ (pokemon.ts 504 sets it in the constructor
 -- and nothing ever clears or removes from it, so a switch or a faint keeps it): it never loses a type, and a Pokemon that
@@ -137,10 +168,63 @@ playChecked dx t1 t2 = startBattle dx t1 t2 >>= go 0 0
 -- Forced switches (slice 6b): a side whose active Pokemon, after the step, is not the one its choice put there (the one it had, or the
 -- target of its @switch@) was dragged out by a Roar, Whirlwind, Dragon Tail or Circle Throw, which no other effect does yet. The one it
 -- had is then benched, without a flag or queued action (@queue.cancelAction@), and the one that replaced it was on the bench before the
--- step (or the one the side's own switch benched during it), unfainted and not active (@getRandomSwitchable@ lists only those). Returns the number of drags.
-checkStep :: Battle -> Battle -> (Maybe Choice, Maybe Choice) -> Either String Int
-checkStep b b' (c1, c2) = mapM_ one [(p, i) | (p, side) <- [(P1, bP1), (P2, bP2)], i <- [0 .. SV.length (sMons (side b)) - 1]] >> turnOk >> (((,) <$> drag (P1, c1) <*> drag (P2, c2)) >>= \ds -> pivotsOk ds >> pure (length (filter id [fst ds, snd ds])))
+-- step (or the one the side's own switch benched during it), unfainted and not active (@getRandomSwitchable@ lists only those).
+--
+-- Switch-out effects (slice 6c), for each Pokemon in the active slot before the step with HP: a Regenerator holder that chose to
+-- switch and is benched afterwards has healed exactly a third of its max HP, up to the maximum (nothing hurts it between the
+-- choice, which runs first, and the bench); a Natural Cure holder that is benched afterwards with HP, by any path (a choice, a pivot,
+-- an item, a drag), has no status; a fainted Pokemon never regains HP. Eject Button and Red Card, in a step where no Pokemon in play
+-- knows an item-removal move (Knock Off, Thief, Trick, Switcheroo): an Eject Button that is gone left its holder flagged and still
+-- in the active slot (the step ends at the switch request the item made), or the holder fainted; a Red Card that is gone has
+-- forced the attacker out, so the attacker is no longer active, in a step where no Pokemon in play knows a forcing move that
+-- could bring it back.
+-- Returns what the step went through.
+checkStep :: Dex -> Battle -> Battle -> (Maybe Choice, Maybe Choice) -> Either String Seen
+checkStep dx b b' (c1, c2) = mapM_ one [(p, i) | (p, side) <- [(P1, bP1), (P2, bP2)], i <- [0 .. SV.length (sMons (side b)) - 1]] >> turnOk >> (((,) <$> drag (P1, c1) <*> drag (P2, c2)) >>= \ds -> pivotsOk ds >> switchOuts >>= \so -> pure (so <> mempty {seenDrags = length (filter id [fst ds, snd ds])}))
   where
+    chose p = if p == P1 then c1 else c2
+    abilityIs name m = abilityId dx (monAbility m) == name
+    itemIs name m = monItem m /= noItem && itemId dx (monItem m) == name
+    knownMoves m = [mvId (dxMoves dx V.! msMove ms) | ms <- SV.toList (monMoves m)]
+    inPlay = [monOf b (activeActor p b) | p <- [P1, P2], sHasActive (sideOf p b)]
+    removers = ["knockoff", "thief", "trick", "switcheroo"]
+    stealing = any (any (`elem` removers) . knownMoves) inPlay
+    -- (a later forced switch in the same step, a Roar after a Red Card, can bring the attacker back in)
+    forcing = any (any (`elem` ["roar", "whirlwind", "dragontail", "circlethrow"]) . knownMoves) inPlay
+    switchOuts = mconcat <$> mapM switchOut [(p, i) | p <- [P1, P2], i <- [0 .. SV.length (sMons (sideOf p b)) - 1]]
+    switchOut (p, i) = case (sMons (sideOf p b) SV.!? i, sMons (sideOf p b') SV.!? i) of
+      (Just m0, Just m1) -> do
+        let who = show p ++ " " ++ show (monSpecies m0) ++ ": "
+            wasOn = monActive m0 && monHp m0 > 0
+            benched = not (monActive m1) && monHp m1 > 0
+            foe = otherP p
+            fainted0 = monFainted m0
+            foeBefore = if sHasActive (sideOf foe b) then U.head (sSlots (sideOf foe b)) else (-1)
+            foeAfter = if sHasActive (sideOf foe b') then monActive (monOf b' (Actor foe foeBefore)) else False
+            healed = min (monMaxHp m0) (monHp m0 + monMaxHp m0 `quot` 3)
+        if fainted0 && monHp m1 /= 0 then Left (who ++ "a fainted Pokemon regained HP") else Right ()
+        let regen = wasOn && benched && abilityIs "regenerator" m0 && isSwitch (chose p)
+        if regen && monHp m1 /= healed
+          then Left (who ++ "Regenerator holder switched out from " ++ show (monHp m0) ++ " HP and has " ++ show (monHp m1) ++ ", not " ++ show healed)
+          else Right ()
+        -- (the ability can change within the step: a Terastallizing Ogerpon takes Embody Aspect before it pivots out, so the
+        -- holder must still have Natural Cure after the step)
+        let cure = wasOn && benched && abilityIs "naturalcure" m0 && abilityIs "naturalcure" m1
+        if cure && monStatus m1 /= StatusNone then Left (who ++ "Natural Cure holder switched out with the status " ++ show (monStatus m1)) else Right ()
+        let ejected = not stealing && wasOn && itemIs "ejectbutton" m0 && monItem m1 == noItem
+            carded = not stealing && not forcing && wasOn && itemIs "redcard" m0 && monItem m1 == noItem
+        if ejected && not ((monActive m1 && monSwitchFlag m1 == SwitchForced && monHp m1 > 0) || monFainted m1)
+          then Left (who ++ "Eject Button used up, but its holder is neither flagged to switch nor fainted") else Right ()
+        if carded && foeAfter then Left (who ++ "Red Card used up, but the attacker was not forced out") else Right ()
+        pure mempty
+          { seenRegen = fromEnum (regen && monHp m0 < monMaxHp m0)
+          , seenCure = fromEnum (cure && monStatus m0 /= StatusNone)
+          , seenEject = fromEnum ejected
+          , seenRedCard = fromEnum carded
+          }
+      _ -> Right mempty
+    isSwitch c = case c of Just (Switch _) -> True; _ -> False
+    otherP p = if p == P1 then P2 else P1
     drag (p, c) = do
       let s = sideOf p b
           s' = sideOf p b'
@@ -223,7 +307,7 @@ checkBattle dx b = do
   where
     -- The switch flag (slice 6a): only the Pokemon in the active slot has one (a fainted one is no longer 'isActive' there: faintMessages
     -- sets `isActive = false`); a self-switch move's flag (SwitchMove) is on an active Pokemon with HP, a faint's (SwitchForced) on a
-    -- fainted one. A flag outlives no decision point except the switch request that asks for it, and a switch request asks exactly
+    -- fainted one, an Eject Button's on an active one with HP and no item. A flag outlives no decision point except the switch request that asks for it, and a switch request asks exactly
     -- the sides whose active-slot Pokemon is flagged (and that have a Pokemon left).
     switchFlags = do
       let flagged p = [(i, m) | (i, m) <- zip [0 :: Int ..] (SV.toList (sMons (sideOf p b))), monSwitchFlag m /= NoSwitch]
@@ -231,7 +315,9 @@ checkBattle dx b = do
         if U.head (sSlots (sideOf p b)) == i then Right () else Left (show p ++ ": a switch flag on member " ++ show i ++ ", not the one in the active slot")
         case monSwitchFlag m of
           SwitchMove | monHp m <= 0 || not (monActive m) -> Left (show p ++ ": a self-switch flag on a Pokemon with no HP or off the field")
-          SwitchForced | not (monFainted m) -> Left (show p ++ ": a forced-switch flag on a Pokemon that has not fainted")
+          -- (an Eject Button's flag, slice 6c: set on a live active holder together with its use of the item, so the holder has no item)
+          SwitchForced | not (monFainted m) && not (monActive m && monHp m > 0 && monItem m == noItem) ->
+            Left (show p ++ ": a forced-switch flag on a Pokemon that has not fainted and is not an Eject Button holder that used its item")
           _ -> Right ())
         [(p, im) | p <- [P1, P2], im <- flagged p]
       case request b of
