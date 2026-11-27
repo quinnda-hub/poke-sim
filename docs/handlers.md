@@ -1074,7 +1074,54 @@ Protect, Spiky Shield, Baneful Bunker and Endure are accepted, with the `stall` 
 
 ### 7c findings
 
-(to be written by 7c)
+Encore and Taunt are accepted. Both are `volatileStatus` moves, and their volatiles are `CEncore` and `CTaunt`, read from the
+`condition` block of the move (as Roost's is).
+
+- **How the volatile is added.** `volatileStatus` is the move's own id, so it is 7a's `EOwnVolatile` (encore and taunt are in
+  `ownVolatileMoves`), the whole of the move's `mrOnHit`. `statusMove` calls `addVolatile` (`condByName` of the move id), and the move
+  fails (no Update events) exactly when it returns false (battle-actions.ts 1305-1308).
+- **`failencore` is live.** `mrFailEncore` is the flag, translated like `contact` and `powder`; the inert entry is gone. Only Encore
+  and Struggle have it among moves that can be a last move here.
+- **State.** `monLastMove` (a Dex move index, -1 for null) and `monActiveTurns`. `lastMove` is set in `runMove` after `BeforeMove` and
+  the PP check (battle-actions.ts 339-354, `pokemon.moveUsed`), so a flinch, a full paralysis or Taunt leaves it alone. Struggle sets
+  it too (Struggle is a Dex move; Encore then fails: no slot and `failencore`). A Tera move sets it like any move. `clearVolatile`
+  clears it: the switch-out in `switchIn` and the faint in `resolveFaints`. `activeTurns` is 0 at switch-in and +1 in `endTurn`
+  for each active Pokemon that has not fainted (battle.ts 1782; it is in `endTurn`, not in the residual).
+- **OverrideAction.** `runEvent('OverrideAction', pokemon, target, baseMove)` is the first thing in `runMove` (battle-actions.ts
+  277-287), skipped for Struggle. Encore's handler returns the encored move's id when the chosen move differs. `runMove` then uses
+  the encored move: its `BeforeMove`, its slot's PP, its target. The queue is not re-sorted, and the move in use keeps the chosen
+  move's priority (`baseMove.priority = priority`): an Encored Bullet Punch used in place of Taunt is not blocked by Psychic Terrain
+  (seed 704 of the set found this).
+- **PP check order (the old LATENT).** `runMove` now runs `BeforeMove` first and then the PP check, as Showdown does
+  (a move with no PP left returns before `useMove`, no `lastMove`, no `AfterMove`). The override can name a move whose PP ran
+  out this turn, so the path can be reached.
+- **Encore start (`onStart`).** Fails with no `lastMove`, a `failencore` last move, no slot for it, or a slot with 0 PP. Then
+  `effectState.move` is the move (`esA`) and the duration (3) gets +1 if `willMove target` is Nothing: the target already moved
+  this turn. A second Encore fails in `addVolatile` (no `onRestart`).
+- **Encore end.** Residual order 16: the duration counts down first, and at 0 the volatile goes; otherwise it goes when the encored
+  move has no PP. `onDisableMove` disables every other slot. Struggle comes from the generic rule: all slots disabled or empty.
+- **Taunt.** Duration 3, +1 if `activeTurns > 0` and `willMove target` is Nothing (so never on the turn it came in or its
+  first turn: `activeTurns` is 0 until the first `endTurn`). `onBeforeMove` (priority 5, between flinch 8 and paralysis 1) blocks a
+  Status move other than Me First and returns false: no PP, no `lastMove`. `onDisableMove` disables Status moves (the helper
+  of Assault Vest). Residual order 15.
+- **Request and trace.** A disabled move shows `disabled: true` in the request and the trace; the record's legal choices leave it
+  out, as `legalChoices` does. A Pokemon with every move disabled is offered `move 1` (Struggle) alone, with no Tera.
+- **Parity.** The trace records `encore`'s `move`; the parity test compares it from `esA` (the lead's change).
+- **LATENT.** Oblivious, Aroma Veil and Mental Herb are not accepted, so nothing refuses or clears the volatiles; Magic Bounce and
+  Magic Coat (`reflectable`) are not accepted; Substitute (7b) does not stop either move (`bypasssub`).
+- **Interactions with the stack** (checked only by the four step-4 sets, no new traces). Protect (7a): its `protect` flag is live and
+  Encore and Taunt carry it, so a protecting target blocks them in `TryHit` after `PrepareHit`; Taunt in turn blocks Protect (a Status
+  move) in `BeforeMove`, before `PrepareHit` and its stall draw. Choice items (7e): the override runs before `BeforeMove`, so a Choice
+  holder locked into another move that Encore swaps in meets choicelock's `-fail` for the encored move (no PP lost), as 7e's
+  LATENT(7c) says; Showdown's order is the same, and Encore's `DisableMove` and choicelock's both run at `endTurn`. Sucker Punch (7d):
+  its `onTry` reads the queued action (`willMove`), which Encore's override does not change, as in Showdown (the override happens in
+  `runMove`).
+- **Properties** (both tiers, in `Playout.checkBattle`): an encored Pokemon whose encored move can be used is offered no other
+  move; a taunted Pokemon is offered no Status move other than Me First (unless it must Struggle); a Pokemon that is not active has
+  no last move, no encore and no taunt; encore and taunt durations and the encored move are in bounds. `pivotPlayouts` covers
+  both volatiles at move requests, and `genPivotTeams` carries Encore and Taunt.
+- **Set.** `slice7c`, 1000 battles from `gen-slice7c.js` (about 59% scripted). Its tally shows each Encore fail reason, the +1 turn, the
+  override, the 0-PP end, Taunt's +1 and its block, Struggle with everything disabled, and a switch while encored or taunted.
 
 ### 7d findings
 

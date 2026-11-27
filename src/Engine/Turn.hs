@@ -189,6 +189,8 @@ endTurn dx = do
       let a = activeActor p b
       modify' (modifyMon a (\m -> m {monMoves = SV.map (\ms -> ms {msDisabled = False}) (monMoves m)}))
       void (runEvent dx EvDisableMove a Nothing Nothing RNone)
+      -- slice 7c: `pokemon.activeTurns++` (battle.ts 1782), in the same loop, after the trapping checks, for a Pokemon that has not fainted
+      modify' (modifyMon a (\m -> if monFainted m then m else m {monActiveTurns = monActiveTurns m + 1}))
   t <- gets bTurn
   -- maybeTriggerEndlessBattleClause: turn limit (staleness cannot arise in slice 0)
   if t > 1000
@@ -445,7 +447,7 @@ switchIn dx how p target = do
         endAbilityAndItem dx o
         -- queue.cancelAction(oldActive) (battle-actions.ts 124-127: a Pokemon forced out or switching by its own move cannot use its
         -- chosen move; the actions it still has queued go, except a runSwitch); oldActive.clearVolatile() (resets the stat stages, the volatiles, both switch flags (`includeSwitchFlags`, pokemon.ts 1530, 1558-1561: a U-turn user dragged out by Red Card keeps none) and the cached speed; the status, and toxic's stage, stay)
-        modify' (\b -> modifyMon o (\m -> m {monSpeed = stSpe (monStats m), monBoosts = noBoosts, monVolatiles = SV.empty, monAbility = monBaseAbility m, monSwitchFlag = NoSwitch, monForceSwitchFlag = False}) b {bQueue = cancelAction o (bQueue b)})
+        modify' (\b -> modifyMon o (\m -> m {monSpeed = stSpe (monStats m), monBoosts = noBoosts, monVolatiles = SV.empty, monLastMove = -1 {- slice 7c: clearVolatile, pokemon.ts 1563 -}, monAbility = monBaseAbility m, monSwitchFlag = NoSwitch, monForceSwitchFlag = False}) b {bQueue = cancelAction o (bQueue b)})
       _ -> pure ()
     case old of
       Just o -> do
@@ -454,7 +456,8 @@ switchIn dx how p target = do
         -- the old active and the incoming Pokemon trade slots
         modify' (modifySide p (\s -> s {sSlots = swapSlot0 target (sSlots s)}))
       Nothing -> pure ()
-    modify' (modifyMon tgt (\m -> m {monActive = True}) . modifySide p (\s -> s {sHasActive = True}))
+    -- (slice 7c: `pokemon.activeTurns = 0`, battle-actions.ts 157)
+    modify' (modifyMon tgt (\m -> m {monActive = True, monActiveTurns = 0}) . modifySide p (\s -> s {sHasActive = True}))
     -- pokemon.abilityState = initEffectState({ id: pokemon.ability, target: pokemon }); pokemon.itemState =
     -- initEffectState({ id: pokemon.item, target: pokemon }) (battle-actions.ts 185-186). The Pokemon is active, so a
     -- state with an id takes the next effectOrder: the ability always (`noability` is an id), the item when held
@@ -524,38 +527,54 @@ runMove fmt dx user@(Actor p _) slot = do
   let target = activeActor (other p) b
       um = monOf b user
   case (slot < 0, monMoves um SV.!? slot) of
-    (True, _) ->
-      -- pokemon.deductPP finds no Struggle slot and returns 0, which runMove allows for struggle
-      go target (dxStruggle dx) (pure ())
-    -- LATENT: Showdown runs BeforeMove (with its frz/par draws) before the PP check (battle-actions.ts runMove
-    -- ~312, then deductPP ~339); here a move at 0 PP returns before BeforeMove. Unreachable while a chosen move
-    -- always has PP; it goes live with PP drain mid-turn (Pressure, Spite, Eerie Spell).
-    (False, Just ms)
-      | msPP ms > 0 ->
-          -- pokemon.deductPP
-          go target (moveData dx (msMove ms))
-            (modify' (modifyMon user (\m -> m {monMoves = SV.imap (\i x -> if i == slot then x {msPP = msPP x - 1} else x) (monMoves m)})))
+    -- Struggle: `baseMove.id !== 'struggle'` skips OverrideAction (battle-actions.ts 277); pokemon.deductPP finds no Struggle slot and
+    -- returns 0, which runMove allows for struggle
+    (True, _) -> go target (dxStruggle dx) (M.findWithDefault (-1) "struggle" (dxMoveIx dx)) Nothing
+    (False, Just ms) -> do
+      -- slice 7c. runEvent('OverrideAction', pokemon, target, baseMove) (battle-actions.ts 278-287): Encore returns the encored move's id;
+      -- `baseMove = getActiveMove(changedMove); baseMove.priority = priority` keeps the chosen move's priority, on the move in use too
+      -- (Psychic Terrain's TryHit and the Tera floor read `move.priority`; the queue is not re-sorted either), and the target is `getRandomTarget(pokemon, baseMove)` ('go' recomputes it from the
+      -- move). The slot whose PP is deducted is the new move's (`deductPP(baseMove)` finds it by id).
+      let chosen = moveData dx (msMove ms)
+      over <- runEvent dx EvOverrideAction user (Just target) (Just chosen) RNone
+      case over of
+        RText i | Just ix <- M.lookup i (dxMoveIx dx) -> go target ((moveData dx ix) {mvPriority = mvPriority chosen}) ix (SV.findIndex ((== ix) . msMove) (monMoves um))
+        _ -> go target chosen (msMove ms) (Just slot)
     _ -> pure ()
   where
-    go target mv deductPP = do
+    -- @mix@: the Dex index of the move in use; @mslot@: the index of its move slot (Nothing: none, as for Struggle)
+    go target mv mix mslot = do
       -- runEvent('BeforeMove'): before PP is deducted; a move stopped here costs no PP and returns from
-      -- runMove without the closing resolveFaints / checkWin (there is nothing to resolve)
+      -- runMove without the closing resolveFaints / checkWin (there is nothing to resolve), and does not set lastMove
       -- (a move on the user targets the user: battle.getRandomTarget returns the Pokemon for 'self')
       -- (battle.getRandomTarget: `self`, `all`, `allySide` and `allyTeam` return the Pokemon; foeSide the foe)
       let eventTarget = if mrTarget (mvRule mv) `elem` [TargetSelf, TargetAllySide, TargetAll] then user else target
       proceed <- relayTruthy <$> runEvent dx EvBeforeMove user (Just eventTarget) (Just mv) RNone
       when proceed $ do
-        void deductPP
-        useMove fmt dx user target mv
-        -- runMove (battle-actions.ts 366-368), after useMove: `singleEvent('AfterMove', move, null, pokemon, target, move)` (no supported
-        -- move has an onAfterMove) then `runEvent('AfterMove', pokemon, target, move)`: Eject Pack's onAnyAfterMove. The move is the
-        -- one chosen: Showdown passes the ActiveMove after useMove's changes, which no handler of AfterMove reads.
-        -- A move stopped before useMove (BeforeMove, the PP check) returns earlier and reaches neither.
-        void (singleMoveEvent dx EvAfterMove user (Just target) mv)
-        void (runEvent dx EvAfterMove user (Just target) (Just mv) RNone)
-        -- resolveFaints(); checkWin()
-        resolveFaints dx False True
-        void (checkWin Nothing)
+        -- pokemon.deductPP (battle-actions.ts 339), after BeforeMove: `if (!pokemon.deductPP(baseMove, null, target) && move.id !== 'struggle')`
+        -- the move fails (`cant nopp`) and returns. deductPP returns 0 for a move with no slot or no PP left. (A chosen move always has PP
+        -- at the request, but BeforeMove can no longer hide that: Encore's override can name a move whose PP ran out this turn.)
+        b <- get
+        let um = monOf b user
+            struggling = slot < 0
+            hasPP = case mslot of
+              Just i -> maybe False ((> 0) . msPP) (monMoves um SV.!? i)
+              Nothing -> False
+        when (struggling || hasPP) $ do
+          forM_ mslot $ \i ->
+            modify' (modifyMon user (\m -> m {monMoves = SV.imap (\j x -> if j == i then x {msPP = msPP x - 1} else x) (monMoves m)}))
+          -- pokemon.moveUsed(move, targetLoc) (battle-actions.ts 354; pokemon.ts 920-935): `this.lastMove = move`
+          modify' (modifyMon user (\m -> m {monLastMove = mix}))
+          useMove fmt dx user target mv
+          -- runMove (battle-actions.ts 366-368), after useMove: `singleEvent('AfterMove', move, null, pokemon, target, move)` (no supported
+          -- move has an onAfterMove) then `runEvent('AfterMove', pokemon, target, move)`: Eject Pack's onAnyAfterMove. The move is the
+          -- one chosen: Showdown passes the ActiveMove after useMove's changes, which no handler of AfterMove reads.
+          -- A move stopped before useMove (BeforeMove, the PP check) returns earlier and reaches neither.
+          void (singleMoveEvent dx EvAfterMove user (Just target) mv)
+          void (runEvent dx EvAfterMove user (Just target) (Just mv) RNone)
+          -- resolveFaints(); checkWin()
+          resolveFaints dx False True
+          void (checkWin Nothing)
 
 -- | The hit steps of @trySpreadMoveHit@ (battle-actions.ts): target check, type immunity, accuracy, then the
 -- hit loop. Spread targets and @randomNormal@ reach the one foe in singles ('TargetFoe'); a move on the
@@ -746,6 +765,11 @@ statusMove dx user tgt mv0 = do
         Nothing -> pure False
       (r, m') <- moveOwnHit dx user tgt mv0
       pure (added || r /= HitFail, m')
+    -- slice 7c. encore, taunt: runMoveEffects (battle-actions.ts 1305-1308) `hitResult = target.addVolatile(moveData.volatileStatus, source, move)`,
+    -- the move's only effect: it did something exactly when the volatile was added (already there, no HP or a failing onStart: the
+    -- move fails, with no Update). LATENT(7b): a Substitute does not stop them (both are `bypasssub`). LATENT: Oblivious (Taunt's
+    -- onTryHit), Aroma Veil (onAllyTryAddVolatile) and Mental Herb (onUpdate) are not supported; nor are Magic Bounce and Magic Coat.
+    [EOwnVolatile] -> (\r -> (r, mv0)) <$> maybe (pure False) (addVolatile dx tgt) (condByName (mvId mv0))
     -- `target.trySetStatus(moveData.status, ...)`; `!hitResult && move.status` fails the move
     [EStatus st] -> (\r -> (r, mv0)) <$> trySetStatus dx tgt st
     -- runMoveEffects (battle-actions.ts 1319-1322): `if (moveData.forceSwitch) hitResult = !!canSwitch(target.side)`, the move's only

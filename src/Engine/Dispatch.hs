@@ -67,7 +67,7 @@ import Data.Bits (testBit)
 import Data.List (sortBy)
 import qualified Data.Map.Strict as M
 import qualified Data.Text as T
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (fromMaybe, isJust, isNothing)
 import qualified Data.Vector.Strict as SV
 import qualified Data.Vector.Unboxed as U
 
@@ -1776,6 +1776,57 @@ runNative dx n c relay = do
     NTrickHit -> keep
     NThiefAfterHit -> keep
     NPoltergeistTry -> keep
+    -- slice 7c
+    -- encore.onStart(target) (data/moves.ts 4741-4757): `let move = target.lastMove; if (!move || target.volatiles['dynamax']) return false`;
+    -- `moveSlot = target.getMoveData(move.id)`; it fails for a `failencore` move, no slot for the move, or a slot with no PP (Struggle has
+    -- no slot, and the flag); else `effectState.move = move.id` and, when `!this.queue.willMove(target)`, one more turn.
+    NEncoreStart -> do
+      b <- get
+      let lm = monLastMove m
+          slots = [ms | lm >= 0, ms <- SV.toList (monMoves m), msMove ms == lm]
+      case slots of
+        ms : _ | not (mrFailEncore (mvRule (moveData dx lm))), msPP ms > 0 -> do
+          let extra = if isNothing (willMove b holder) then 1 else 0
+          modify' (\bb -> maybe bb (\st -> setOwnerState (cOwner c) (cKey c) st {esA = lm, esDuration = esDuration st + extra} bb) (ownerState bb (cOwner c) (cKey c)))
+          keep
+        _ -> returning stop
+    -- encore.onOverrideAction(pokemon, target, move) (4758-4760): `if (move.id !== this.effectState.move) return this.effectState.move`
+    NEncoreOverride -> do
+      b <- get
+      case (cMove c, esA <$> ownerState b (cOwner c) (cKey c)) of
+        (Just mv, Just e) | e >= 0, mvId mv /= mvId (moveData dx e) -> returning (Replace (RText (mvId (moveData dx e))))
+        _ -> keep
+    -- encore.onResidual(target) (4762-4767), order 16: `moveSlot = target.getMoveData(this.effectState.move); if (!moveSlot || moveSlot.pp <= 0)
+    -- target.removeVolatile('encore')`
+    NEncoreResidual -> do
+      b <- get
+      let e = maybe (-1) esA (ownerState b (cOwner c) (cKey c))
+      when (not (any (\ms -> msMove ms == e && msPP ms > 0) (monMoves m))) $
+        modify' (modifyMon holder (removeVolatile (fromEnum CEncore)))
+      keep
+    -- encore.onDisableMove(pokemon) (4771-4780): `if (!this.effectState.move || !pokemon.hasMove(this.effectState.move)) return;` then every other
+    -- slot is disabled
+    NEncoreDisable -> do
+      b <- get
+      let e = maybe (-1) esA (ownerState b (cOwner c) (cKey c))
+      when (e >= 0 && any ((== e) . msMove) (monMoves m)) $
+        modify' (modifyMon holder (\x -> x {monMoves = SV.map (\ms -> if msMove ms /= e then ms {msDisabled = True} else ms) (monMoves x)}))
+      keep
+    -- taunt.onStart(target) (18989-18994): `if (target.activeTurns && !this.queue.willMove(target)) this.effectState.duration!++`
+    NTauntStart -> do
+      b <- get
+      when (monActiveTurns m > 0 && isNothing (willMove b holder)) $
+        modify' (\bb -> maybe bb (\st -> setOwnerState (cOwner c) (cKey c) st {esDuration = esDuration st + 1} bb) (ownerState bb (cOwner c) (cKey c)))
+      keep
+    -- taunt.onBeforeMove(attacker, defender, move) (19000-19006), priority 5: a Status move other than Me First is `cant` and returns false
+    -- (no Z or Max move is supported)
+    NTauntBeforeMove -> case cMove c of
+      Just mv | mvStatus mv, mvId mv /= "mefirst" -> returning stop
+      _ -> keep
+    -- taunt.onDisableMove(pokemon) (18996-19001): every Status move other than Me First is disabled
+    NTauntDisable -> do
+      modify' (modifyMon holder (\x -> x {monMoves = SV.map disableStatus (monMoves x)}))
+      keep
     -- boosterenergy.onStart(pokemon): `this.effectState.started = true`, then its onUpdate
     NBoosterEnergyStart -> do
       modify' (\bb -> maybe bb (\st -> setOwnerState (cOwner c) (cKey c) st {esA = 1} bb) (ownerState bb (cOwner c) (cKey c)))
@@ -2468,6 +2519,7 @@ resolveFaints dx checkWinIfNoFaints checkWin' = do
               { monSpeed = stSpe (monStats mm)
               , monBoosts = noBoosts
               , monVolatiles = SV.empty
+              , monLastMove = -1 -- slice 7c: clearVolatile's `this.lastMove = null` (pokemon.ts 1563)
               , monFainted = True
               , monActive = False
               , monTerastallized = False -- delete pokemon.terastallized (battle.ts 2617)

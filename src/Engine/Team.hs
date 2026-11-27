@@ -216,4 +216,6 @@ buildMon fmt dx s = do
     , monItemState = noEffectState
     , monStatusState = noEffectState
     , monVolatiles = SV.empty
+    , monLastMove = -1
+    , monActiveTurns = 0
     }

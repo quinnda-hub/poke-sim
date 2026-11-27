@@ -442,6 +442,9 @@ conditionFor conditionsV abilitiesV movesV c = do
       CSpikyShield -> Just "spikyshield"
       CBanefulBunker -> Just "banefulbunker"
       CEndure -> Just "endure"
+      -- slice 7c
+      CEncore -> Just "encore"
+      CTaunt -> Just "taunt"
       _ -> Nothing
 
 -- | A move's field condition by key, if the engine runs it ('Engine.Rule.CondLookup').

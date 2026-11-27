@@ -250,6 +250,14 @@ data Mon = Mon
   , monVolatiles :: !(SV.Vector Volatile)
   -- ^ @pokemon.volatiles@ in insertion order (flinch, duration 1: set by a flinch secondary, removed by the next
   -- @Residual@ and by @clearVolatile@).
+  -- slice 7c
+  , monLastMove :: !Int
+  -- ^ @pokemon.lastMove@ (pokemon.ts 190): the 'Engine.Dex' move index of the move last used, -1 for @null@. Set by @moveUsed@ in
+  -- @runMove@ once the move got past @BeforeMove@ and the PP check (a Struggle sets it too), cleared by @clearVolatile@ (a switch-out
+  -- and a faint). Encore reads it.
+  , monActiveTurns :: !Int
+  -- ^ @pokemon.activeTurns@ (pokemon.ts 264): 0 when the Pokemon switches in (battle-actions.ts 157), +1 at each @endTurn@ while it
+  -- is on the field and not fainted (battle.ts 1782). Taunt reads it.
   }
   deriving (Eq, Show)
 

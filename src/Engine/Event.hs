@@ -167,6 +167,10 @@ data EventId
   | EvDamage
   -- ^ @runEvent('Damage', target, source, effect, damage, true)@ in @spreadDamage@ (battle.ts 2146), after the damage is clamped to at least 1
   -- and before it is dealt. Endure's @onDamage@ (priority -10). Run for a move's damage; see 'Engine.Turn.hitMove'.
+  -- slice 7c
+  | EvOverrideAction
+  -- ^ @runEvent('OverrideAction', pokemon, target, baseMove)@ at the head of @runMove@ (battle-actions.ts 278-287), for every move but
+  -- Struggle: a handler returns the id of the move to use instead (Encore). The relay value is the id (@RText@), or @true@ (@RNone@).
   deriving (Eq, Show, Enum, Bounded)
 
 -- | How @runEvent@ orders the handlers of an event (battle.ts 797-803).
@@ -267,6 +271,8 @@ eventName e = case e of
   EvAfterMove -> "AfterMove"
   EvStallMove -> "StallMove"
   EvDamage -> "Damage"
+  -- slice 7c
+  EvOverrideAction -> "OverrideAction"
 
 -- | Which Pokemon a handler reacts to: the holder (@onX@), its allies (@onAllyX@), its foes (@onFoeX@), the
 -- source of the event (@onSourceX@) or anyone (@onAnyX@).
@@ -312,6 +318,8 @@ data CondId = CBrn | CPar | CPsn | CTox | CFrz | CFlinch | CProtosynthesis | CQu
   | CStall | CProtect | CSpikyShield | CBanefulBunker | CEndure
   -- slice 7e
   | CChoiceLock
+  -- slice 7c
+  | CEncore | CTaunt
   deriving (Eq, Show, Enum, Bounded)
 
 -- | The key of the condition in @conditions.json@ (data/conditions.ts).
@@ -337,6 +345,9 @@ condName c = case c of
 
   -- slice 7e
   CChoiceLock -> "choicelock"
+  -- slice 7c
+  CEncore -> "encore"
+  CTaunt -> "taunt"
 
 -- | The condition with a key of @conditions.json@ (or a move's own volatile).
 condByName :: T.Text -> Maybe CondId
@@ -687,6 +698,21 @@ data NativeId
   -- ^ choicelock @onStart@ (data/conditions.ts 326-330): `effectState.move = activeMove.id`; the move is recorded by 'NChoiceItemModifyMove'.
   | NChoiceLockBeforeMove
   | NChoiceLockDisableMove
+  -- slice 7c
+  | NEncoreStart
+  -- ^ encore @condition.onStart@: fails without a usable last move; records the move and adds a turn when the target has no move queued.
+  | NEncoreOverride
+  -- ^ encore @condition.onOverrideAction@: the encored move's id when the chosen move is another.
+  | NEncoreResidual
+  -- ^ encore @condition.onResidual@: ends when the encored move has no PP (or no slot).
+  | NEncoreDisable
+  -- ^ encore @condition.onDisableMove@: every move but the encored one is disabled.
+  | NTauntStart
+  -- ^ taunt @condition.onStart@: one more turn when the target has already been on the field a turn and has no move queued.
+  | NTauntBeforeMove
+  -- ^ taunt @condition.onBeforeMove@: a Status move other than Me First fails.
+  | NTauntDisable
+  -- ^ taunt @condition.onDisableMove@: every Status move other than Me First is disabled.
   deriving (Eq, Show)
 
 -- | The body of each handler the engine implements (written by hand: Showdown's handlers are code). A condition
@@ -741,6 +767,16 @@ nativeBody c POwn e = BNative <$> case (c, e) of
   (CChoiceLock, EvStart) -> Just NChoiceLockStart
   (CChoiceLock, EvBeforeMove) -> Just NChoiceLockBeforeMove
   (CChoiceLock, EvDisableMove) -> Just NChoiceLockDisableMove
+  -- slice 7c: encore (data/moves.ts 4741-4786) and taunt (18988-19009); the End handlers only log
+  (CEncore, EvStart) -> Just NEncoreStart
+  (CEncore, EvOverrideAction) -> Just NEncoreOverride
+  (CEncore, EvResidual) -> Just NEncoreResidual
+  (CEncore, EvEnd) -> Just NLogOnly
+  (CEncore, EvDisableMove) -> Just NEncoreDisable
+  (CTaunt, EvStart) -> Just NTauntStart
+  (CTaunt, EvEnd) -> Just NLogOnly
+  (CTaunt, EvDisableMove) -> Just NTauntDisable
+  (CTaunt, EvBeforeMove) -> Just NTauntBeforeMove
   (_, EvModifyAtk) | paradox c -> Just NParadoxAtk
   (_, EvModifyDef) | paradox c -> Just NParadoxDef
   (_, EvModifySpA) | paradox c -> Just NParadoxSpA
