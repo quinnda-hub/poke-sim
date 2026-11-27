@@ -18,11 +18,13 @@ import Data.Either (isLeft)
 import Data.List (group, sort, sortOn, (\\))
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe)
+import Data.String (fromString)
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as U
 import qualified Data.Vector.Strict as SV
 import qualified Data.Text as T
 import Hedgehog
+import Hedgehog.Internal.Property (Property (..), wilsonBounds)
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Main as H
 import qualified Hedgehog.Range as Range
@@ -59,21 +61,21 @@ main = do
   conditionsJson <- eitherDecodeFileStrict' (dexDir </> "conditions.json") >>= either die pure
   abilitiesJson <- eitherDecodeFileStrict' (dexDir </> "abilities.json") >>= either die pure
   let n = if tier == ("fast" :: String) then 100 else 2000 :: Int
-      -- the properties with `cover` thresholds on rare events (a few percent of playouts): 100 cases leave a threshold short by chance
-      -- often enough to fail a run, so the fast tier runs these for more cases (slice 7). The long tier runs them at n.
-      nCover = if tier == ("fast" :: String) then 400 else n
-  putStrLn ("props: tier " ++ tier ++ ", " ++ show n ++ " tests per property (" ++ show nCover ++ " for the playouts with coverage thresholds)")
+      -- the properties with `cover` thresholds on rare events decide them statistically, not at a fixed count: 'stat'.
+      -- (the fast tier's floor for these is 400 cases, not 100: see 'statistical')
+      stat = statistical (if tier == ("fast" :: String) then 400 else n)
+  putStrLn ("props: tier " ++ tier ++ ", " ++ show n ++ " tests per property (at least that many, and until the coverage statements are verified, for the playouts with coverage thresholds)")
   H.defaultMain
     [ checkSequential $ Group "engine"
         [ ("random playouts keep the decision-point and state invariants", withTests (fromIntegral n) (playouts dex))
         , ("random playouts over teams heavy in self-switch moves, Rocky Helmet, Shedinja, Regenerator, Natural Cure, Eject Button, Red Card and Eject Pack keep the invariants, switch flags and mid-turn requests included",
-            withTests (fromIntegral nCover) (pivotPlayouts dex))
+            stat (pivotPlayouts dex))
         -- slice 8a
         , ("random playouts over teams heavy in the stage and switch-in abilities (Intimidate, Dauntless Shield, Defiant, Contrary, Clear Body, Guard Dog, Inner Focus, Big Pecks, Mirror Armor, Keen Eye, Weak Armor, Justified, Gooey, Speed Boost) and the moves that change stages keep the invariants, the stage range and the once-only Dauntless Shield boost included",
-            withTests (fromIntegral nCover) (statPlayouts dex))
+            stat (statPlayouts dex))
         -- slice 7b
         , ("Substitute: a successful use costs exactly a quarter of the maximum HP and leaves a substitute of that size; a failed one changes nothing",
-            withTests (fromIntegral nCover) (substituteCost dex))
+            stat (substituteCost dex))
         , ("bad input is rejected without draws", withTests (fromIntegral n) (badInput dex))
         , ("every move translates to Right or Left and supported moves are executable",
             withTests 1 (translation dex movesJson))
@@ -103,29 +105,29 @@ main = do
             withTests (fromIntegral n) (itemMoves dex))
         -- slice 8f
         , ("Magic Bounce: a reflectable status move aimed at an unsuppressed holder changes nothing on the holder or its side, and does land on the user",
-            withTests (fromIntegral nCover) (magicBounceHolds dex))
+            stat (magicBounceHolds dex))
         -- slice 7d
         , ("Sucker Punch and Thunderclap: other queued actions never change whether onTry passes, and a failed move makes no accuracy, crit or damage draw and changes no HP",
-            withTests (fromIntegral n) (punchMoves dex))
+            stat (punchMoves dex))
         , ("a weight-based base power never decreases as the target gets heavier or the user lighter",
             withTests (fromIntegral n) (weightBands dex))
         , ("a base-power callback never lowers the move's own base power below what its condition adds",
             withTests (fromIntegral n) (callbacksRaise dex))
         -- slice 8b
         , ("damage abilities: each one only raises or only lowers the damage of the hits it names and leaves every other hit alone, Supreme Overlord rises with the fallen count, and Unaware equals zeroed stages",
-            withTests (fromIntegral nCover) (damageAbilities dex))
+            stat (damageAbilities dex))
         -- slice 8c
         , ("random playouts over teams heavy in the immunity and guard abilities, their items and their moves keep the invariants, and reach what they guard against",
-            withTests (fromIntegral nCover) (guardPlayouts dex))
+            stat (guardPlayouts dex))
         , ("Magic Guard, Sturdy and Poison Heal change a damage only where their handler acts: every other damage is the one a holder with no ability takes",
-            withTests (fromIntegral nCover) (damageGuards dex))
+            stat (damageGuards dex))
         , ("Good as Gold, Water Absorb, Sap Sipper, Soundproof, Bulletproof and Levitate block a move before any other effect: the move changes nothing but the holder's HP (Water Absorb) or Attack (Sap Sipper)",
-            withTests (fromIntegral nCover) (immunityAbilities dex))
+            stat (immunityAbilities dex))
         , ("Shell Armor: a move deals no more to its holder than to a Pokemon with no ability, whatever the crit roll, and draws the same",
-            withTests (fromIntegral nCover) (shellArmor dex))
+            stat (shellArmor dex))
         -- slice 8d
         , ("random playouts over small teams heavy in Flame Body, Static, Rough Skin, Toxic Chain, Synchronize, Magician, Pickpocket, Berserk, Moxie, Shield Dust and Bad Dreams keep the invariants, and no item is ever created",
-            withTests (fromIntegral nCover) (abilityPlayouts dex))
+            stat (abilityPlayouts dex))
         ]
     , checkSequential $ Group "arithmetic (against JavaScript semantics)"
         [ ("roundDiv is Math.round(n / d)", withTests (fromIntegral n) propRoundDiv)
@@ -139,6 +141,25 @@ main = do
         , ("the STAB and burn modifiers are modify(value, 1.5) and modify(value, 0.5)", withTests (fromIntegral n) propDamageModifiers)
         ]
     ]
+
+-- | A property with `cover` statements, run until they are decided. Hedgehog's 'verifiedTermination' stops at the first multiple of 100
+-- cases at which every cover's interval lies at or above its threshold (confirmed) or some cover's lies below it (refuted, and the
+-- property fails). A cover whose true rate sits on its threshold is never decided, so a fixed count would pass or fail it by chance; here the
+-- run goes on until it is. The confidence is one wrong verdict in 10^6.
+--
+-- Two things of hedgehog 1.7 shape the rest. Its 'wilsonBounds' divides the interval's offset by the denominator twice, so the interval is
+-- too narrow, most of all at few cases: after 100 cases with no hit it still has a lower bound of 1.9%, which confirms a cover of 1% or less
+-- (and the run then fails the cover's plain percentage check). So the cases of a run must not be few: `n` is a floor. And an early-terminating
+-- run stops at 100 cases whatever 'withTests' says, so the floor is made by one more statement: an always-true cover whose threshold is the
+-- lowest percentage that the interval confirms after exactly @n@ cases, which is confirmed from case @n@ on and never refuted. The
+-- long tier keeps its 2000 cases that way, and the fast tier's floor is 400.
+statistical :: Int -> Property -> Property
+statistical n prop =
+  withConfidence conf . verifiedTermination . withTests (fromIntegral n) $
+    prop {propertyTest = propertyTest prop >> cover (realToFrac floorPct) (fromString ("at least " ++ show n ++ " cases")) True}
+  where
+    conf = 10 ^ (6 :: Int)
+    floorPct = 100 * (fst (wilsonBounds (fromIntegral n) (fromIntegral n) (1 / 10 ^ (6 :: Int))) - 1e-9)
 
 -- ---------------------------------------------------------------------------
 -- Engine properties
