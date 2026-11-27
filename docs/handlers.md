@@ -1394,3 +1394,187 @@ Properties (both tiers):
 LATENT comments: `LATENT(7c)` in `Dispatch.hs` (two) are resolved and now say why. The two `LATENT(7a)` in `Turn.hs` stay as plain
 `LATENT` (Dancer and Instruct; Sturdy, Magic Guard and Focus Sash), since the mechanics are still unsupported.
 
+
+## Abilities (slice 8)
+
+Roadmap step 5, first part, designed 2026-11-27. Before slice 8, 24 of the
+whitelist's 85 abilities are supported (36.4% by usage). Slice 8 adds 58 more,
+in six phases built in parallel from `slice8-base`, then an integration phase,
+8g. That brings abilities to about 98% by usage. The weights below are usage
+weights from `data/usage/gen9ou.json` (2026-10), as `whitelist-report` prints
+them.
+
+| Phase | Abilities | Weight |
+|---|---|---|
+| 8a, stat stages and switch-in | Intimidate, Dauntless Shield, Defiant, Contrary, Clear Body, Guard Dog, Inner Focus, Big Pecks, Mirror Armor, Keen Eye, Weak Armor, Justified, Gooey, Speed Boost | 0.639 |
+| 8b, damage and stats | Multiscale, Sharpness, Tinted Lens, Guts, Transistor, Sniper, Heatproof, Purifying Salt, Water Bubble, Flash Fire, Supreme Overlord, Vessel of Ruin, Unaware | 1.005 |
+| 8c, immunities and damage guards | Good as Gold, Water Absorb, Levitate, Sturdy, Magic Guard, Poison Heal, Sap Sipper, Soundproof, Bulletproof, Sweet Veil, Shell Armor | 0.827 |
+| 8d, on-hit and after-move | Flame Body, Static, Rough Skin, Toxic Chain, Bad Dreams, Synchronize, Magician, Pickpocket, Berserk, Moxie, Shield Dust | 0.384 |
+| 8e, the move pipeline | Pressure, Prankster, Libero, Protean, Liquid Voice, Infiltrator | 0.521 |
+| 8f, suppression and reflection | Mold Breaker, Neutralizing Gas, Magic Bounce | 0.192 |
+
+Three abilities wait for a mechanic the engine lacks:
+- **Poison Puppeteer** (0.083) confuses the Pokémon it poisons, and confusion
+  is not modelled.
+- **Cute Charm** (0.008) needs Attract.
+- **Disguise** (0.006) needs a forme change.
+
+They come with those mechanics. Sleep is not modelled either. Bad Dreams and
+Sweet Veil act only on sleep (and Yawn), which nothing can inflict yet, so
+their handlers are written exactly but cannot fire. Each carries
+`-- LATENT(sleep)`, and the slice that adds sleep traces them.
+
+### Base (`slice8-base`, built before the phases)
+
+The phases share four paths through the engine. Each is built once, in the
+base, so that no two phases write it. The base changes no behaviour on the
+existing corpus: parity must pass with the same draws.
+
+1. **A wider event mask.** `cnEvents` and `cnEventsBy` become a two-word
+   mask (`EvMask !Word64 !Word64`, 128 events), so that phases can add
+   events. The property that checks the bound changes from 64 to 128.
+2. **The boost path.** `boostMon` follows `battle.boost` (battle.ts 2037-2100)
+   step for step:
+   - the early returns;
+   - `runEvent('ChangeBoost')`, then the cap;
+   - `runEvent('TryBoost')`;
+   - each stat applied, then `runEvent('AfterEachBoost')` when something
+     changed;
+   - `runEvent('AfterBoost')`.
+
+   `ChangeBoost`, `TryBoost` and `AfterEachBoost` are new events. The boost
+   events carry the effect that caused the boost, as Showdown's `effect`
+   argument does: a move, an ability, an item, or a condition. When the
+   argument is null, Showdown uses the running effect, and this is how
+   Intimidate's boost is recognised (`effect.name === 'Intimidate'`).
+   `statsRaisedThisTurn` and `statsLoweredThisTurn` stay LATENT: no
+   whitelisted reader is supported.
+3. **Damage through one path.** Every place Showdown damages through
+   `battle.damage` or `spreadDamage` (battle.ts) runs the `Damage` event with
+   the damaging effect, through one function. That covers residual damage,
+   hazards, recoil, Struggle, Rocky Helmet, weather and items, as well as the
+   hit path, where 7a's call site moves into it. Magic Guard
+   (`effect.effectType !== 'Move'`), Poison Heal (`psn`, `tox`), Heatproof
+   (`brn`) and Sturdy all read the effect. With no listener, the event does
+   nothing and draws nothing.
+4. **The move in use.**
+   - A transient battle field, `bActiveMove`, holds the user and the move's
+     `ignoreAbility`, which `suppressingAbility` reads (battle.ts 366-369). It
+     is set where `useMoveInner` calls `setActiveMove`, restored after a
+     nested `useMove` (battle-actions.ts 363, 416), and cleared where
+     Showdown clears it. At every decision point it is empty; a property
+     checks this.
+   - Flags Showdown writes on the `ActiveMove` travel on the move-in-use copy
+     of `MoveData`, as Parting Shot's change already does. The fields are in
+     the state table below.
+
+The base also adds:
+- **`hasAbility`,** the one helper for every direct ability test outside the
+  dispatcher (Levitate in `isGrounded`, a body's "does the target have X").
+  It is `pokemon.hasAbility`, which consults `ignoringAbility`.
+- **The Tera fix in `whitelist-report`:** it counts Tera types as supported,
+  as they have been since slice 5.
+
+### Decisions shared by every phase
+
+- **State.** These additions are allowed. Anything else goes to the lead.
+
+  | Where | Field | Meaning | Phase |
+  |---|---|---|---|
+  | `Mon` | `monShieldBoost :: !Bool` | `pokemon.shieldBoost`: Dauntless Shield fires once per battle per Pokémon, so this is never reset | 8a |
+  | `Side` | `sTotalFainted :: !Int` | `side.totalFainted` (battle.ts 2601, side.ts 263) | 8b |
+  | ability state `esA` | `fallen` | Supreme Overlord's count at its start, capped at 5 | 8b |
+  | ability state `esA` | `libero` / `protean` | 1 once the type has changed this switch-in | 8e |
+  | ability state `esA` | `checkedBerserk` | Berserk | 8d |
+  | ability state `esA` | `ending` | Neutralizing Gas | 8f |
+  | volatile | `flashfire` | Flash Fire's boost, a `Volatile` like the step-4 ones | 8b |
+  | move in use | `mvIgnoreEvasion` | Keen Eye | 8a |
+  | move in use | `mvRuinedSpA :: !Int` | `move.ruinedSpA`: the Ruin holder's slot, or -1 | 8b |
+  | move in use | `mvInfiltrates`, `mvPranksterBoosted` | Infiltrator, Prankster | 8e |
+  | move in use | `mvIgnoreAbility`, `mvHasBounced` | Mold Breaker, Magic Bounce | 8f |
+
+  The ability state is reset on switch-in, as Showdown does
+  (battle-actions.ts 185). The engine already does so at `Turn.hs` 467.
+  Check it at each use.
+- **Events.** A phase may add an event only where Showdown runs it, at the
+  same call site and in the same order, with a comment naming the file and
+  function. Expected:
+  - 8b: `ModifyBoost` (pokemon.ts 602 and 639; battle-actions.ts accuracy),
+    and `onAny` stat modifiers for Vessel of Ruin. The prefix already exists.
+  - 8c: `CriticalHit` (battle-actions.ts 1704).
+  - 8d: `AfterSetStatus` (pokemon.ts 1768), `AfterFaint` (battle.ts 2655),
+    `ModifySecondaries` (battle-actions.ts 1401). Berserk's `onTryEatItem`
+    has no reachable caller while berries are unsupported, so it stays
+    LATENT.
+  - 8e: `DeductPP` (battle-actions.ts 541-551, once per
+    `pressureTargets`), and the holder's halves of `ModifyPriority`
+    (battle.ts 2700) and `ModifyType` (battle-actions.ts 497), which today
+    run only the move's own handler.
+
+  Any other change to where sorts or draws happen goes to the lead first.
+- **Bodies.** Native (`BNative`) unless an existing rule kind fits exactly.
+  No rule kind is added in a phase. A pattern with three or more users
+  across phases (Water Absorb and Sap Sipper's absorb, say) is reported to
+  the lead for 8g to decide.
+- **Suppression.** `breakable` is already parsed from the data. A phase
+  writes its abilities as ordinary handlers reached through `runEvent`, and
+  any other ability test goes through `hasAbility`. Then 8f's gates, in the
+  handler loop (battle.ts ~843-896) and `ignoringAbility` (pokemon.ts
+  879-895), cover every ability at once. A phase must not test an ability by
+  reading `monAbility` directly.
+- **The escape hatch.** Magic Bounce is the second one. It reflects a move by
+  calling `useMove` again with a fresh move (abilities.ts 2438-2465), which
+  re-enters the move pipeline. It is marked `-- ESCAPE HATCH: magicbounce`.
+- **Interactions.** Each phase must be exact against everything on main,
+  which its own pool supplies. Interactions between phases belong to 8g.
+  Where a phase can see one coming, it leaves a `-- LATENT(8x):` comment.
+  Expected ones:
+  - Unaware against the boosts of 8a (8b × 8a);
+  - Magic Guard against Rough Skin, Rocky Helmet and recoil (8c × 8d);
+  - Sturdy against multi-hit moves and Substitute;
+  - Magic Bounce against Prankster (8f × 8e);
+  - Infiltrator against Substitute and the screens;
+  - Pressure against Encore and Choice lock;
+  - Mold Breaker against every breakable ability (8f × all).
+- **Parallel work.** As in slice 7:
+  - each phase keeps its additions to the shared lists in one block per list,
+    headed `-- slice 8x`;
+  - it does not reorder or reformat existing code;
+  - it writes its findings only in its own subsection below.
+- **Traces.** Each phase has `tools/oracle/gen-slice8x.js` and its own set,
+  recorded from its own branch's `engine-pool`, with teams biased toward its
+  abilities. Every newly accepted ability appears in some team. JSON is
+  recorded to `local/record/slice8x` and packed into `local/traces/slice8x`
+  (trace format v2) once it passes. 8g records one combined set from the
+  stacked engine, with Mold Breaker and Neutralizing Gas facing every
+  breakable ability.
+
+### Showdown pointers (read the source; these are leads, not facts)
+
+- The handler loop's suppression is in `runEvent` (battle.ts ~843-896). It
+  skips a `breakable` Ability when `suppressingAbility(holder)` holds, and any
+  Ability when `holder.ignoringAbility()` holds (except `End`).
+  `runEvent`'s early exit for `SwitchIn` is at 609-622.
+- `suppressingAbility` is at battle.ts 366-369. It holds only while
+  `activePokemon` is active and is not the target. Mold Breaker, Teravolt and
+  Turboblaze set `move.ignoreAbility` in `onModifyMove`, which runs at
+  battle-actions.ts 503, after `setActiveMove`.
+- `ignoringAbility` is pokemon.ts 879-895:
+  - not active;
+  - `cantsuppress`;
+  - Gastro Acid;
+  - Ability Shield;
+  - an active Neutralizing Gas that is not `ending`.
+- `cantsuppress` abilities include Disguise, Zen Mode, Commander and Tera
+  Shift.
+- Pressure's extra PP is at battle-actions.ts 540-551. Its targets come from
+  `getMoveTargets` (`pressureTargets`: none for `foeSide`, all foes for
+  `mustpressure`). The usual deduction is in `runMove` (battle-actions.ts
+  339).
+- `abilityState` is reset at battle-actions.ts 185 and pokemon.ts 1947.
+  `shieldBoost` is set only in the constructor (pokemon.ts 501-502) and
+  Dauntless Shield (abilities.ts 855-856).
+- Switch-in starts run as `fieldEvent('SwitchIn')`, which substitutes an
+  ability's or item's `onStart` (battle.ts 1028-1036). Both sides are sorted
+  together, at battle start too (battle.ts 2724-2751, battle-actions.ts
+  228-251).
