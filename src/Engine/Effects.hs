@@ -199,6 +199,32 @@ abilityBodies ty wx name = case name of
   "vesselofruin" -> Just [(POwn, EvStart, BNative NLogOnly), (PAny, EvModifySpA, BNative NVesselOfRuinSpA)]
   -- unaware: onAnyModifyBoost
   "unaware" -> Just [(PAny, EvModifyBoost, BNative NUnawareModifyBoost)]
+  -- slice 8c. The abilities that block a hit or guard against damage.
+  -- LATENT(8f): all of them but Magic Guard and Poison Heal are `breakable` (Good as Gold, Water Absorb, Levitate, Sturdy, Sap Sipper, Soundproof,
+  -- Bulletproof, Sweet Veil, Shell Armor): the dispatcher already skips their handlers while 'Engine.Damage.suppressingAbility' holds, and Levitate's
+  -- grounding reads it, but no move sets @ignoreAbility@ until Mold Breaker arrives. Magic Bounce's reflected moves reach Good as Gold the same way.
+  -- goodasgold (abilities.ts 1631): onTryHit, a Status move from another Pokemon -> null
+  "goodasgold" -> Just [(POwn, EvTryHit, BNative NGoodAsGoldTryHit)]
+  -- waterabsorb (5365): onTryHit, a Water move from another Pokemon -> heal baseMaxhp / 4, null
+  "waterabsorb" -> Just [(POwn, EvTryHit, BNative NWaterAbsorbTryHit)]
+  -- levitate (2312): no handler; airborneness is Pokemon#isGrounded ('Engine.Damage.isGrounded')
+  "levitate" -> Just []
+  -- sturdy (4674): onTryHit blocks an OHKO move (none is accepted), onDamage (priority -30) leaves 1 HP from full HP
+  "sturdy" -> Just [(POwn, EvTryHit, BNative NSturdyTryHit), (POwn, EvDamage, BNative NSturdyDamage)]
+  -- magicguard (2466): onDamage cancels every damage that is not a Move's
+  "magicguard" -> Just [(POwn, EvDamage, BNative NMagicGuardDamage)]
+  -- poisonheal (3332): onDamage (priority 1), psn and tox damage heals baseMaxhp / 8 instead
+  "poisonheal" -> Just [(POwn, EvDamage, BNative NPoisonHealDamage)]
+  -- sapsipper (4024): onTryHit (priority 1), a Grass move from another Pokemon -> +1 Attack, null; onAllyTryHitSide for an ally
+  "sapsipper" -> Just [(POwn, EvTryHit, BNative NSapSipperTryHit), (PAlly, EvTryHitSide, BNative NSapSipperAllyTryHitSide)]
+  -- soundproof (4437): onTryHit, a sound move from another Pokemon -> null; onAllyTryHitSide only logs
+  "soundproof" -> Just [(POwn, EvTryHit, BNative NSoundproofTryHit), (PAlly, EvTryHitSide, BNative NSoundproofAllyTryHitSide)]
+  -- bulletproof (480): onTryHit, a bullet move -> null
+  "bulletproof" -> Just [(POwn, EvTryHit, BNative NBulletproofTryHit)]
+  -- sweetveil (4788): onAllySetStatus (slp), onAllyTryAddVolatile (yawn)
+  "sweetveil" -> Just [(PAlly, EvSetStatus, BNative NSweetVeilSetStatus), (PAlly, EvTryAddVolatile, BNative NSweetVeilTryAddVolatile)]
+  -- shellarmor (4223): `onCriticalHit: false`, a constant handler
+  "shellarmor" -> Just [(POwn, EvCriticalHit, BConst (RBool False))]
   _ -> Nothing
   where
     speed ws = do

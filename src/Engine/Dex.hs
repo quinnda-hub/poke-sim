@@ -569,7 +569,13 @@ effectFor ident typeOrder ownPfx startAsSwitchIn v mbodies = do
       -- (`side.active.length === 1`) and its `showCure` is log-only: no event point, no body
       names2 = if ident == "naturalcure" && startAsSwitchIn then filter (/= "onCheckShow") names1 else names1
       -- ejectpack.onAnyAfterMega (items.ts 1739) runs `afterMega` events, which Gen 9 has none of (no Mega Evolution): no event point, no body
-      names = if ident == "ejectpack" && startAsSwitchIn then filter (/= "onAnyAfterMega") names2 else names2
+      names3 = if ident == "ejectpack" && startAsSwitchIn then filter (/= "onAnyAfterMega") names2 else names2
+      -- slice 8c: Shell Armor's @onCriticalHit: false@ is not a function, so the export does not list it under @handlers@; Showdown still
+      -- collects it as a handler whose callback is the constant (battle.ts 'findPokemonEventHandlers', 'runEvent' 903-905). The ability
+      -- carries it as a key, and the engine runs it as a constant body ('BConst').
+      names = case v of
+        Object o | startAsSwitchIn, KM.member "onCriticalHit" o, "onCriticalHit" `notElem` names3 -> names3 ++ ["onCriticalHit"]
+        _ -> names3
   boosts <- case v of
     Object o | startAsSwitchIn, Just (Object bo) <- KM.lookup "boosts" o ->
       traverse (\(k, x) -> (,) <$> boostStatOf (K.toText k) <*> asInt x) (KM.toList bo)

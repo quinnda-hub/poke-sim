@@ -1340,6 +1340,69 @@ runNative dx n c relay = do
       (Just mv, Just src)
         | src /= holder, not (mrBypassSub (mvRule mv)) -> returning (Replace (if mvStatus mv then RBool False else RInt 0))
       _ -> keep
+    -- slice 8c. The holder is the event's target (`onTryHit(target, source, move)`, `onDamage(damage, target, source, effect)`), the
+    -- source is the attacker. Each TryHit body returns null (a stop) to block the hit; the log lines are not modelled.
+    -- goodasgold.onTryHit (data/abilities.ts 1631): `move.category === 'Status' && target !== source`.
+    -- LATENT(8f): Magic Bounce reflects a status move first (it runs at priority 2) and the reflected use comes back through here;
+    -- Mold Breaker (breakable) is 'skipped' in the dispatcher by 'suppressingAbility'.
+    NGoodAsGoldTryHit -> case (cMove c, cSource c) of
+      (Just mv, Just src) | mvStatus mv, src /= holder -> returning stop
+      _ -> keep
+    -- waterabsorb.onTryHit (5365): `target !== source && move.type === 'Water'` -> `this.heal(target.baseMaxhp / 4)` (battle.heal:
+    -- an amount of at most 1 is 1, then truncated; it heals nothing at full HP and the move is blocked either way), null.
+    -- LATENT: battle.heal's TryHeal event has no listener (Heal Block is not accepted).
+    NWaterAbsorbTryHit -> case (cMove c, cSource c) of
+      (Just mv, Just src) | src /= holder, typeIsNamed dx (mvType mv) "Water" -> do
+        modify' (healMon holder (max 1 (monMaxHp m `quot` 4)))
+        returning stop
+      _ -> keep
+    -- sapsipper.onTryHit (4024, priority 1): `target !== source && move.type === 'Grass'` -> `this.boost({atk: 1})` (battle.boost's defaults:
+    -- the event's target and source, and the running effect, the ability), null whether or not the boost happened
+    NSapSipperTryHit -> case (cMove c, cSource c) of
+      (Just mv, Just src) | src /= holder, typeIsNamed dx (mvType mv) "Grass" -> do
+        void (boostMon dx (Just src) (Just mv) (Just (cKey c)) holder [(BAtk, 1)])
+        returning stop
+      _ -> keep
+    -- sapsipper.onAllyTryHitSide(target, source, move): `source === this.effectState.target || !target.isAlly(source)` returns. The event
+    -- is 'TryHitSide' for a move on a side, whose target is the Pokemon the move is aimed at; in singles the holder is the only ally of
+    -- that target (alliesAndSelf), and the source is either the holder (returns) or the foe (not an ally: returns). Never acts here.
+    -- LATENT(doubles): `this.boost({atk: 1}, this.effectState.target)` for a Grass move on an ally's side.
+    NSapSipperAllyTryHitSide -> keep
+    -- soundproof.onTryHit (4437): `target !== source && move.flags['sound']`; onAllyTryHitSide only logs `-immune`
+    NSoundproofTryHit -> case (cMove c, cSource c) of
+      (Just mv, Just src) | src /= holder, mrSound (mvRule mv) -> returning stop
+      _ -> keep
+    NSoundproofAllyTryHitSide -> keep
+    -- bulletproof.onTryHit (480): `move.flags['bullet']` (no source test: a move on the user does not run TryHit)
+    NBulletproofTryHit -> case cMove c of
+      Just mv | mrBullet (mvRule mv) -> returning stop
+      _ -> keep
+    -- sturdy.onTryHit (4674): `move.ohko` -> null. LATENT(ohko): Fissure, Guillotine, Horn Drill and Sheer Cold are rejected ('Engine.Rule'
+    -- does not model @ohko@), so no accepted move has it.
+    NSturdyTryHit -> keep
+    -- sturdy.onDamage (priority -30; data/abilities.ts 4680-4686): `target.hp === target.maxhp && damage >= target.hp && effect?.effectType
+    -- === 'Move'` -> `target.hp - 1`. It runs after Endure's (-10), so an Endure that already left 1 HP leaves nothing to save.
+    NSturdyDamage -> case (cEffect c, relay) of
+      (Just (EffectKey EffMove _), RInt d) | monHp m == monMaxHp m, d >= monHp m -> returning (Replace (RInt (monHp m - 1)))
+      _ -> keep
+    -- magicguard.onDamage (2466): `effect.effectType !== 'Move'` -> false. Every damageMon site passes its cause (a status, an item, a side
+    -- condition, a weather, 'EffRecoil', a volatile: none is a Move), so it blocks them all; directDamage (Struggle's recoil, Substitute's
+    -- cost) runs no Damage event and is not blocked.
+    -- LATENT(8d): Rough Skin's and Iron Barbs' damage has the ability as its effect, and Magic Guard then logs `-activate` and blocks it too.
+    NMagicGuardDamage -> case cEffect c of
+      Just (EffectKey EffMove _) -> keep
+      _ -> returning stop
+    -- poisonheal.onDamage (3332, priority 1): `effect.id === 'psn' || effect.id === 'tox'` -> `this.heal(target.baseMaxhp / 8)`, false
+    NPoisonHealDamage -> case cEffect c of
+      Just (EffectKey EffStatus i) | i == fromEnum CPsn || i == fromEnum CTox -> do
+        modify' (healMon holder (max 1 (monMaxHp m `quot` 8)))
+        returning stop
+      _ -> keep
+    -- sweetveil.onAllySetStatus (4788): `status.id === 'slp'` -> null; onAllyTryAddVolatile: `status.id === 'yawn'` -> null. The holder is
+    -- the target's ally (or the target itself).
+    -- LATENT(sleep): neither can happen (no sleep status, no Yawn); written as Showdown does it.
+    NSweetVeilSetStatus -> if relay == RText "slp" then returning stop else keep
+    NSweetVeilTryAddVolatile -> if relay == RText "yawn" then returning stop else keep
     -- slice 4c: the moves' own bodies are run by 'moveAfterHit', 'moveOwnHit', 'moveFieldHit', 'moveTryHit', 'moveTry' and
     -- 'singleMoveEvent', each at its own call site
     NHazardSweepAfterHit -> keep

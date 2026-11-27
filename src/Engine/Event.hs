@@ -191,6 +191,10 @@ data EventId
   -- ^ @runEvent('ModifyBoost', pokemon, null, null, boosts)@ where Showdown reads a stage to use it: @calculateStat@ (pokemon.ts 602, the stat user's
   -- event in @getDamage@), @getStat@ (639, @getActionSpeed@) and @hitStepAccuracy@ (battle-actions.ts 782, 786). The relay value is the table of the
   -- stat read ('RBoosts'); a handler returns the table that replaces it (Unaware's @onAnyModifyBoost@ zeroes stages).
+  -- slice 8c
+  | EvCriticalHit
+  -- ^ @runEvent('CriticalHit', target, null, move)@ in @getDamage@ (battle-actions.ts 1704-1706), after a successful crit roll: a falsy result
+  -- cancels the critical hit (Shell Armor's @onCriticalHit: false@, a constant). The relay value starts as the hidden @true@.
   deriving (Eq, Show, Enum, Bounded)
 
 -- | How @runEvent@ orders the handlers of an event (battle.ts 797-803).
@@ -301,6 +305,8 @@ eventName e = case e of
   EvAfterEachBoost -> "AfterEachBoost"
   -- slice 8b
   EvModifyBoost -> "ModifyBoost"
+  -- slice 8c
+  EvCriticalHit -> "CriticalHit"
 
 -- | Which Pokemon a handler reacts to: the holder (@onX@), its allies (@onAllyX@), its foes (@onFoeX@), the
 -- source of the event (@onSourceX@) or anyone (@onAnyX@).
@@ -844,6 +850,33 @@ data NativeId
   | NSupremeOverlordPower
   | NVesselOfRuinSpA
   | NUnawareModifyBoost
+  -- slice 8c
+  | NGoodAsGoldTryHit
+  -- ^ goodasgold @onTryHit@: a Status move from another Pokemon is blocked (null).
+  | NWaterAbsorbTryHit
+  -- ^ waterabsorb @onTryHit@: a Water move from another Pokemon is blocked, and heals the holder a quarter.
+  | NSapSipperTryHit
+  -- ^ sapsipper @onTryHit@ (priority 1): a Grass move from another Pokemon is blocked, and raises the holder's Attack.
+  | NSapSipperAllyTryHitSide
+  -- ^ sapsipper @onAllyTryHitSide@: for an ally of the holder that is not the user; no ally exists in singles, so it never acts.
+  | NSoundproofTryHit
+  -- ^ soundproof @onTryHit@: a sound move from another Pokemon is blocked.
+  | NSoundproofAllyTryHitSide
+  -- ^ soundproof @onAllyTryHitSide@: logs only.
+  | NBulletproofTryHit
+  -- ^ bulletproof @onTryHit@: a bullet move is blocked.
+  | NSturdyTryHit
+  -- ^ sturdy @onTryHit@: an OHKO move is blocked (no OHKO move is accepted).
+  | NSturdyDamage
+  -- ^ sturdy @onDamage@ (priority -30): at full HP a move's damage of at least the HP leaves 1 HP.
+  | NMagicGuardDamage
+  -- ^ magicguard @onDamage@: every damage that is not a Move's is cancelled.
+  | NPoisonHealDamage
+  -- ^ poisonheal @onDamage@ (priority 1): psn and tox damage heals the holder an eighth instead.
+  | NSweetVeilSetStatus
+  -- ^ sweetveil @onAllySetStatus@: sleep is blocked (LATENT(sleep): no sleep status).
+  | NSweetVeilTryAddVolatile
+  -- ^ sweetveil @onAllyTryAddVolatile@: yawn is blocked (LATENT(sleep): Yawn is not accepted).
   deriving (Eq, Show)
 
 -- | The body of each handler the engine implements (written by hand: Showdown's handlers are code). A condition
