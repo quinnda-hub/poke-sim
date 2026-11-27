@@ -31,6 +31,7 @@ module Engine.State
   , Actor (..)
   , ActionKind (..)
   , Action (..)
+  , MoveInUse (..)
   , Battle (..)
   , takeEffectOrder
   , sideOf
@@ -336,6 +337,16 @@ data Action = Action
   deriving (Eq, Show)
 
 -- | The whole battle.
+-- | The move in use, as @battle.activeMove@ and @battle.activePokemon@ (battle.ts 165, 375-387): the user, and the move's
+-- @ignoreAbility@, which 'Engine.Damage.suppressingAbility' reads (Mold Breaker and its kin). The rest of the active move travels
+-- as the move-in-use copy of 'Engine.Dex.MoveData'. Transient: it is set where Showdown calls @setActiveMove@ and cleared where
+-- it calls @clearActiveMove@, so it is 'Nothing' at every decision point.
+data MoveInUse = MoveInUse
+  { muUser :: !Actor
+  , muIgnoreAbility :: !Bool
+  }
+  deriving (Eq, Show)
+
 data Battle = Battle
   { bFormat :: !Format
   , bTurn :: !Int
@@ -344,6 +355,8 @@ data Battle = Battle
   , bMidTurn :: !Bool
   , bQueue :: !(SV.Vector Action)
   , bFaintQueue :: !(SV.Vector Actor)
+  , bActiveMove :: !(Maybe MoveInUse)
+  -- ^ @battle.activeMove@ with @battle.activePokemon@: transient, 'Nothing' at every decision point (a property checks it).
   , bSpeedOrder :: !(U.Vector Int)
   -- ^ @battle.speedOrder@: the field position values of the Pokemon in play, in speed order, as of the last
   -- @runSwitch@ (battle-actions.ts 236). Empty before the first one (Showdown's is @[]@ too).

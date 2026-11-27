@@ -79,7 +79,7 @@ import qualified Data.Vector.Strict as SV
 import qualified Data.Vector.Unboxed as U
 
 import Engine.Chance
-import Engine.Damage (hasItemNamed, hasTypeNamed, isGrounded, isSemiInvulnerable, moveTypeMod, statusKey, typeIdNamed, typeImmuneTo, typeIsNamed, typeMod)
+import Engine.Damage (hasAbility, hasItemNamed, hasTypeNamed, ignoringAbility, isGrounded, isSemiInvulnerable, suppressingAbility, moveTypeMod, statusKey, typeIdNamed, typeImmuneTo, typeIsNamed, typeMod)
 import Engine.Dex
 import Engine.Event
 import Engine.Modifier (baseMod, chainModify, modify)
@@ -268,12 +268,6 @@ runStatusImmunity dx a key = do
     else if typeImmuneTo dx key m
       then pure False
       else relayTruthy <$> runEvent dx EvImmunity a Nothing Nothing (RText key)
-
--- | @pokemon.ignoringAbility()@ (pokemon.ts 879): Gastro Acid and Neutralizing Gas, or a Pokemon not in play.
--- LATENT: no supported effect suppresses an ability, and the callers check the Pokemon is active themselves, so this
--- is always false.
-ignoringAbility :: Battle -> Actor -> Bool
-ignoringAbility _ _ = False
 
 -- | @pokemon.getBestStat(false, true)@ (pokemon.ts 677): the index (0 atk, 1 def, 2 spa, 3 spd, 4 spe) of the first stat
 -- with the greatest value after its stage (@getStat@ with @unboosted@ false and @unmodified@ true: no
@@ -948,18 +942,14 @@ skipped :: Dex -> EventId -> Battle -> Handler -> Bool
 skipped dx ev b h = case (hKey h, hOwner h) of
   (EffectKey EffStatus _, OwnMon a) -> not (isJust (effectState (monOf b a) (hKey h))) -- it's changed
   (EffectKey EffAbility _, OwnMon a) ->
-    (maybe False cnBreakable (effectOf dx (hKey h)) && suppressingAbility b a)
-      || not (monActive (monOf b a)) -- ignoringAbility, gen >= 5
+    (maybe False cnBreakable (effectOf dx (hKey h)) && suppressingAbility dx b a)
+      || ignoringAbility b a
   -- battle.ts 881: `eventid !== 'Start' && eventid !== 'SwitchIn' && eventid !== 'TakeItem'`
   (EffectKey EffItem _, OwnMon a) -> ev /= EvStart && ev /= EvSwitchIn && ev /= EvTakeItem && not (monActive (monOf b a)) -- ignoringItem, gen >= 5
   -- battle.ts 897-900: `(effect.effectType === 'Weather' || eventid === 'Weather') && eventid !== 'Residual' && eventid !== 'End'
   -- && this.field.suppressingWeather()` (Air Lock, Cloud Nine: 'suppressingWeather' is always false here)
   (EffectKey kind _, _) | (kind == EffWeather || ev == EvWeather) && ev /= EvResidual && ev /= EvEnd -> suppressingWeather b
   _ -> False
-
--- | @battle.suppressingAbility(target)@: Mold Breaker and its kin. No ability that suppresses exists yet.
-suppressingAbility :: Battle -> Actor -> Bool
-suppressingAbility _ _ = False
 
 -- | @battle.singleEvent@ (battle.ts 578-656): run one effect's handler for an event on its owner (a Pokemon, a side or
 -- the field; the callback is the effect's own: @onStart@ of a status, @onSideStart@ of a side condition). Returns
@@ -999,7 +989,7 @@ singleBodyFx dx ev body key owner holder source mv eff relay = do
         -- battle.ts 614: `eventid !== 'Start' && eventid !== 'TakeItem' && eventid !== 'SetAbility'`
         (EffectKey EffItem _, OwnMon _) -> ev /= EvStart && ev /= EvTakeItem && not (monActive m)
         -- battle.ts 621: `eventid !== 'End' && effect.effectType === 'Ability' && target.ignoringAbility()`
-        (EffectKey EffAbility _, OwnMon _) -> ev /= EvEnd && not (monActive m)
+        (EffectKey EffAbility _, OwnMon _) -> ev /= EvEnd && ignoringAbility b0 holder
         -- battle.ts 624-627: a weather's callbacks other than FieldStart, FieldResidual and FieldEnd while the weather is
         -- suppressed (Air Lock, Cloud Nine; 'suppressingWeather' is always false here)
         (EffectKey EffWeather _, _) -> ev /= EvStart && ev /= EvResidual && ev /= EvEnd && suppressingWeather b0
@@ -1182,8 +1172,9 @@ runNative dx n c relay = do
       -- `this.damage(n)` of the holder's own handler: the holder is the target, the event has no source, and the effect is the
       -- running one (`effect ||= this.effect`, battle.ts 2252)
       damageKeep amount = damageMon dx holder Nothing Nothing (Just (cKey c)) amount >> keep
-  m <- gets (`monOf` holder)
-  fmt <- gets bFormat
+  b0 <- get
+  let m = monOf b0 holder
+      fmt = bFormat b0
   let boots = hasItemNamed dx "heavydutyboots" m
       -- slice 7e: the choicelock volatile of the holder
       lockKey = EffectKey EffVolatile (fromEnum CChoiceLock)
@@ -1191,7 +1182,7 @@ runNative dx n c relay = do
       dropLock = modify' (modifyMon holder (\x -> if monHp x > 0 then removeVolatile (fromEnum CChoiceLock) x else x))
       -- `isGrounded() && !isSemiInvulnerable()` of the holder (the event's target: the Pokemon being hit or statused, or
       -- the attacker of a BasePower event)
-      groundedHolder = isGrounded dx m && not (isSemiInvulnerable m)
+      groundedHolder = isGrounded dx b0 holder && not (isSemiInvulnerable m)
   case n of
     -- brn, par, psn, frz onStart: `this.add('-status', ...)` only
     NLogOnly -> keep
@@ -1272,7 +1263,7 @@ runNative dx n c relay = do
     -- expandingforce: `this.field.isTerrain('psychicterrain') && source.isGrounded()` -> chainModify(1.5)
     NExpandingForcePower -> do
       b <- get
-      if terrainIs dx b ["psychicterrain"] && isGrounded dx m then chained (3, 2) else keep
+      if terrainIs dx b ["psychicterrain"] && isGrounded dx b holder then chained (3, 2) else keep
     -- ficklebeam: `if (this.randomChance(3, 10))` -> chainModify(2). The draw is made when this handler runs, at its place in
     -- the sorted BasePower handlers, after the crit roll (getDamage 1698-1708)
     NFickleBeamPower -> do
@@ -1541,7 +1532,7 @@ runNative dx n c relay = do
     -- spikes.onSwitchIn(pokemon): `if (!pokemon.isGrounded() || pokemon.hasItem('heavydutyboots')) return;`, then
     -- this.damage(damageAmounts[layers] * maxhp / 24) with damageAmounts [0, 3, 4, 6] (floored, at least 1)
     NSpikesSwitchIn
-      | not (isGrounded dx m) || boots -> keep
+      | not (isGrounded dx b0 holder) || boots -> keep
       | otherwise -> do
           layers <- getLayers
           let amount = case layers of 1 -> 3; 2 -> 4; 3 -> 6; _ -> 0
@@ -1551,7 +1542,7 @@ runNative dx n c relay = do
     -- pokemon.trySetStatus('tox' at 2 layers or more, else 'psn', the foe's active Pokemon): a source with Corrosion
     -- is the only thing the source changes, and no supported ability is Corrosion
     NToxicSpikesSwitchIn
-      | not (isGrounded dx m) -> keep
+      | not (isGrounded dx b0 holder) -> keep
       | hasTypeNamed dx "Poison" m -> do
           let Actor p _ = holder
               EffectKey _ ci = cKey c
@@ -1565,7 +1556,7 @@ runNative dx n c relay = do
     -- stickyweb.onSwitchIn(pokemon): `if (!pokemon.isGrounded() || pokemon.hasItem('heavydutyboots')) return;`, then
     -- this.boost({spe: -1}, pokemon, foe.active[0], stickyweb)
     NStickyWebSwitchIn
-      | not (isGrounded dx m) || boots -> keep
+      | not (isGrounded dx b0 holder) || boots -> keep
       -- (the source is the foe's active Pokemon; no move is in use: the switch-in comes after the action tail's clearActiveMove or
       -- runPursuitActivation's, docs/handlers.md "6d: Eject Pack")
       | otherwise -> do
@@ -1681,8 +1672,8 @@ runNative dx n c relay = do
       b <- get
       case (cMove c, cSource c) of
         (Just mv, Just def)
-          | mvId mv `elem` ["earthquake", "bulldoze", "magnitude"], isGrounded dx (monOf b def), not (isSemiInvulnerable (monOf b def)) -> chained (1, 2)
-        _ -> moveTypePower "Grass" (isGrounded dx m) (5325, 4096)
+          | mvId mv `elem` ["earthquake", "bulldoze", "magnitude"], isGrounded dx b def, not (isSemiInvulnerable (monOf b def)) -> chained (1, 2)
+        _ -> moveTypePower "Grass" (isGrounded dx b holder) (5325, 4096)
     -- grassyterrain.onResidual(pokemon): a grounded, not semi-invulnerable Pokemon heals baseMaxhp / 16 (this.heal: at
     -- least 1)
     NGrassyTerrainHeal -> do
@@ -1697,7 +1688,7 @@ runNative dx n c relay = do
       b <- get
       case (cMove c, cSource c) of
         (Just mv, Just def)
-          | typeIsNamed dx (mvType mv) "Dragon", isGrounded dx (monOf b def), not (isSemiInvulnerable (monOf b def)) -> chained (1, 2)
+          | typeIsNamed dx (mvType mv) "Dragon", isGrounded dx b def, not (isSemiInvulnerable (monOf b def)) -> chained (1, 2)
         _ -> keep
     -- psychicterrain.onTryHit(target, source, effect): `effect.priority <= 0.1 || effect.target === 'self'` returns; so
     -- does a semi-invulnerable or allied target and an ungrounded one; else the move is blocked (return null). The
@@ -1706,7 +1697,7 @@ runNative dx n c relay = do
       (Just mv, Just src)
         | mvPriority mv <= 0 -> keep
         | isSemiInvulnerable m || src == holder -> keep
-        | not (isGrounded dx m) -> keep
+        | not (isGrounded dx b0 holder) -> keep
         | otherwise -> returning stop
       _ -> keep
     -- psychicterrain.onBasePower: a Psychic move by a grounded attacker, chainModify([5325, 4096])
@@ -1918,8 +1909,7 @@ runNative dx n c relay = do
       pure (Res Keep (cMod c))
     paradox name cid active = do
       b <- get
-      let mm = monOf b (cHolder c)
-      when (abilityId dx (monAbility mm) == name && not (ignoringAbility b (cHolder c)) && not (active b)) $ do
+      when (hasAbility dx b (cHolder c) name && not (active b)) $ do
         used <- useItem dx (cHolder c) (Just (cKey c))
         when used (void (addVolatileFx dx (cHolder c) cid (Just (cKey c))))
     moveTypePower ty cond nd = case cMove c of
@@ -2020,7 +2010,7 @@ basePowerCallback dx user target mv = case moveSpec mv POwn EvBasePowerCallback 
       -- acrobatics: `!pokemon.item` -> move.basePower * 2
       NAcrobaticsPower -> if monItem u == noItem then mvPower mv * 2 else mvPower mv
       -- risingvoltage: `this.field.isTerrain('electricterrain') && target.isGrounded()` -> move.basePower * 2
-      NRisingVoltagePower -> if terrainIs dx b ["electricterrain"] && isGrounded dx t then mvPower mv * 2 else mvPower mv
+      NRisingVoltagePower -> if terrainIs dx b ["electricterrain"] && isGrounded dx b target then mvPower mv * 2 else mvPower mv
       _ -> mvPower mv
 
 -- | A move's @damageCallback@ (battle-actions.ts 1665, called directly by @getDamage@ before the crit roll: the damage it
@@ -2061,12 +2051,12 @@ singleMoveEvent dx ev user target mv = case moveSpec mv POwn ev >>= hsBody of
       NWeatherBallModifyMove
         | any (\(names, _) -> weatherIs dx b user names) weatherTypes -> mv {mvPower = mvPower mv * 2}
       -- terrainpulse onModifyType: `if (!pokemon.isGrounded()) return; switch (this.field.terrain)`
-      NTerrainPulseType | isGrounded dx (monOf b user) ->
+      NTerrainPulseType | isGrounded dx b user ->
         case [ty | (name, tyName) <- terrainTypes, [i] <- [fieldIds dx [name]], fTerrain (bField b) == i, Just ty <- [typeIdNamed dx tyName]] of
           (ty : _) -> mv {mvType = ty}
           [] -> mv
       -- terrainpulse onModifyMove: `this.field.terrain && pokemon.isGrounded()` -> move.basePower *= 2
-      NTerrainPulseModifyMove | fTerrain (bField b) /= noCond, isGrounded dx (monOf b user) -> mv {mvPower = mvPower mv * 2}
+      NTerrainPulseModifyMove | fTerrain (bField b) /= noCond, isGrounded dx b user -> mv {mvPower = mvPower mv * 2}
       -- ivycudgel onModifyType: Ogerpon-Wellspring, -Hearthflame and -Cornerstone (and their Tera forms) change the type.
       -- LATENT: those forms are not species here (the engine has base formes only), so the type never changes.
       -- expandingforce onModifyMove: under Psychic Terrain with a grounded user `move.target = 'allAdjacentFoes'`, which
@@ -2341,7 +2331,7 @@ switchCandidates b p
 moveTryImmunity :: Monad m => Dex -> Actor -> MoveData -> Eng m Bool
 moveTryImmunity dx target mv = case moveSpec mv POwn EvTryImmunity >>= hsBody of
   Just (BNative NTrickTryImmunity) ->
-    gets (\b -> abilityId dx (monAbility (monOf b target)) /= "stickyhold" || ignoringAbility b target)
+    gets (\b -> not (hasAbility dx b target "stickyhold"))
   _ -> pure True
 
 -- | @singleEvent('TryHit', moveData, {}, target, pokemon, move)@ (battle-actions.ts 1102), the move's own @onTryHit@, at the start of
@@ -2476,7 +2466,7 @@ movePriorityEvent dx user target mv = do
   b <- get
   let single = case moveSpec mv POwn EvModifyPriority >>= hsBody of
         -- grassyglide: `this.field.isTerrain('grassyterrain') && source.isGrounded()` -> priority + 1
-        Just (BNative NGrassyGlidePriority) | terrainIs dx b ["grassyterrain"] && isGrounded dx (monOf b user) -> mvPriority mv + 1
+        Just (BNative NGrassyGlidePriority) | terrainIs dx b ["grassyterrain"] && isGrounded dx b user -> mvPriority mv + 1
         _ -> mvPriority mv
   r <- runEvent dx EvModifyPriority user target (Just mv) (RInt single)
   pure (fromRelayInt single r)

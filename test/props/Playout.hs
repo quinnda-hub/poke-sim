@@ -457,6 +457,11 @@ checkBattle dx b = do
   -- the force-switch flag (slice 6b) is set by a forceSwitch move and consumed by the action tail of the same action
   mapM_ (\(p, s) -> if any monForceSwitchFlag (SV.toList (sMons s)) then Left (show p ++ ": a force-switch flag at a decision point") else Right ())
     [(P1, bP1 b), (P2, bP2 b)]
+  -- slice 8 base: battle.activeMove is set while a move is used and cleared by the action tail (battle.ts 2875), so no decision point
+  -- has one
+  case bActiveMove b of
+    Nothing -> Right ()
+    Just mu -> Left ("a move in use at a decision point: " ++ show mu)
   conditions
   choiceLocks
   disableRules

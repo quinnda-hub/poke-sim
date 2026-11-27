@@ -120,6 +120,21 @@ data MoveData = MoveData
   , mvStellarBoosted :: !Bool
   -- ^ @move.stellarBoosted@ (sim/dex-moves.ts 339): a Stellar Pokemon's boost was spent on this use of the move, so its later hits
   -- keep it. Always 'False' in the dex; 'Engine.Turn' sets it on the copy in use.
+  -- slice 8 base: the flags Showdown writes on the @ActiveMove@ that the ability phases read. All default in the dex (False, or -1)
+  -- and are set only on the copy in use, by the handler that sets them in Showdown.
+  , mvIgnoreAbility :: !Bool
+  -- ^ @move.ignoreAbility@ (Mold Breaker, Teravolt, Turboblaze set it in @onModifyMove@; a move used by another effect inherits it,
+  -- battle-actions.ts 488). 'Engine.State.muIgnoreAbility' mirrors it for @suppressingAbility@.
+  , mvIgnoreEvasion :: !Bool
+  -- ^ @move.ignoreEvasion@ (Keen Eye).
+  , mvInfiltrates :: !Bool
+  -- ^ @move.infiltrates@ (Infiltrator).
+  , mvPranksterBoosted :: !Bool
+  -- ^ @move.pranksterBoosted@ (Prankster).
+  , mvHasBounced :: !Bool
+  -- ^ @move.hasBounced@ (Magic Bounce).
+  , mvRuinedSpA :: !Int
+  -- ^ @move.ruinedSpA@: the slot of the Pokemon whose Vessel of Ruin lowers the special attack of this use, or -1.
   --
   -- A 'MoveData' is also the move in use (Showdown's @ActiveMove@, a copy made when the move is used): the handlers
   -- that Showdown lets change the move return a changed copy, and every later step of the use reads the copy. It is never
@@ -658,7 +673,7 @@ moveOf tix condLookup conds v = do
                   Just ("condition " <> ident <> " or stall is not supported: " <> fromMaybe "" (cnReject cn))
         _ -> rejected0
       supported = isNothing rejected && executable rule
-  pure (MoveData ident ty (cat == "Physical") (cat == "Status") bp acc prio crit pp noBoost (truthyField "struggleRecoil" v) rule rejected supported effect (mrSelfSwitch rule) False)
+  pure (MoveData ident ty (cat == "Physical") (cat == "Status") bp acc prio crit pp noBoost (truthyField "struggleRecoil" v) rule rejected supported effect (mrSelfSwitch rule) False False False False False False (-1))
 
 natureOf :: Value -> Either String NatureData
 natureOf v = do

@@ -70,6 +70,7 @@ newBattle dx fmt t1 t2 = do
     , bMidTurn = True
     , bQueue = SV.singleton start
     , bFaintQueue = SV.empty
+    , bActiveMove = Nothing
     , bSpeedOrder = U.empty
     , bField = noField
     , bEffectOrder = 0
@@ -175,6 +176,14 @@ turnLoop dx = do
           unless stop loop
 {-# INLINABLE turnLoop #-}
 
+-- | @battle.setActiveMove@ (battle.ts 375-379): the move in use and its user.
+setActiveMove :: Monad m => Actor -> MoveData -> Eng m ()
+setActiveMove user mv = modify' (\b -> b {bActiveMove = Just (MoveInUse user (mvIgnoreAbility mv))})
+
+-- | @battle.clearActiveMove@ (battle.ts 381-389).
+clearActiveMove :: Monad m => Eng m ()
+clearActiveMove = modify' (\b -> b {bActiveMove = Nothing})
+
 -- | @battle.endTurn@ (battle.ts): advance the turn counter, apply the 1000-turn limit and request moves.
 {-# INLINABLE endTurn #-}
 endTurn :: MonadChance m => Dex -> Eng m ()
@@ -239,6 +248,7 @@ runAction dx ac = do
       eachEvent dx EvBeforeTurn -- eachEvent('BeforeTurn')
       afterAction dx ac
     KResidual -> do
+      clearActiveMove -- battle.ts 2854: `this.clearActiveMove(true)` before `updateSpeed`
       updateSpeedAll dx
       fieldEvent dx EvResidual Nothing -- fieldEvent('Residual')
       afterAction dx ac
@@ -320,6 +330,8 @@ afterAction :: MonadChance m => Dex -> Action -> Eng m ()
 afterAction dx ac = do
   -- phazing (battle.ts 2866-2873): after the action and before the faints are resolved, whether or not the battle has ended
   phazing dx
+  -- battle.ts 2875: `if (this.gen > 4) this.clearActiveMove()`, after the phazing and before the faints are resolved
+  clearActiveMove
   -- fainting: resolveFaints({ checkWinIfNoFaints: true, checkWin: true })
   resolveFaints dx True True
   ended <- gets ((/= Ongoing) . bResult)
@@ -396,7 +408,8 @@ switchRequests dx = mapM one [P1, P2]
           modify' (modifyMon (activeActor p b) (\m -> m {monSwitchFlag = NoSwitch}))
           pure False
         else do
-          when (flagged && monHp (activeMon p b) > 0) (eachEvent dx EvUpdate)
+          -- runPursuitActivation: `this.battle.clearActiveMove()` (battle-actions.ts 65), then the Update
+          when (flagged && monHp (activeMon p b) > 0) (clearActiveMove >> eachEvent dx EvUpdate)
           pure flagged
 
 -- ---------------------------------------------------------------------------
@@ -438,7 +451,7 @@ switchIn dx how p target = do
       Just o | monHp (monOf b0 o) > 0 -> do
         -- runPursuitActivation(oldActive): eachEvent('Update') (the BeforeSwitchOut event has no handlers). It returns at once for a
         -- Pokemon whose `skipPursuit` is set, which a flagged one has ('switchRequests'): not for an instaswitch
-        when (how == HowSwitch) (eachEvent dx EvUpdate)
+        when (how == HowSwitch) (clearActiveMove >> eachEvent dx EvUpdate)
         -- battle-actions.ts 100: `if (!this.battle.runEvent('SwitchOut', oldActive)) return false` (Regenerator and Natural Cure listen,
         -- neither refuses; custom formats are the only thing that can)
         void (runEvent dx EvSwitchOut o Nothing Nothing RNone)
@@ -549,7 +562,11 @@ runMove fmt dx user@(Actor p _) slot = do
       -- (a move on the user targets the user: battle.getRandomTarget returns the Pokemon for 'self')
       -- (battle.getRandomTarget: `self`, `all`, `allySide` and `allyTeam` return the Pokemon; foeSide the foe)
       let eventTarget = if mrTarget (mvRule mv) `elem` [TargetSelf, TargetAllySide, TargetAll] then user else target
+      -- runMove (battle-actions.ts 302): `this.battle.setActiveMove(move, pokemon, target)`, before BeforeMove
+      setActiveMove user mv
       proceed <- relayTruthy <$> runEvent dx EvBeforeMove user (Just eventTarget) (Just mv) RNone
+      -- a move stopped here: `clearActiveMove(true)` (309)
+      unless proceed clearActiveMove
       when proceed $ do
         -- pokemon.deductPP (battle-actions.ts 339), after BeforeMove: `if (!pokemon.deductPP(baseMove, null, target) && move.id !== 'struggle')`
         -- the move fails (`cant nopp`) and returns. deductPP returns 0 for a move with no slot or no PP left. (A chosen move always has PP
@@ -560,6 +577,8 @@ runMove fmt dx user@(Actor p _) slot = do
             hasPP = case mslot of
               Just i -> maybe False ((> 0) . msPP) (monMoves um SV.!? i)
               Nothing -> False
+        -- the PP check fails: `cant nopp` and `clearActiveMove(true)` (341)
+        unless (struggling || hasPP) clearActiveMove
         when (struggling || hasPP) $ do
           forM_ mslot $ \i ->
             modify' (modifyMon user (\m -> m {monMoves = SV.imap (\j x -> if j == i then x {msPP = msPP x - 1} else x) (monMoves m)}))
@@ -588,10 +607,15 @@ useMove fmt dx user target mv0 = do
   -- conditions.ts frz.onModifyMove; no other supported effect changes the move). The target they see is the one
   -- `getRandomTarget` gives (a move on the user targets the user). Every later step of the use reads the changed move.
   let eventTarget = if mrTarget (mvRule mv0) `elem` [TargetSelf, TargetAllySide, TargetAll] then user else target
+  -- useMoveInner (battle-actions.ts 492): `this.battle.setActiveMove(move, pokemon, target)`, before the ModifyType and ModifyMove events.
+  -- Showdown's ActiveMove is one object that those handlers mutate: 'mvIgnoreAbility' of the changed move is set again after them
+  -- (Mold Breaker sets it in onModifyMove, 8f). There is no restore after a nested useMove in Gen 9 (battle-actions.ts 415-417 restores only for `gen <= 4`).
+  setActiveMove user mv0
   mvT <- singleMoveEvent dx EvModifyType user (Just eventTarget) mv0
   mv <- singleMoveEvent dx EvModifyMove user (Just eventTarget) mvT
   void (runEvent dx EvModifyType user (Just eventTarget) (Just mv) RNone)
   void (runEvent dx EvModifyMove user (Just eventTarget) (Just mv) RNone)
+  setActiveMove user mv
   useMoveWith fmt dx user target mv
 
 -- | 'useMove' after the @ModifyType@ and @ModifyMove@ events: the rest of @useMoveInner@ and the hit steps, which read the
@@ -639,7 +663,7 @@ useMoveWith fmt dx user target mv = case mrTarget rule of
      when tryHit $
       -- hitStepTypeImmunity (before accuracy: an immune target consumes no draws); a move with
       -- ignoreImmunity (every status move but a few) skips it
-      unless (not (mrIgnoreImmunity rule) && isImmune dx (mvType mv) tm) $
+      unless (not (mrIgnoreImmunity rule) && isImmune dx b target (mvType mv)) $
        -- hitStepTryImmunity (battle-actions.ts 735): `gen >= 6 && move.flags['powder'] && target !== pokemon &&
        -- !this.dex.getImmunity('powder', target)`: Grass types are immune to a powder move (no draw)
        unless (mrPowder rule && typeImmuneTo dx "powder" tm) $
@@ -685,6 +709,8 @@ useMoveWith fmt dx user target mv = case mrTarget rule of
 {-# INLINABLE sideMove #-}
 sideMove :: MonadChance m => Dex -> Actor -> Actor -> MoveData -> Eng m ()
 sideMove dx user target mv = do
+  -- tryMoveHit (battle-actions.ts 887): `this.battle.setActiveMove(move, pokemon, targets[0])`
+  setActiveMove user mv
   -- tryMoveHit (battle-actions.ts 889-891): `singleEvent('Try') && singleEvent('PrepareHit') && runEvent('PrepareHit')`; the move's
   -- own onTry (Aurora Veil needs snow) comes first and a falsy result fails the move before anything else
   tried <- moveTry dx user target mv
