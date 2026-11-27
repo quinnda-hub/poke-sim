@@ -225,25 +225,32 @@ bounceMoves dx = [mvId mv | mv <- V.toList (dxMoves dx), mvSupported mv, let r =
     plain e = case e of EStatus _ -> True; EBoost _ -> True; EOwnVolatile -> True; _ -> False
 
 -- | slice 8f: a pair of one-Pokemon teams for the Magic Bounce property. The first has a 'bounceMoves' move in its first slot and an ability
--- that does not suppress Magic Bounce (not Mold Breaker, not Neutralizing Gas); the second holds Magic Bounce.
+-- that does not suppress Magic Bounce or react to the bounced move; the second holds Magic Bounce.
 genBounceTeams :: Dex -> Gen (Team, Team)
-genBounceTeams dx = (,) <$> one (Just ["moldbreaker", "neutralizinggas"]) <*> one Nothing
+genBounceTeams dx = do
+  used <- Gen.element (bounceMoves dx)
+  holderKnows <- Gen.bool
+  (,) <$> one (Just used) [] <*> one Nothing [used | holderKnows]
   where
     abilities = supportedAbilities dx
     items = supportedItems dx
-    one :: Maybe [T.Text] -> Gen Team
-    one user = do
+    -- the user's ability is any but these: Mold Breaker and Neutralizing Gas suppress Magic Bounce, Mirror Armor reflects the bounced drop
+    -- back onto the bouncer (mirrorarmor.onTryBoost, source = the bouncer) and Synchronize gives it the status the bounced move inflicted
+    -- (synchronize.onAfterSetStatus): the bouncer is changed, correctly, and those interactions are 8g's.
+    -- Pressure is in the sample, and half the holders know the bounced move: the bounced use must not take PP from the bouncer's slot.
+    banned = ["moldbreaker", "neutralizinggas", "mirrorarmor", "synchronize"]
+    one :: Maybe T.Text -> [T.Text] -> Gen Team
+    one user known = do
       sp <- Gen.element (supportedSpecies dx)
-      first <- maybe (pure Nothing) (const (Just <$> Gen.element (bounceMoves dx))) user
       rest <- Gen.list (Range.linear 1 3) (Gen.element (supportedMoves dx))
       ab <- case user of
-        Just banned -> Gen.element [a | a <- abilities, a `notElem` banned]
+        Just _ -> Gen.frequency ([(1, pure "pressure") | "pressure" `elem` abilities] ++ [(4, Gen.element [a | a <- abilities, a `notElem` banned])])
         Nothing -> pure "magicbounce"
       it <- Gen.element items
       nat <- Gen.element (M.keys (dxNatureIx dx))
       lvl <- Gen.int (Range.linear 1 100)
       tera <- Gen.element [t | t <- V.toList (dxTypeNames dx), t `notElem` ["Stellar", "???"]]
-      let ms = nub (maybe id (:) first rest)
+      let ms = nub (maybe id (:) user (known ++ rest))
           set = object ["species" .= sp, "teraType" .= tera, "moves" .= ms, "nature" .= nat, "level" .= lvl, "ability" .= ab, "item" .= it]
       either (\e -> error ("genBounceTeams: parseTeam rejected a generated team: " ++ e)) pure (parseTeam dx (Array (V.singleton set)))
 

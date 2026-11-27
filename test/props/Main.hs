@@ -980,6 +980,8 @@ magicBounceHolds dex = property $ do
           monOf b' holder === monOf b0 holder
           holderSide b' === holderSide b0
           cover 20 "the bounced move changed the user or its side" landed
+          -- (the move's PP is in the holder's Mon: a Pressure user must not take PP from the holder's slot of the bounced move)
+          cover 3 "a Pressure user met a Magic Bounce holder that knows the bounced move" (hasAbility dex b0 user "pressure" && any ((== msMove ms) . msMove) (SV.toList (monMoves (monOf b0 holder))))
     _ -> success
 
 -- | Sucker Punch and Thunderclap (slice 7d). The move's @onTry@ reads only the target's queued @move@ actions (@queue.willMove@), so the
@@ -1192,6 +1194,8 @@ damageGuards dex = property $ do
   r <- reachedBattle dex
   case r of
     Nothing -> success
+    -- (slice 8 stack: a Neutralizing Gas holder on the foe suppresses the guard, and that is 8g's: such a battle is not tried)
+    Just (b0, who) | abilityId dex (monAbility (monOf b0 (activeActor (other who) b0))) == "neutralizinggas" -> success
     Just (b0, who) -> do
       guardName <- forAll (Gen.frequency [(2, pure "magicguard"), (3, pure "sturdy"), (2, pure ("poisonheal" :: T.Text))])
       -- (a move's damage, and psn and tox, weigh more: they are the effects the three abilities act on)
