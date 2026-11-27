@@ -14,6 +14,8 @@ module Engine.Dex
   , condSpec
   , EvMask (..)
   , evMaskHas
+  , evBit
+  , prefixMask
   , eventBits
   , prefixBits
   , hasEntry
@@ -40,7 +42,7 @@ module Engine.Dex
 import Data.Aeson (Value (..), eitherDecodeFileStrict)
 import qualified Data.Aeson.Key as K
 import qualified Data.Aeson.KeyMap as KM
-import Data.Bits (setBit, testBit)
+import Data.Bits (setBit, unsafeShiftL, unsafeShiftR, (.&.), (.|.))
 import Data.Char (isAlphaNum, toLower)
 import Data.List (foldl')
 import qualified Data.Map.Strict as M
@@ -168,9 +170,10 @@ data Condition = Condition
   , cnEvents :: !EvMask
   -- ^ The events 'cnHandlers' has an entry for, under any prefix, as a bit set over 'fromEnum' of the 'EventId'
   -- ('eventBits'). Derived from 'cnHandlers'; it lets 'condSpec' and the dispatcher answer "no handler" with one bit test.
-  , cnEventsBy :: !(V.Vector EvMask)
-  -- ^ 'cnEvents' per prefix: element @fromEnum p@ has bit @fromEnum e@ for every entry @(p, e, _)@ of 'cnHandlers'
-  -- ('prefixBits'). 'condSpec' and the collectors test it before scanning the list.
+  , cnEventsBy :: !(U.Vector Word64)
+  -- ^ 'cnEvents' per prefix: the mask of prefix @p@ ('prefixMask') has bit @fromEnum e@ for every entry @(p, e, _)@ of 'cnHandlers'
+  -- ('prefixBits'). It is stored flat, two words per prefix, so that a test reads two unboxed words: a boxed vector of 'EvMask' cost 3%
+  -- of a replay's throughput. 'condSpec' and the collectors test it before scanning the list.
   }
   deriving (Show)
 
@@ -179,11 +182,18 @@ data Condition = Condition
 data EvMask = EvMask !Word64 !Word64
   deriving (Eq, Show)
 
--- | Whether the mask has bit @i@.
-evMaskHas :: EvMask -> Int -> Bool
-evMaskHas (EvMask lo hi) i
-  | i < 64 = testBit lo i
-  | otherwise = testBit hi (i - 64)
+-- | The mask with only bit @i@ set: the query of 'evMaskHas'. A caller testing many masks for one event builds it once.
+evBit :: Int -> EvMask
+evBit i = EvMask (w .&. (s - 1)) (w .&. negate s)
+  where
+    w = 1 `unsafeShiftL` (i .&. 63) :: Word64
+    s = fromIntegral (i `unsafeShiftR` 6) :: Word64 -- 0 for the first word, 1 for the second
+{-# INLINE evBit #-}
+
+-- | Whether the mask has the bit of the query ('evBit'). Both words are tested with no branch on the index: a branch here cost 5% of
+-- a replay's throughput, because the dispatcher tests a mask for every effect in reach of every event.
+evMaskHas :: EvMask -> EvMask -> Bool
+evMaskHas (EvMask lo hi) (EvMask qlo qhi) = (lo .&. qlo) .|. (hi .&. qhi) /= 0
 {-# INLINE evMaskHas #-}
 
 evMaskSet :: EvMask -> Int -> EvMask
@@ -290,7 +300,7 @@ supportedItems dx = "" : [cnId a | a <- V.toList (dxItems dx), cnSupported a]
 -- | The handler of a condition for a prefix and event (@on<Prefix><Event>@), if the engine has one.
 condSpec :: Condition -> Prefix -> EventId -> Maybe HandlerSpec
 condSpec cn p e
-  | not (evMaskHas (V.unsafeIndex (cnEventsBy cn) (fromEnum p)) (fromEnum e)) = Nothing
+  | not (evMaskHas (maskBy (cnEventsBy cn) (fromEnum p)) (evBit (fromEnum e))) = Nothing
   | otherwise = go (cnHandlers cn)
   where
     go [] = Nothing
@@ -305,12 +315,21 @@ eventBits :: [(Prefix, EventId, HandlerSpec)] -> EvMask
 eventBits = foldl' (\w (_, e, _) -> evMaskSet w (fromEnum e)) (EvMask 0 0)
 
 -- | The 'cnEventsBy' of a handler list: one mask per 'Prefix', indexed by 'fromEnum'.
-prefixBits :: [(Prefix, EventId, HandlerSpec)] -> V.Vector EvMask
-prefixBits hs = V.fromList [foldl' (\w (p', e, _) -> if p' == p then evMaskSet w (fromEnum e) else w) (EvMask 0 0) hs | p <- [minBound .. maxBound]]
+prefixBits :: [(Prefix, EventId, HandlerSpec)] -> U.Vector Word64
+prefixBits hs = U.fromList (concat [let EvMask lo hi = foldl' (\w (p', e, _) -> if p' == p then evMaskSet w (fromEnum e) else w) (EvMask 0 0) hs in [lo, hi] | p <- [minBound .. maxBound]])
+
+-- | The 'cnEventsBy' mask of a prefix.
+prefixMask :: Condition -> Prefix -> EvMask
+prefixMask cn p = maskBy (cnEventsBy cn) (fromEnum p)
+{-# INLINE prefixMask #-}
+
+maskBy :: U.Vector Word64 -> Int -> EvMask
+maskBy v p = EvMask (U.unsafeIndex v (2 * p)) (U.unsafeIndex v (2 * p + 1))
+{-# INLINE maskBy #-}
 
 -- | Whether the condition has an entry for the prefix and event: 'condSpec' is 'Just' exactly then.
 hasEntry :: Condition -> Prefix -> EventId -> Bool
-hasEntry cn p e = evMaskHas (V.unsafeIndex (cnEventsBy cn) (fromEnum p)) (fromEnum e)
+hasEntry cn p e = evMaskHas (maskBy (cnEventsBy cn) (fromEnum p)) (evBit (fromEnum e))
 {-# INLINE hasEntry #-}
 
 -- | Showdown's effectiveness code of an attacking type against a defending type.

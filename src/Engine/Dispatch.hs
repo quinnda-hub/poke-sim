@@ -795,8 +795,8 @@ findEventHandlers dx b ev target source =
 eventHeard :: Dex -> Battle -> EventId -> Actor -> Maybe Actor -> Bool
 eventHeard dx b ev target source = mon target || maybe False mon source || side P1 || side P2 || fieldPart
   where
-    bit = fromEnum ev
-    has key = maybe False (\cn -> evMaskHas (cnEvents cn) bit) (effectOf dx key)
+    q = evBit (fromEnum ev)
+    has key = maybe False (\cn -> evMaskHas (cnEvents cn) q) (effectOf dx key)
     mon a =
       let m = monOf b a
        in maybe False (has . EffectKey EffStatus . fromEnum) (statusCond (monStatus m))

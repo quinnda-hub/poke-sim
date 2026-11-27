@@ -182,7 +182,7 @@ setActiveMove user mv = modify' (\b -> b {bActiveMove = Just (MoveInUse user (mv
 
 -- | @battle.clearActiveMove@ (battle.ts 381-389).
 clearActiveMove :: Monad m => Eng m ()
-clearActiveMove = modify' (\b -> b {bActiveMove = Nothing})
+clearActiveMove = modify' (\b -> case bActiveMove b of Nothing -> b; Just _ -> b {bActiveMove = Nothing})
 
 -- | @battle.endTurn@ (battle.ts): advance the turn counter, apply the 1000-turn limit and request moves.
 {-# INLINABLE endTurn #-}

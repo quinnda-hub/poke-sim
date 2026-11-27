@@ -19,6 +19,7 @@ import Data.List (group, sort, sortOn, (\\))
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe)
 import qualified Data.Vector as V
+import qualified Data.Vector.Unboxed as U
 import qualified Data.Vector.Strict as SV
 import qualified Data.Text as T
 import Hedgehog
@@ -32,7 +33,7 @@ import System.Random.SplitMix (mkSMGen)
 
 import Engine
 import Engine.Chance (runSample, speedSortWith)
-import Engine.Dex (Condition (..), Dex (..), EvMask (..), MoveData (..), SpeciesData (..), abilityId, evMaskHas, dexCondLookup, itemId, supportedAbilities, supportedItems, supportedMoves, supportedSpecies)
+import Engine.Dex (Condition (..), Dex (..), EvMask (..), MoveData (..), SpeciesData (..), abilityId, evBit, evMaskHas, prefixMask, dexCondLookup, itemId, supportedAbilities, supportedItems, supportedMoves, supportedSpecies)
 import Engine.Dispatch (HitResult (..), addSideCondition, basePowerCallback, moveAfterHit, moveFieldHit, moveOwnHit, moveTry)
 import Engine.Effects (abilityBodies, fieldCondBodies, itemBodies, moveBodies)
 import Engine.Event (CondId (..), EventId (..), HandlerSpec (..), Prefix (..), condName, parseHandlerName)
@@ -579,7 +580,7 @@ eventMasksExact dex = withTests 1 $ property $ do
       -- bit by bit against the handler list, independently of 'eventBits'
       checkMask what c = do
         let named = [e | (_, e, _) <- cnHandlers c]
-            wrong = [e | e <- [minBound .. maxBound :: EventId], evMaskHas (cnEvents c) (fromEnum e) /= (e `elem` named)]
+            wrong = [e | e <- [minBound .. maxBound :: EventId], evMaskHas (cnEvents c) (evBit (fromEnum e)) /= (e `elem` named)]
         footnote (what ++ " " ++ T.unpack (cnId c) ++ ": events whose bit is wrong: " ++ show wrong)
         wrong === []
         -- the per-prefix masks, bit by bit against the same list
@@ -587,11 +588,11 @@ eventMasksExact dex = withTests 1 $ property $ do
               [ (p, e)
               | p <- [minBound .. maxBound :: Prefix]
               , e <- [minBound .. maxBound :: EventId]
-              , evMaskHas (cnEventsBy c V.! fromEnum p) (fromEnum e) /= any (\(p', e', _) -> p' == p && e' == e) (cnHandlers c)
+              , evMaskHas (prefixMask c p) (evBit (fromEnum e)) /= any (\(p', e', _) -> p' == p && e' == e) (cnHandlers c)
               ]
         footnote (what ++ " " ++ T.unpack (cnId c) ++ ": (prefix, event) pairs whose bit is wrong: " ++ show wrongBy)
         wrongBy === []
-        V.length (cnEventsBy c) === fromEnum (maxBound :: Prefix) + 1
+        U.length (cnEventsBy c) === 2 * (fromEnum (maxBound :: Prefix) + 1)
         -- no bit beyond the last event
         let EvMask lo hi = cnEvents c
         assert (hi `shiftR` max 0 (fromEnum (maxBound :: EventId) + 1 - 64) == 0)
