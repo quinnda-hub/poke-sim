@@ -395,6 +395,9 @@ data EffectKind
   | -- | A move, as the effect of a @runEvent@ with @onEffect@ (@BasePower@): its state is @initEffectState({})@, which
     -- has no id, so it is not in the state and the key's id is unused (the handler carries the move's spec).
     EffMove
+  | -- | The effect of recoil damage (@effect: 'recoil'@ of @applyRecoilDamage@, battle-actions.ts 1451): Showdown's @Condition@ with
+    -- @effectType: 'Recoil'@ (dex-conditions.ts 700). It is no Move, and no state holds it; the key's id is unused.
+    EffRecoil
   deriving (Eq, Show)
 
 -- | The prefix of the callbacks an effect of this kind keeps for itself, as @singleEvent@ reads them: a side

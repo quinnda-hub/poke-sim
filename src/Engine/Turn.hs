@@ -847,12 +847,13 @@ hitLoop fmt dx user target mv = do
   -- applyRecoilDamage (after the loop, from move.totalDamage; battle-actions.ts ~1439)
   let um = monOf b user
   case (mvStruggleRecoil mv, mrRecoil rule) of
-    -- struggleRecoil: round(baseMaxhp / 4), at least 1, as directDamage
+    -- struggleRecoil: round(baseMaxhp / 4), at least 1, as directDamage (battle-actions.ts 1449): no Damage event
     -- (slice 7b: `move.totalDamage || (move.struggleRecoil && damage.some((val, i) => val === 0 && !!targetsCopy[i]))`: a last hit on a
     -- Substitute leaves no target in targetsCopy, and its recoil was taken inside the hit ('hitSubstitute'))
     (True, _) | not lastSub -> modify' (applyDamage user (max 1 (roundDiv (monMaxHp um) 4)))
-    -- recoil: round(totalDamage * n / d), at least 1, as damage(.., 'recoil')
-    (_, Just (n, d)) | total > 0 -> modify' (applyDamage user (max 1 (roundDiv (total * n) d)))
+    -- recoil: round(totalDamage * n / d), at least 1, as battle.damage(recoil, pokemon, pokemon, 'recoil'): the Damage event runs
+    -- with the 'EffRecoil' effect (Magic Guard and Rock Head read it)
+    (_, Just (n, d)) | total > 0 -> void (damageMon dx user (Just user) Nothing (Just (EffectKey EffRecoil 0)) (max 1 (roundDiv (total * n) d)))
     _ -> pure ()
   -- `if (!damage.some(val => !!val || val === 0)) return damage;` guards the next Update: a hit always
   -- yields a numeric damage here (0 counts), so the guard always passes
@@ -949,8 +950,6 @@ applyEffect dx user mv a e = case e of
 {-# INLINABLE hitMove #-}
 hitMove :: MonadChance m => Format -> Dex -> Actor -> Actor -> MoveData -> Eng m (Int, MoveData, Bool)
 hitMove fmt dx user target mv = do
-  b <- get
-  let tm = monOf b target
   -- spreadMoveHit (battle-actions.ts 1101-1105): singleEvent('TryHit', moveData, {}, target, pokemon, move) opens every hit
   -- (lowkick, grassknot and heavyslam fail against a Dynamaxed target: never here). The hit steps' runEvent('TryHit') already ran.
   -- (Brick Break, Psychic Fangs and Raging Bull shatter the target's screens here, before getDamage: 'moveTryHit')
@@ -960,7 +959,7 @@ hitMove fmt dx user target mv = do
   primary <- runEvent dx EvTryPrimaryHit target (Just user) (Just mv) RNone
   case primary of
     RInt 0 -> hitSubstitute fmt dx user target mv
-    _ -> hitTarget fmt dx user target mv tm
+    _ -> hitTarget fmt dx user target mv
 
 -- | The damage of one hit (@getDamage@, battle-actions.ts 1650-1779) of a move on a Pokemon: the damage callback or a fixed damage, which
 -- draw nothing, or the full formula.
@@ -1009,7 +1008,7 @@ hitSubstitute fmt dx user target mv = do
   -- `if (damage) this.actions.applyRecoilDamage(damage, move, source)`
   when (dealt > 0) $ case (mvStruggleRecoil mv, mrRecoil rule) of
     (True, _) -> modify' (applyDamage user (max 1 (roundDiv (monMaxHp um) 4)))
-    (_, Just (n, d)) -> modify' (applyDamage user (max 1 (roundDiv (dealt * n) d)))
+    (_, Just (n, d)) -> void (damageMon dx user (Just user) Nothing (Just (EffectKey EffRecoil 0)) (max 1 (roundDiv (dealt * n) d)))
     _ -> pure ()
   -- `if (move.drain) this.heal(Math.ceil(damage * move.drain[0] / move.drain[1]), source, target, 'drain')`
   forM_ (mrDrain rule) $ \(n, d) -> modify' (healMon user ((dealt * n + d - 1) `quot` d))
@@ -1020,24 +1019,17 @@ hitSubstitute fmt dx user target mv = do
 
 -- | The rest of 'hitMove' for a hit on the Pokemon itself.
 {-# INLINABLE hitTarget #-}
-hitTarget :: MonadChance m => Format -> Dex -> Actor -> Actor -> MoveData -> Mon -> Eng m (Int, MoveData, Bool)
-hitTarget fmt dx user target mv tm = do
+hitTarget :: MonadChance m => Format -> Dex -> Actor -> Actor -> MoveData -> Eng m (Int, MoveData, Bool)
+hitTarget fmt dx user target mv = do
   (dmg, mv') <- hitDamage fmt dx user target mv
-  -- spreadDamage (battle.ts 2146): `targetDamage = this.runEvent('Damage', target, source, effect, targetDamage, true)` after the clamp to
-  -- at least 1 (unless 0) and before the damage is dealt, with the move as the effect: Endure's onDamage leaves the target 1 HP. The
-  -- result is clamped again (`if (targetDamage !== 0) targetDamage = clampIntRange(targetDamage, 1)`). A falsy result ends the damage
-  -- (`damage event failed`): no handler returns one.
-  -- LATENT: the other `battle.damage` calls (residuals, recoil, Rocky Helmet, Spiky Shield, ...) run no Damage event here: their
-  -- effect is not a Move, and Endure is its only listener and acts on a Move alone. An effect with a Damage handler of another kind
-  -- (Sturdy, Magic Guard, Focus Sash) must add the event to those paths. A hit on a Substitute ('hitSubstitute') is no spreadDamage
-  -- (its target is null there: the damage is `target.volatiles['substitute'].hp -= damage`), so Endure does not act on it.
-  let damage0 = if dmg == 0 then 0 else max 1 dmg
-  dmgR <- runEvent dx EvDamage target (Just user) (Just mv') (RInt damage0)
-  let damage1 = fromRelay damage0 dmgR
-  let -- spreadDamage: clamp to at least 1 unless 0, then Pokemon.damage; `dealt` is the damage returned
-      requested = if damage1 == 0 then 0 else max 1 damage1
-      dealt = min requested (monHp tm)
-  modify' (applyDamage target requested)
+  -- spreadDamage (battle.ts 2107-2154) through 'damageMon': the clamp to at least 1 (unless 0), `runEvent('Damage', target, source,
+  -- effect, targetDamage, true)` with the move as the effect (Endure's onDamage leaves the target 1 HP), the second clamp and
+  -- Pokemon.damage; `dealt` is the damage returned. A falsy result of the event (`damage event failed`) deals nothing.
+  -- LATENT(8c): the move's damage array then holds `false`, which fails the hit; none of the supported handlers returns one for a
+  -- Move (Magic Guard acts on every effect but a Move), and Sturdy returns a damage.
+  -- A hit on a Substitute ('hitSubstitute') is no spreadDamage (its target is null there: the damage is
+  -- `target.volatiles['substitute'].hp -= damage`), so no Damage event runs for it.
+  dealt <- fromMaybe 0 <$> damageMon dx target (Just user) (Just mv') moveCause dmg
   -- spreadDamage, effect.drain (battle.ts ~2187): heal the user round(dealt * n / d); battle.heal turns a
   -- positive amount below 1 into 1 and does nothing for 0, at full HP or when the user is down
   case mrDrain (mvRule mv) of

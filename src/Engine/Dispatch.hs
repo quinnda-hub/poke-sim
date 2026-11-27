@@ -64,6 +64,7 @@ module Engine.Dispatch
   , checkWin
   , win
   , applyDamage
+  , damageMon
   , healMon
   , battleHeal
   ) where
@@ -1178,6 +1179,9 @@ runNative dx n c relay = do
   let holder = cHolder c
       keep = pure (Res Keep (cMod c))
       returning o = pure (Res o (cMod c))
+      -- `this.damage(n)` of the holder's own handler: the holder is the target, the event has no source, and the effect is the
+      -- running one (`effect ||= this.effect`, battle.ts 2252)
+      damageKeep amount = damageMon dx holder Nothing Nothing (Just (cKey c)) amount >> keep
   m <- gets (`monOf` holder)
   fmt <- gets bFormat
   let boots = hasItemNamed dx "heavydutyboots" m
@@ -1192,9 +1196,9 @@ runNative dx n c relay = do
     -- brn, par, psn, frz onStart: `this.add('-status', ...)` only
     NLogOnly -> keep
     -- brn.onResidual: this.damage(pokemon.baseMaxhp / 16)
-    NBrnResidual -> modify' (applyDamage holder (max 1 (monMaxHp m `quot` 16))) >> keep
+    NBrnResidual -> damageKeep (max 1 (monMaxHp m `quot` 16))
     -- psn.onResidual: this.damage(pokemon.baseMaxhp / 8)
-    NPsnResidual -> modify' (applyDamage holder (max 1 (monMaxHp m `quot` 8))) >> keep
+    NPsnResidual -> damageKeep (max 1 (monMaxHp m `quot` 8))
     -- tox.onStart and tox.onSwitchIn: this.effectState.stage = 0
     NToxStart -> setStage holder 0 >> keep
     NToxSwitchIn -> setStage holder 0 >> keep
@@ -1203,7 +1207,7 @@ runNative dx n c relay = do
       let stage0 = esA (monStatusState m)
           stage = if stage0 < 15 then stage0 + 1 else stage0
       setStage holder stage
-      modify' (applyDamage holder (max 1 (monMaxHp m `quot` 16) * stage))
+      void (damageMon dx holder Nothing Nothing (Just (cKey c)) (max 1 (monMaxHp m `quot` 16) * stage))
       keep
     -- par.onModifySpe: spe = finalModify(spe); floor(spe * 50 / 100) (no Quick Feet: no abilities yet)
     NParModifySpe -> case relay of
@@ -1375,13 +1379,13 @@ runNative dx n c relay = do
     -- LATENT: Protective Pads, Unseen Fist and the moves with @breaksProtect@ (Feint, Phantom Force, Shadow Force, Hyperspace Hole
     -- and Fury) are not accepted; Outrage's lockedmove reset is not modelled.
     NProtectTryHit -> protectBlock Nothing
-    NSpikyShieldTryHit -> protectBlock (Just (\src srcM -> modify' (applyDamage src (max 1 (monMaxHp srcM `quot` 8)))))
+    NSpikyShieldTryHit -> protectBlock (Just (\src srcM -> void (damageMon dx src (Just holder) Nothing (Just (cKey c)) (max 1 (monMaxHp srcM `quot` 8)))))
     NBanefulBunkerTryHit -> protectBlock (Just (\src _ -> void (trySetStatus dx src Psn)))
     NInertZMaxHit -> keep
     -- endure.condition.onDamage(damage, target, source, effect): `if (effect?.effectType === 'Move' && damage >= target.hp)` the
     -- damage becomes `target.hp - 1` (data/moves.ts 4834-4839)
-    NEndureDamage -> case (cMove c, relay) of
-      (Just _, RInt d) | d >= monHp m -> returning (Replace (RInt (monHp m - 1)))
+    NEndureDamage -> case (cEffect c, relay) of
+      (Just (EffectKey EffMove _), RInt d) | d >= monHp m -> returning (Replace (RInt (monHp m - 1)))
       _ -> keep
     -- slice 6a: run by 'moveTry', 'moveOwnHit' and 'movePriorityCharge'
     NTeleportTry -> keep
@@ -1459,7 +1463,7 @@ runNative dx n c relay = do
     -- blacksludge.onResidual: a Poison-type heals baseMaxhp / 16, anything else takes this.damage(baseMaxhp / 8)
     NBlackSludge
       | hasTypeNamed dx "Poison" m -> modify' (healMon holder (max 1 (monMaxHp m `quot` 16))) >> keep
-      | otherwise -> modify' (applyDamage holder (max 1 (monMaxHp m `quot` 8))) >> keep
+      | otherwise -> damageKeep (max 1 (monMaxHp m `quot` 8))
     -- lifeorb.onAfterMoveSecondarySelf(source, target, move): `source && source !== target && move &&
     -- move.category !== 'Status' && !source.forceSwitchFlag` -> this.damage(source.baseMaxhp / 10, source, source,
     -- lifeorb); the holder is the user, and the move category is never Status where the event is run (a
@@ -1467,7 +1471,7 @@ runNative dx n c relay = do
     -- then no recoil is taken: the user is dragged out at the action tail
     NLifeOrbRecoil
       | Just mv <- cMove c, not (mvStatus mv), cSource c /= Just holder, not (monForceSwitchFlag m) ->
-          modify' (applyDamage holder (max 1 (monMaxHp m `quot` 10))) >> keep
+          void (damageMon dx holder (Just holder) Nothing (Just (cKey c)) (max 1 (monMaxHp m `quot` 10))) >> keep
       | otherwise -> keep
     -- rockyhelmet.onDamagingHit(damage, target, source, move): `this.checkMoveMakesContact(move, source, target)`
     -- (no Protective Pads) -> this.damage(source.baseMaxhp / 6, source, target); the source is the attacker
@@ -1475,7 +1479,7 @@ runNative dx n c relay = do
       b <- get
       case (cMove c, cSource c) of
         (Just mv, Just src) | mrContact (mvRule mv) ->
-          modify' (applyDamage src (max 1 (monMaxHp (monOf b src) `quot` 6))) >> keep
+          void (damageMon dx src (Just holder) Nothing (Just (cKey c)) (max 1 (monMaxHp (monOf b src) `quot` 6))) >> keep
         _ -> keep
     -- flameorb, toxicorb .onResidual: pokemon.trySetStatus('brn' / 'tox', pokemon)
     NFlameOrb -> void (trySetStatus dx holder Brn) >> keep
@@ -1526,8 +1530,7 @@ runNative dx n c relay = do
       | Just rock <- typeIdNamed dx "Rock" -> do
           let tm = typeMod dx rock m
               dmg = if tm >= 0 then monMaxHp m * 2 ^ tm `quot` 8 else monMaxHp m `quot` (8 * 2 ^ negate tm)
-          modify' (applyDamage holder (max 1 dmg))
-          keep
+          damageKeep (max 1 dmg)
       | otherwise -> keep
     -- spikes, toxicspikes onSideStart: this.effectState.layers = 1
     NLayerStart -> setLayers 1 >> keep
@@ -1542,8 +1545,7 @@ runNative dx n c relay = do
       | otherwise -> do
           layers <- getLayers
           let amount = case layers of 1 -> 3; 2 -> 4; 3 -> 6; _ -> 0
-          modify' (applyDamage holder (max 1 (amount * monMaxHp m `quot` 24)))
-          keep
+          damageKeep (max 1 (amount * monMaxHp m `quot` 24))
     -- toxicspikes.onSwitchIn(pokemon): `if (!pokemon.isGrounded()) return;` a Poison type removes the condition
     -- (checked before Steel and the boots); Steel or Heavy-Duty Boots do nothing; else
     -- pokemon.trySetStatus('tox' at 2 layers or more, else 'psn', the foe's active Pokemon): a source with Corrosion
@@ -1622,9 +1624,7 @@ runNative dx n c relay = do
     -- `target.runStatusImmunity('sandstorm')` of a Weather effect (battle.ts 2133): Rock, Ground and Steel types, and
     -- the Immunity event (Sand Rush), skip it
     NSandstormWeather -> do
-      ok <- runStatusImmunity dx holder "sandstorm"
-      when ok (modify' (applyDamage holder (max 1 (monMaxHp m `quot` 16))))
-      keep
+      damageKeep (max 1 (monMaxHp m `quot` 16))
     -- sandstorm.onModifySpD(spd, pokemon): `pokemon.hasType('Rock') && pokemon.effectiveWeather() === 'sandstorm'` ->
     -- this.modify(spd, 1.5) (a modify, not a chainModify: the stat itself changes)
     NSandstormSpD -> weatherStat "Rock"
@@ -2583,6 +2583,56 @@ healMon a amount b
   | otherwise = modifyMon a (\x -> x {monHp = min (monMaxHp x) (monHp x + amount)}) b
   where
     m = monOf b a
+
+-- | @battle.damage@ / @spreadDamage@ (battle.ts 2107-2214, 2252-2260) for one target: the one path of every damage that Showdown deals
+-- through them. @source@ is the Pokemon that deals it, @mv@ the move when the effect is one ('moveCause'; the event's move argument),
+-- @cause@ the damaging effect (Showdown's @effect@: a move, a status, an item, an ability, a hazard or weather, 'EffRecoil'), which
+-- the handlers read as 'cEffect'. Showdown's @null@ effect falls back to @this.effect@, the effect running the event; the caller
+-- resolves it.
+--
+-- 1. no HP: 0, nothing happens; not in play: Showdown returns @false@, here 'Nothing';
+-- 2. a damage other than 0 is at least 1;
+-- 3. a Weather effect needs @target.runStatusImmunity(effect.id)@ (@weather immunity@: 0, nothing happens);
+-- 4. @runEvent('Damage', target, source, effect, damage, true)@: a handler returns the new damage, or a falsy value (@damage event
+--    failed@: 'Nothing'); the result is clamped to at least 1 again unless 0;
+-- 5. @Pokemon.damage@ ('applyDamage'), which queues the faint.
+--
+-- Returns the damage dealt (at most the HP the target had), 'Nothing' where Showdown returns @false@ or the event fails. The drain
+-- heal and the @-damage@ log of @spreadDamage@ are the caller's (the hit path heals; the engine does not log). @directDamage@ (Struggle's
+-- recoil, Substitute's cost) runs no Damage event and calls 'applyDamage' itself.
+-- LATENT: @onEffect@ (the @true@ argument) lets the damaging effect's own @onDamage@ run too; only a move is looked up (none has
+-- one), and no other effect that deals damage has an @onDamage@.
+-- LATENT: @pokemon.hurtThisTurn@ and @source.lastDamage@ (battle.ts 2155-2156) are not in the state.
+{-# INLINABLE damageMon #-}
+damageMon :: MonadChance m => Dex -> Actor -> Maybe Actor -> Maybe MoveData -> Maybe EffectKey -> Int -> Eng m (Maybe Int)
+damageMon dx target source mv cause amount0 = do
+  b <- get
+  let m = monOf b target
+  if monHp m <= 0
+    then pure (Just 0)
+    else
+      if not (monActive m)
+        then pure Nothing
+        else do
+          let amount1 = if amount0 == 0 then 0 else max 1 amount0
+          immune <- case cause of
+            Just key@(EffectKey EffWeather _) | Just cn <- effectOf dx key -> not <$> runStatusImmunity dx target (cnId cn)
+            _ -> pure False
+          if immune
+            then pure (Just 0)
+            else do
+              r <- runEventFull dx False True cause EvDamage target source mv (RInt amount1)
+              let result = case r of
+                    RInt v -> Just v
+                    _ | relayTruthy r -> Just amount1
+                    _ -> Nothing
+              case result of
+                Nothing -> pure Nothing
+                Just v -> do
+                  let requested = if v == 0 then 0 else max 1 v
+                      dealt = min requested (monHp m)
+                  modify' (applyDamage target requested)
+                  pure (Just dealt)
 
 -- | @Pokemon.damage@ / @faint@: reduce HP and queue the faint when it reaches zero.
 applyDamage :: Actor -> Int -> Battle -> Battle

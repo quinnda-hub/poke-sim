@@ -248,6 +248,7 @@ effectOf dx (EffectKey kind i) = case kind of
   EffTerrain -> dxFieldConds dx V.!? i
   EffPseudoWeather -> dxFieldConds dx V.!? i
   EffMove -> Nothing -- a move's effect is 'mvEffect' of the move in use
+  EffRecoil -> Nothing
 {-# INLINE effectOf #-}
 
 -- | A move's own handler for a prefix and event, if the engine has one (docs/handlers.md, "A move's own handlers").
