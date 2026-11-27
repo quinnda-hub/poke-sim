@@ -181,6 +181,9 @@ pivotPlayouts dex = property $ do
       cover 2 "a Substitute was hit" (seenSubHit seen > 0)
       -- slice 7f: a move request with a Pokemon under two disabling effects at once (the exact-moves check of checkBattle then combines them)
       cover 7 "a move request came with an active Pokemon under two disabling effects" (seenMultiDisable seen > 0)
+      -- slice 8e: a Pokemon lost 2 PP to one move (a Pressure holder on the other side), and a Libero or Protean holder had changed its type
+      cover 10 "a move cost 2 PP (Pressure)" (seenPressure seen > 0)
+      cover 10 "a Libero or Protean holder changed its type" (seenTypeChange seen > 0)
       case request b of
         Finished _ -> success
         Awaiting {} -> footnote "playout ended without a result" >> failure
@@ -570,7 +573,8 @@ movesSupported dex movesV = withTests 1 $ property $ do
 -- only when every handler the export lists for it has a body, so none may have a body for these.
 moveEventsOnlyOfMoves :: Dex -> Property
 moveEventsOnlyOfMoves dex = withTests 1 $ property $ do
-  let moveOnly = [EvEffectiveness, EvModifyPriority, EvModifyType, EvBasePowerCallback, EvDamageCallback, EvTry, EvAfterHit, EvAfterSubDamage, EvHitField, EvTryImmunity]
+  -- (slice 8e: ModifyPriority and ModifyType left the list: Prankster and Liquid Voice listen, and 'movePriorityEvent' and 'useMove' run both through runEvent)
+  let moveOnly = [EvEffectiveness, EvBasePowerCallback, EvDamageCallback, EvTry, EvAfterHit, EvAfterSubDamage, EvHitField, EvTryImmunity]
       tables = [("ability", dxAbilities dex), ("item", dxItems dex), ("condition", dxConditions dex), ("field condition", dxFieldConds dex)]
   mapM_ (\(what, table) -> mapM_ (\c -> do
     footnote (what ++ " " ++ T.unpack (cnId c) ++ " listens to an event only moves run")

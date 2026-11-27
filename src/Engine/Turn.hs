@@ -225,7 +225,7 @@ runAction dx ac = do
       b <- get
       case acActor ac of
         Just a | monActive (monOf b a), not (monFainted (monOf b a)) -> do
-          runMove fmt dx a (acArg ac)
+          runMovePrio fmt dx a (acArg ac) (Just (acPriority ac `quot` priorityScale))
           afterAction dx ac
         _ -> pure () -- the Pokemon left the field or fainted: no tail (battle.ts 'move' case returns false)
     KInstaSwitch -> switchAction dx ac >> afterAction dx ac
@@ -462,7 +462,9 @@ switchIn dx how p target = do
         endAbilityAndItem dx o
         -- queue.cancelAction(oldActive) (battle-actions.ts 124-127: a Pokemon forced out or switching by its own move cannot use its
         -- chosen move; the actions it still has queued go, except a runSwitch); oldActive.clearVolatile() (resets the stat stages, the volatiles, both switch flags (`includeSwitchFlags`, pokemon.ts 1530, 1558-1561: a U-turn user dragged out by Red Card keeps none) and the cached speed; the status, and toxic's stage, stay)
-        modify' (\b -> modifyMon o (\m -> m {monSpeed = stSpe (monStats m), monBoosts = noBoosts, monVolatiles = SV.empty, monLastMove = -1 {- slice 7c: clearVolatile, pokemon.ts 1563 -}, monAbility = monBaseAbility m, monSwitchFlag = NoSwitch, monForceSwitchFlag = False}) b {bQueue = cancelAction o (bQueue b)})
+        modify' (\b -> modifyMon o (\m -> m {monSpeed = stSpe (monStats m), monBoosts = noBoosts, monVolatiles = SV.empty, monLastMove = -1 {- slice 7c: clearVolatile, pokemon.ts 1563 -}, monAbility = monBaseAbility m,
+          -- slice 8e: `setSpecies(baseSpecies)` (pokemon.ts 1581) gives back the species' types (Libero and Protean's setType is undone)
+          monType1 = spType1 (speciesData dx (monSpecies m)), monType2 = spType2 (speciesData dx (monSpecies m)), monSwitchFlag = NoSwitch, monForceSwitchFlag = False}) b {bQueue = cancelAction o (bQueue b)})
       _ -> pure ()
     case old of
       Just o -> do
@@ -537,26 +539,41 @@ runSwitch dx first = do
 -- Struggle (slot -1: no PP is deducted and the move is typeless with recoil).
 {-# INLINABLE runMove #-}
 runMove :: MonadChance m => Format -> Dex -> Actor -> Int -> Eng m ()
-runMove fmt dx user@(Actor p _) slot = do
+runMove fmt dx user slot = runMovePrio fmt dx user slot Nothing
+
+-- | 'runMove' with the priority of the queued action (slice 8e). Showdown's @getActionSpeed@ writes the priority that the
+-- @ModifyPriority@ events gave into @action.move.priority@ (battle.ts 2702), and @runMove@ reads it back off the same ActiveMove
+-- (@baseMove.priority@, 283): the move in use carries it, which Psychic Terrain's @onTryHit@ reads (a Prankster status move has priority
+-- 1). 'Nothing' is the dex priority. @pranksterBoosted@ is set on the same object by Prankster's handler: it is derived here, for a
+-- Status move of a Prankster holder (the ability the handler saw when the action was last given its priority).
+-- LATENT: a holder that gained or lost Prankster after that (Skill Swap, Gastro Acid) is not modelled.
+{-# INLINABLE runMovePrio #-}
+runMovePrio :: MonadChance m => Format -> Dex -> Actor -> Int -> Maybe Int -> Eng m ()
+runMovePrio fmt dx user@(Actor p _) slot qprio = do
   b <- get
   let target = activeActor (other p) b
       um = monOf b user
   case (slot < 0, monMoves um SV.!? slot) of
     -- Struggle: `baseMove.id !== 'struggle'` skips OverrideAction (battle-actions.ts 277); pokemon.deductPP finds no Struggle slot and
     -- returns 0, which runMove allows for struggle
-    (True, _) -> go target (dxStruggle dx) (M.findWithDefault (-1) "struggle" (dxMoveIx dx)) Nothing
+    (True, _) -> go target (inUse b (dxStruggle dx)) (M.findWithDefault (-1) "struggle" (dxMoveIx dx)) Nothing
     (False, Just ms) -> do
       -- slice 7c. runEvent('OverrideAction', pokemon, target, baseMove) (battle-actions.ts 278-287): Encore returns the encored move's id;
       -- `baseMove = getActiveMove(changedMove); baseMove.priority = priority` keeps the chosen move's priority, on the move in use too
       -- (Psychic Terrain's TryHit and the Tera floor read `move.priority`; the queue is not re-sorted either), and the target is `getRandomTarget(pokemon, baseMove)` ('go' recomputes it from the
       -- move). The slot whose PP is deducted is the new move's (`deductPP(baseMove)` finds it by id).
-      let chosen = moveData dx (msMove ms)
+      let chosen = inUse b (moveData dx (msMove ms))
       over <- runEvent dx EvOverrideAction user (Just target) (Just chosen) RNone
       case over of
-        RText i | Just ix <- M.lookup i (dxMoveIx dx) -> go target ((moveData dx ix) {mvPriority = mvPriority chosen}) ix (SV.findIndex ((== ix) . msMove) (monMoves um))
+        -- (`if (pranksterBoosted) baseMove.pranksterBoosted = pranksterBoosted`, 289)
+        RText i | Just ix <- M.lookup i (dxMoveIx dx) -> go target ((moveData dx ix) {mvPriority = mvPriority chosen, mvPranksterBoosted = mvPranksterBoosted chosen}) ix (SV.findIndex ((== ix) . msMove) (monMoves um))
         _ -> go target chosen (msMove ms) (Just slot)
     _ -> pure ()
   where
+    -- the move as the queue left it: its priority and its prankster flag
+    inUse b0 mv0 = mv0
+      { mvPriority = fromMaybe (mvPriority mv0) qprio
+      , mvPranksterBoosted = mvStatus mv0 && hasAbility dx b0 user "prankster" }
     -- @mix@: the Dex index of the move in use; @mslot@: the index of its move slot (Nothing: none, as for Struggle)
     go target mv mix mslot = do
       -- runEvent('BeforeMove'): before PP is deducted; a move stopped here costs no PP and returns from
@@ -614,15 +631,38 @@ useMove fmt dx user target mv0 = do
   -- (Mold Breaker sets it in onModifyMove, 8f). There is no restore after a nested useMove in Gen 9 (battle-actions.ts 415-417 restores only for `gen <= 4`).
   setActiveMove user mv0
   mvT <- singleMoveEvent dx EvModifyType user (Just eventTarget) mv0
-  mv <- singleMoveEvent dx EvModifyMove user (Just eventTarget) mvT
+  mv1 <- singleMoveEvent dx EvModifyMove user (Just eventTarget) mvT
   -- the holders' handlers edit the move ('MoveEdit'): ModifyType's result is the move ModifyMove sees (battle-actions.ts 502-503)
   let edited r m = case r of
         RMoveEdits es@(_ : _) -> applyMoveEdits es m
         _ -> m
-  mvTy <- (`edited` mv) <$> runEvent dx EvModifyType user (Just eventTarget) (Just mv) (RMoveEdits [])
-  mvM <- (`edited` mvTy) <$> runEvent dx EvModifyMove user (Just eventTarget) (Just mvTy) (RMoveEdits [])
-  setActiveMove user mvM
-  useMoveWith fmt dx user target mvM
+  mvTy <- (`edited` mv1) <$> runEvent dx EvModifyType user (Just eventTarget) (Just mv1) (RMoveEdits [])
+  mv <- (`edited` mvTy) <$> runEvent dx EvModifyMove user (Just eventTarget) (Just mvTy) (RMoveEdits [])
+  setActiveMove user mv
+  -- useMoveInner (battle-actions.ts 540-551): the Pressure targets of the move pay for it, after the move is announced and before
+  -- its `TryMove` and the hit steps. `runEvent('DeductPP', source, pokemon, move)` runs once per Pressure target and its numbers are
+  -- summed; `pokemon.deductPP(moveOrMoveName, extraPP)` then takes them from the move's slot (pokemon.ts 909-923: nothing when the move
+  -- has no slot, as Struggle, or its PP is 0 already; the PP stops at 0). `getMoveTargets` (pokemon.ts 812-873) gives the targets:
+  -- the foe for a move on one foe (none when it has fainted: the move has no targets), the user alone for a move on itself or its
+  -- side, the user and the foe (a fainted one too: `foes(true)`) for a move on the field, none for a move on the foe's side, and for
+  -- a move with `mustpressure` (Spikes, Stealth Rock, Toxic Spikes) the foe that has not fainted, whatever its target.
+  b <- get
+  let foeAlive = not (monFainted (monOf b target))
+      rule = mvRule mv
+      pressureTargets
+        | mrMustPressure rule = [target | foeAlive]
+        | otherwise = case mrTarget rule of
+            TargetFoe -> [target | foeAlive]
+            TargetSelf -> [user]
+            TargetAllySide -> [user]
+            TargetFoeSide -> []
+            TargetAll -> [user, target]
+  drops <- mapM (\pt -> runEvent dx EvDeductPP pt (Just user) (Just mv) RNone) pressureTargets
+  let extraPP = sum [n | RInt n <- drops]
+      slotOf = SV.findIndex (\ms -> mvId (moveData dx (msMove ms)) == mvId mv) (monMoves (monOf b user))
+  when (extraPP > 0) $ forM_ slotOf $ \i ->
+    modify' (modifyMon user (\m -> m {monMoves = SV.imap (\j x -> if j == i && msPP x > 0 then x {msPP = max 0 (msPP x - extraPP)} else x) (monMoves m)}))
+  useMoveWith fmt dx user target mv
 
 -- | 'useMove' after the @ModifyType@ and @ModifyMove@ events: the rest of @useMoveInner@ and the hit steps, which read the
 -- move in use.
@@ -674,8 +714,13 @@ useMoveWith fmt dx user target mv = case mrTarget rule of
        -- !this.dex.getImmunity('powder', target)`: Grass types are immune to a powder move (no draw)
        unless (mrPowder rule && typeImmuneTo dx "powder" tm) $
         -- hitStepTryImmunity, the move's own onTryImmunity (battle-actions.ts 739): Trick and Switcheroo against Sticky Hold
-        moveTryImmunity dx target mv >>= \tryImm -> when tryImm $ do
+        -- hitStepTryImmunity (battle-actions.ts 742), after it: `gen >= 7 && move.pranksterBoosted && pokemon.hasAbility('prankster') &&
+        -- !targets[i].isAlly(pokemon) && !this.dex.getImmunity('prankster', target)`: a Dark target is immune (the foe is never an
+        -- ally here). A move on the user or a side never reaches this per-target step against a foe.
+        moveTryImmunity dx target mv >>= \tryImm0 -> gets (\bP -> tryImm0 && not (mvPranksterBoosted mv && hasAbility dx bP user "prankster" && typeImmuneTo dx "prankster" tm)) >>= \tryImm -> when tryImm $ do
         -- hitStepAccuracy
+        -- (the user as it is now: Libero and Protean's PrepareHit may have changed its types, which Toxic's check reads)
+        umNow <- gets (`monOf` user)
         hits <- if mvAccuracy mv == neverMisses then pure True
           else do
             -- slice 8b. `accuracy !== true` (battle-actions.ts 779-791): the user's @ModifyBoost@ event, then (`if (!move.ignoreEvasion)`) the
@@ -685,7 +730,7 @@ useMoveWith fmt dx user target mv = case mrTarget rule of
             evaStage <- if mrIgnoreEvasion rule || mvIgnoreEvasion mv then pure 0 else modifyBoost dx target BEvasion (bsEvasion (monBoosts tm))
             -- the target's evasion stage joins the accuracy stage (battle-actions.ts 785-788)
             let staged = stagedAccuracy fmt (mvAccuracy mv) ((monBoosts um) {bsAccuracy = accStage}) ((monBoosts tm) {bsEvasion = evaStage})
-            if isToxic && hasTypeNamed dx "Poison" um then pure True else randomChance staged 100
+            if isToxic && hasTypeNamed dx "Poison" umNow then pure True else randomChance staged 100
         when hits $
           if mrDamaging rule
             then do

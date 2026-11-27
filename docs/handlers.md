@@ -1982,7 +1982,52 @@ branch from Showdown's own events, and no counter was zero.
 
 ### 8e findings
 
-(To be written by phase 8e.)
+The move pipeline: Pressure, Prankster, Libero, Protean, Liquid Voice, Infiltrator. Set `slice8e`, 1000 battles.
+
+**Pressure.**
+- `DeductPP` is a new event (`EvDeductPP`). `useMove` runs it once per Pressure target, after the `ModifyType` and `ModifyMove` events and before `TryMove` (battle-actions.ts 540-551). It sums the numbers and takes them from the slot of the move.
+- The Pressure targets follow `getMoveTargets` (pokemon.ts 812-873):
+  - A move on one foe: the foe, unless it has fainted (then the move has no targets).
+  - A move on itself or the user's side: the user. The handler returns nothing for an ally, so this costs nothing.
+  - A move on the field (`all`): the user and the foe, a fainted foe too.
+  - A move on the foe's side: none. Exception: a move with `mustpressure` (Spikes, Stealth Rock, Toxic Spikes) has the foe, whatever its target.
+- `mrMustPressure` and `mrSound` are two new flags of `MoveRule`. They were inert flags.
+- The extra PP does nothing when the slot is at 0 already, and stops at 0. Every maximum PP is a multiple of 8, so the one extra PP always finds PP left after the move's own: the tally cannot show a wasted extra.
+- Struggle has no slot, so nothing is taken.
+
+**Prankster.**
+- `movePriorityEvent` already ran the move's own handler, then the holder's. The ability adds 1 to a Status move.
+- The flag `pranksterBoosted` is written on the `ActiveMove` in Showdown. A priority event has no move to write to, so `runMovePrio` derives it for the move in use: a Status move of a holder that has Prankster. LATENT: a holder that gained or lost Prankster between the last priority refresh and the move is not modelled.
+- `runAction` now gives `runMove` the priority of the queued action (`runMovePrio`). Showdown writes it into `action.move.priority` (battle.ts 2702) and `runMove` reads it back, so the move in use has priority 1. Psychic Terrain's `onTryHit` reads it: a Prankster move into a grounded target under Psychic Terrain is blocked. This was the LATENT note of `movePriorityEvent`.
+- The Dark immunity is `hitStepTryImmunity` (battle-actions.ts 742), after the move's own `TryImmunity`: the flag, the user has Prankster, the target is a foe, and `getImmunity('prankster', target)` (Dark, read from `getTypes`, so a Terastallized Dark type counts). Moves on the user, its side or the field never reach it.
+- Ties: the queue sort is unchanged. The priority is part of the key, so a Prankster move ties with a priority 1 move, and two Pranksters tie on speed (the tally counts both).
+
+**Liquid Voice and Infiltrator: how a handler changes the move.**
+- Showdown mutates the `ActiveMove`. A relay value carries no move, so `useMove` starts the event from a number and reads the move back.
+  - `ModifyType`: the relay value is the move's type id. Liquid Voice returns Water for a sound move (`mrSound`). Priority -1 comes from the export.
+  - `ModifyMove`: the relay value is a bit set (`moveFlagBits`, `withMoveFlagBits`). Bit 0 is `infiltrates`. Another phase adds its flag as the next bit (`mvIgnoreAbility`, `mvIgnoreEvasion`).
+- An ability that returns type id 0 (Normal) has a falsy relay value and stops the event; no supported handler does.
+
+**Infiltrator.** The LATENT `infiltrates` sites are resolved: the Substitute's `onTryPrimaryHit` test, Reflect, Light Screen (`screenDamage`) and Aurora Veil, and Defog's evasion drop. A status move goes through a Substitute too. Mist and Safeguard are not supported, so their `infiltrates` clause stays out.
+
+**Libero and Protean.**
+- `onPrepareHit` runs on the user in all three hit paths. The flag is the ability state's `esA` (1), new at every switch-in.
+- The conditions, in Showdown's order: the flag is not set, the move is not bounced (`mvHasBounced`), the move's type is not `???`, the user's types are not exactly that one type, `setType` succeeds. `setType` refuses Stellar, a Terastallized Pokemon, Arceus and Silvally, and then the flag stays unset. It overwrites both types (`monType1`, `monType2`).
+- `futuremove`, `snatch` and `callsMove` need moves the engine does not accept.
+- The type is undone at switch-out and at faint (`clearVolatile`'s `setSpecies(baseSpecies)`): both sites now reset the types.
+- Accuracy reads the user's types after `PrepareHit`: Toxic from a Libero user that became a Poison type never misses (battle-actions.ts 797). The check had read the user from before the event.
+
+**Surprises.**
+- Toxic's no-miss check (above) was the one stale read of the user.
+- `moveEventsOnlyOfMoves` listed `ModifyPriority` and `ModifyType` as events only moves listen to. Abilities listen now, so they left that list.
+- A Pokemon's drop of PP in one step is at most 2 (`checkStep`), and 2 needs a Pressure holder on the other side.
+
+**Properties.** `checkStep` (every playout): no move slot gains PP or loses more than 2 in a step, and a loss of 2 needs a Pressure holder on the other side. `checkBattle` (every state): stored types are the species' own, except an active Libero or Protean holder that has used the ability, whose single stored type is what `getTypes` reports. The pivot playouts carry the six abilities and their kit (`pipelineKit`) and cover a 2-PP move and a type change.
+
+**LATENT.**
+- `LATENT(8f)`: Magic Bounce: a bounced move is not prankster-boosted (battle-actions.ts 476).
+- `LATENT(8f)`: Libero against a bounced move (`mvHasBounced` is always False until Magic Bounce).
+- 8c adds a Soundproof reader of `mrSound`; the flag exists already.
 
 ### 8f findings
 

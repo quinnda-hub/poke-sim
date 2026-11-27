@@ -119,10 +119,17 @@ genTeamsK dx pivotHeavy statHeavy guardHeavy abilityHeavy = (,) <$> genTeam <*> 
       ++ [(6, Gen.element (concat [protectKit, punches, encoreKit, substituteKit])) | not (null (concat [protectKit, punches, encoreKit, substituteKit]))]
       -- slice 8a: the moves that change stages (self-drops, boosts, drops on the foe) and the contact and Dark moves that Weak Armor, Gooey and Justified answer
       ++ [(8, Gen.element statKit) | statHeavy, not (null statKit)]
+      -- slice 8e: the moves that meet Pressure (a move on each kind of target), Prankster (status moves into Dark types), Liquid Voice (sound
+      -- moves) and Infiltrator (Substitute and the screens)
+      ++ [(4, Gen.element pipelineKit) | not (null pipelineKit)]
     -- slice 8a
     statKit = [m | m <- ["closecombat", "superpower", "dracometeor", "swordsdance", "dragondance", "bulkup", "calmmind", "nastyplot", "snarl", "icywind", "growl", "tailwhip"
                         , "stickyweb", "partingshot", "knockoff", "suckerpunch", "crunch", "bite", "darkpulse", "tackle", "doubleironbash", "bulletseed", "uturn", "roar", "dragontail"
                         , "substitute", "sandattack", "doubleteam", "minimize", "agility", "shellsmash", "curse"], m `elem` moves]
+    -- slice 8e
+    pipelineKit = [m | m <- ["thunderwave", "willowisp", "toxic", "taunt", "hypervoice", "boomburst", "defog", "reflect", "lightscreen", "auroraveil", "substitute"
+                            , "tailwind", "haze", "stealthrock", "spikes", "toxicspikes", "swordsdance", "psychicterrain", "trickroom", "earthquake", "surf"], m `elem` moves]
+    pipelineAbilities = [a | a <- ["pressure", "prankster", "libero", "protean", "liquidvoice", "infiltrator"], a `elem` abilities]
     pickMove
       | abilityHeavy && not (null kit8d) = Gen.frequency [(5, Gen.element kit8d), (3, Gen.element moves)]
       | pivotHeavy && not (null step4Kits) && not (null pivots) && not (null dragKit) =
@@ -152,7 +159,13 @@ genTeamsK dx pivotHeavy statHeavy guardHeavy abilityHeavy = (,) <$> genTeam <*> 
       | abilityHeavy && not (null abilities8d) = Gen.frequency [(5, Gen.element abilities8d), (1, Gen.element abilities)]
       -- slice 8b: the damage abilities join the pivot-heavy mix, where Supreme Overlord meets switch-ins after faints and Flash Fire meets
       -- the switch-outs that end its volatile
+      -- slice 8e: the move-pipeline abilities (Pressure, Prankster, Libero, Protean, Liquid Voice, Infiltrator) join the same mix, with weight 4
+      -- STACK NOTE: 8b and 8e each added a guard for this mix with its own kit; stacked, the first would hide the second, so this one takes both
+      | pivotHeavy && not (null switchAbilities) && not (null damageAbilities) && not (null pipelineAbilities) =
+          Gen.frequency [(3, Gen.element switchAbilities), (3, Gen.element damageAbilities), (4, Gen.element pipelineAbilities), (3, Gen.element abilities)]
       | pivotHeavy && not (null switchAbilities) && not (null damageAbilities) = Gen.frequency [(3, Gen.element switchAbilities), (3, Gen.element damageAbilities), (3, Gen.element abilities)]
+      | pivotHeavy && not (null switchAbilities) && not (null pipelineAbilities) =
+          Gen.frequency [(3, Gen.element switchAbilities), (4, Gen.element pipelineAbilities), (3, Gen.element abilities)]
       | pivotHeavy && not (null switchAbilities) = Gen.frequency [(3, Gen.element switchAbilities), (3, Gen.element abilities)]
       | otherwise = Gen.element abilities
     -- slice 8d
@@ -294,6 +307,11 @@ data Seen = Seen
   -- ^ a Magician or Pickpocket holder with no item before the step and an item after it
   , seenBerserk :: !Int
   -- ^ a Berserk holder in play before and after the step, with HP after it, that lost HP and whose Special Attack stage rose
+  -- slice 8e
+  , seenPressure :: !Int
+  -- ^ a move slot that lost 2 PP in one step (its move's use, and a foe's Pressure)
+  , seenTypeChange :: !Int
+  -- ^ an active Libero or Protean holder that has used the ability after a step
   }
   deriving (Eq, Show)
 
@@ -333,6 +351,9 @@ instance Semigroup Seen where
       , seenMoxie = f seenMoxie
       , seenThief = f seenThief
       , seenBerserk = f seenBerserk
+      -- slice 8e
+      , seenPressure = f seenPressure
+      , seenTypeChange = f seenTypeChange
       }
     where
       f g = g x + g y
@@ -372,6 +393,9 @@ instance Monoid Seen where
       , seenMoxie = 0
       , seenThief = 0
       , seenBerserk = 0
+      -- slice 8e
+      , seenPressure = 0
+      , seenTypeChange = 0
       }
 
 -- | Play with random legal choices, checking every state on the way, until the battle ends (or the cap).
@@ -417,13 +441,25 @@ playChecked dx t1 t2 = startBattle dx t1 t2 >>= go 0 mempty
 -- could bring it back.
 -- Returns what the step went through.
 checkStep :: Dex -> Battle -> Battle -> (Maybe Choice, Maybe Choice) -> Either String Seen
-checkStep dx b b' (c1, c2) = (mappend (stallSeen <> seen8d) <$>) $ mapM_ one [(p, i) | (p, side) <- [(P1, bP1), (P2, bP2)], i <- [0 .. SV.length (sMons (side b)) - 1]] >> turnOk >> itemsNeverCreated >> (((,) <$> drag (P1, c1) <*> drag (P2, c2)) >>= \ds -> pivotsOk ds >> switchOuts >>= \so -> pure (so <> mempty {seenDrags = length (filter id [fst ds, snd ds]), seenEncore = volatileAtRequest CEncore, seenTaunt = volatileAtRequest CTaunt, seenLocked = length lockedNow, seenLockStruggle = length (filter (mustStruggle b) lockedNow), seenMultiDisable = multiDisabled dx b'}))
+checkStep dx b b' (c1, c2) = (mappend (stallSeen <> seen8d <> pressureSeen) <$>) $ pressureOk >> mapM_ one [(p, i) | (p, side) <- [(P1, bP1), (P2, bP2)], i <- [0 .. SV.length (sMons (side b)) - 1]] >> turnOk >> itemsNeverCreated >> (((,) <$> drag (P1, c1) <*> drag (P2, c2)) >>= \ds -> pivotsOk ds >> switchOuts >>= \so -> pure (so <> mempty {seenDrags = length (filter id [fst ds, snd ds]), seenEncore = volatileAtRequest CEncore, seenTaunt = volatileAtRequest CTaunt, seenLocked = length lockedNow, seenLockStruggle = length (filter (mustStruggle b) lockedNow), seenMultiDisable = multiDisabled dx b'}))
   where
     -- slice 7c: the step ended at a move request with an active Pokemon that has the volatile
     volatileAtRequest c = case request b' of
       Awaiting MoveRequest _ _ | or [fromEnum c `elem` [i | Volatile i _ <- SV.toList (monVolatiles (monOf b' (activeActor p b')))] | p <- [P1, P2], sHasActive (sideOf p b')] -> 1
       _ -> 0
     chose p = if p == P1 then c1 else c2
+    -- slice 8e: Pressure. A move slot loses PP only by a use of its move (1), and a foe's Pressure adds 1 (battle-actions.ts 540-551): no
+    -- slot loses more than 2 in a step (a Pokemon moves once; a second Pressure holder cannot exist in singles), none gains PP, and a slot
+    -- that loses 2 has a Pressure holder on the other side
+    ppDrops = [ (p, msPP ms - msPP ms')
+              | p <- [P1, P2]
+              , (m0, m1) <- zip (SV.toList (sMons (sideOf p b))) (SV.toList (sMons (sideOf p b')))
+              , (ms, ms') <- zip (SV.toList (monMoves m0)) (SV.toList (monMoves m1)) ]
+    foeHasPressure p = any (\m -> abilityIs "pressure" m) (SV.toList (sMons (sideOf (otherP p) b)))
+    pressureOk = case [(p, d) | (p, d) <- ppDrops, d < 0 || d > 2 || (d == 2 && not (foeHasPressure p))] of
+      [] -> Right ()
+      (p, d) : _ -> Left (show p ++ ": a move slot lost " ++ show d ++ " PP in one step (more than 2, a gain, or 2 with no Pressure holder on the other side)")
+    pressureSeen = mempty {seenPressure = length [() | (_, 2) <- ppDrops], seenTypeChange = length [() | p <- [P1, P2], sHasActive (sideOf p b'), let m = activeMon p b', abilityIs "libero" m || abilityIs "protean" m, esA (monAbilityState m) == 1]}
     -- slice 7a: the stall volatiles after the step (the protect volatiles themselves end with the turn, so only stall shows)
     stalls = [st | p <- [P1, P2], m <- SV.toList (sMons (sideOf p b')), Volatile i st <- SV.toList (monVolatiles m), i == fromEnum CStall]
     stallSeen = mempty {seenStall = length stalls, seenStallClimb = length [() | st <- stalls, esA st >= 9]}
@@ -826,7 +862,10 @@ checkBattle dx b = do
         then bad ("stage " ++ show stage ++ " with status " ++ show (monStatus m) ++ " on a live Pokemon") else Right ()
       -- the stored types are the species' own (nothing supported changes them); @getTypes()@ ('monTypes') is those, less Flying
       -- under a Roost (Normal when that leaves none), so a Roosted Pokemon never reports the Flying type
-      let baseTypes = [t | t <- [spType1 sp, spType2 sp], t /= noType]
+      -- slice 8e: a Libero or Protean holder in play that has used the ability (its ability state's esA is 1) holds the one type it took
+      -- (setType); every other Pokemon's stored types are its species', and a Pokemon that leaves the field gets them back (clearVolatile)
+      let liberoUsed = monActive m && (ability "libero" || ability "protean") && esA (monAbilityState m) == 1
+          baseTypes = if liberoUsed then storedTypes else [t | t <- [spType1 sp, spType2 sp], t /= noType]
           storedTypes = [t | t <- [monType1 m, monType2 m], t /= noType]
           (g1, g2) = monTypes dx m
           gotTypes = [t | t <- [g1, g2], t /= noType]
@@ -851,6 +890,7 @@ checkBattle dx b = do
           realTypes = foldr (\(i, t) acc -> if t `notElem` ["Stellar", "???"] then acc + 2 ^ i else acc) (0 :: Int) (zip [0 :: Int ..] (V.toList (dxTypeNames dx)))
       if boosted == 0 || (stellar && sTeraUsed' && (monTerastallized m || monFainted m) && boosted .&. complement realTypes == 0)
         then Right () else bad ("boosted types " ++ show boosted ++ " without a Stellar Tera type or the side's Tera, or with a type that is not real")
+      if liberoUsed && length storedTypes /= 1 then bad "a Libero or Protean holder that changed type holds other than one type" else Right ()
       if storedTypes == baseTypes && gotTypes == expected' && (not roosted || all (\t -> Just t /= flyingId) gotTypes)
         then Right ()
         else bad ("stored types " ++ show storedTypes ++ ", getTypes " ++ show gotTypes ++ " but " ++ show expected')

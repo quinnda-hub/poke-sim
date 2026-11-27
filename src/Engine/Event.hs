@@ -101,13 +101,13 @@ data EventId
   -- Trick, Switcheroo, Thief).
   | EvModifyType
   -- ^ @singleEvent('ModifyType', move, ...)@ then @runEvent('ModifyType', pokemon, target, move, move)@ in @useMoveInner@
-  -- (battle-actions.ts 494, 497). Only a move's own handler is supported.
+  -- (battle-actions.ts 494, 497). A move's own handler and, since slice 8e, an ability's (Liquid Voice): the relay value is the move's type id.
   | EvEffectiveness
   -- ^ @singleEvent('Effectiveness', move, null, pokemon, type, move, typeMod)@ then @runEvent('Effectiveness', ...)@ in
   -- @runEffectiveness@ (pokemon.ts 2237-2238), once per defending type. Only a move's own handler is supported.
   | EvModifyPriority
   -- ^ @singleEvent('ModifyPriority', move, ...)@ then @runEvent('ModifyPriority', ...)@ in @getActionSpeed@ (battle.ts
-  -- 2699-2700). Only a move's own handler is supported.
+  -- 2699-2700). A move's own handler and, since slice 8e, an ability's (Prankster).
   | EvBasePowerCallback
   -- ^ Not an event: a move's @basePowerCallback@, called directly by @getDamage@ (battle-actions.ts 1676). The export
   -- lists it as the handler @basePowerCallback@ and the engine keeps it as @(POwn, EvBasePowerCallback)@, as it does
@@ -206,6 +206,10 @@ data EventId
   | EvModifySecondaries
   -- ^ @runEvent('ModifySecondaries', target, source, moveData, secondaries.slice())@ in @secondaries@ (battle-actions.ts 1401), before the draws of
   -- the secondaries, once per hit: the relay value is the list of secondaries ('RSecondaries'), and a handler returns the list that replaces it.
+  -- slice 8e
+  | EvDeductPP
+  -- ^ @runEvent('DeductPP', pressureTarget, pokemon, move)@ in @useMoveInner@ (battle-actions.ts 543-546), once per Pressure target of the
+  -- move, with no relay value (@true@): Pressure returns 1 (not for an ally of the user). 'Engine.Turn.useMove' sums the numbers.
   deriving (Eq, Show, Enum, Bounded)
 
 -- | How @runEvent@ orders the handlers of an event (battle.ts 797-803).
@@ -322,6 +326,8 @@ eventName e = case e of
   EvAfterSetStatus -> "AfterSetStatus"
   EvAfterFaint -> "AfterFaint"
   EvModifySecondaries -> "ModifySecondaries"
+  -- slice 8e
+  EvDeductPP -> "DeductPP"
 
 -- | Which Pokemon a handler reacts to: the holder (@onX@), its allies (@onAllyX@), its foes (@onFoeX@), the
 -- source of the event (@onSourceX@) or anyone (@onAnyX@).
@@ -918,6 +924,18 @@ data NativeId
   -- ^ moxie @onSourceAfterFaint@: +1 Attack per faint, when a move caused it.
   | NShieldDustModifySecondaries
   -- ^ shielddust @onModifySecondaries@: only the secondaries with a @self@ effect remain.
+  -- slice 8e
+  | NPressureDeductPP
+  -- ^ pressure @onDeductPP(target, source)@ (data/abilities.ts 3438-3444): `if (target.isAlly(source)) return; return 1`.
+  | NPranksterModifyPriority
+  -- ^ prankster @onModifyPriority(priority, pokemon, target, move)@ (3426-3433): a Status move gets +1 (and sets @pranksterBoosted@, which
+  -- 'Engine.Turn.runMove' recomputes for the move in use).
+  | NLiberoPrepareHit
+  -- ^ libero and protean @onPrepareHit(source, target, move)@ (2319, 3498): once per ability state, the user takes the move's type.
+  | NLiquidVoiceModifyType
+  -- ^ liquidvoice @onModifyType(move, pokemon)@ (2417): a sound move becomes Water. 
+  | NInfiltratorModifyMove
+  -- ^ infiltrator @onModifyMove(move)@ (2132): @move.infiltrates = true@. An edit: 'MEInfiltrates'.
   deriving (Eq, Show)
 
 -- | The body of each handler the engine implements (written by hand: Showdown's handlers are code). A condition

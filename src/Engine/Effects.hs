@@ -246,6 +246,15 @@ abilityBodies ty wx name = case name of
   "moxie" -> Just [(PSource, EvAfterFaint, BNative NMoxieAfterFaint)]
   -- shielddust: onModifySecondaries
   "shielddust" -> Just [(POwn, EvModifySecondaries, BNative NShieldDustModifySecondaries)]
+  -- slice 8e (the move pipeline). pressure (abilities.ts 3438): onStart logs, onDeductPP returns 1 against a foe; prankster (3426):
+  -- onModifyPriority; libero (2319) and protean (3498): onPrepareHit; liquidvoice (2417): onModifyType (priority -1, from the export);
+  -- infiltrator (2132): onModifyMove
+  "pressure" -> Just [(POwn, EvStart, BNative NLogOnly), (POwn, EvDeductPP, BNative NPressureDeductPP)]
+  "prankster" -> Just [(POwn, EvModifyPriority, BNative NPranksterModifyPriority)]
+  "libero" -> Just [(POwn, EvPrepareHit, BNative NLiberoPrepareHit)]
+  "protean" -> Just [(POwn, EvPrepareHit, BNative NLiberoPrepareHit)]
+  "liquidvoice" -> Just [(POwn, EvModifyType, BNative NLiquidVoiceModifyType)]
+  "infiltrator" -> Just [(POwn, EvModifyMove, BNative NInfiltratorModifyMove)]
   _ -> Nothing
   where
     speed ws = do
