@@ -980,18 +980,624 @@ the whitelist and stay rejected.
   `ERoost` is the precedent. It has seven users (Protect, Spiky Shield,
   Baneful Bunker, Endure, Substitute, Encore and Taunt), well past the three a
   new kind needs, and it replaced the per-phase versions 7b and 7c first wrote.
-- **The event mask.** `cnEvents` is an `EvMask !Word64 !Word64`; `cnEventsBy` holds
-the same mask per prefix, flat, as two unboxed words each (`prefixMask` reads
-one back as an `EvMask`). `EventId` has room for 128 events; the property
-checks the bound (`fromEnum maxBound < 128`) and that each mask is exactly the
-handler list's events.
-- **The test is branch-free:** `evBit i` is the one-bit query mask, built
-  without a branch, and `evMaskHas mask query` is `(lo .&. qlo) .|. (hi .&.
-  qhi) /= 0`. `eventHeard` builds the query once per event. A first version
-  that chose the word by `if i < 64` cost 8% of the benchmark (`eventHeard`
-  tests a mask for every effect in reach of every `runEvent`); a boxed
-  `Vector EvMask` for `cnEventsBy` cost another 3%. Keep both in mind when a
-  phase touches `condSpec`, `hasEntry` or `eventHeard`.
+- **The event mask.** After step 4, 59 of the mask's 64 bits are used. Step 5
+  needs a wider mask (two words, or a bitset), and that is the lead's
+  decision.
+- **The escape hatch.** Substitute is the first one. Its `TryPrimaryHit`
+  body and the `HIT_SUBSTITUTE` outcome in the hit path are hand-written
+  and marked `-- ESCAPE HATCH: substitute`.
+- **Flags.** The inert-flag list in `Rule.hs` has `protect`, `failencore`
+  and `bypasssub`, each with a reason that names a mechanic not yet built.
+  The phase that builds the mechanic makes the flag live and drops it from
+  the inert list: `protect` in 7a, `bypasssub` in 7b and `failencore`
+  in 7c.
+- **Interactions.** Each phase must be exact against everything already on
+  main, which its own pool supplies (U-turn, the forced switches, Knock Off,
+  Trick, Rocky Helmet, Red Card, Eject Button, Eject Pack, Tera and so on).
+  Interactions between two step-4 phases are 7f's. Where a phase can see
+  one coming, it leaves a `-- LATENT(7x):` comment, with `7x` the other
+  phase.
+- **Parallel work.** Each phase keeps its additions to the shared lists (the
+  `CondId`, `NativeId` and `EventId` enums, `moveBodies`, `itemBodies`, the
+  native dispatch, the inert-flag list, the property and cover lists) in one
+  block per list, headed `-- slice 7x`. It does not reorder or reformat
+  existing code, and it writes its findings only in its own subsection
+  below.
+- **Traces.** Each phase has its own generator, `tools/oracle/gen-slice7x.js`
+  in the shape of `gen-slice6.js`, and its own set, `local/traces/slice7x`,
+  recorded from its own branch's `engine-pool`. Its teams are biased toward
+  its mechanics, and every newly accepted move or item appears in some
+  team. The sets of the other phases stay valid when they are stacked,
+  because the engine only accepts more. 7f records one combined set from the
+  stacked engine's pool.
+
+### Showdown pointers (read the source; these are leads, not facts)
+
+- **7a.** All four moves: priority 4, `stallingMove`; `onPrepareHit` is
+  `!!this.queue.willAct() && this.runEvent('StallMove', pokemon)`; `onHit`
+  adds `stall` (data/moves.ts: protect 13966, spikyshield 17539,
+  banefulbunker 985, endure 4811).
+  - `stall` (data/conditions.ts 443-466): `onStart` sets `counter = 3`;
+    `onStallMove` is `randomChance(1, counter)`, removing itself on a
+    failure; `onRestart` triples the counter to at most 729 and resets the
+    duration to 2. There is no draw when the user moves last or has no
+    `stall`.
+  - The blocking volatile: `onTryHitPriority` 3, `checkMoveBypassesProtect`
+    (sim/battle.ts 1314-1324), and the result `NOT_FAIL`. The contact
+    punishments are Spiky Shield's `baseMaxhp / 8` and Baneful Bunker's
+    poison, skipped with Protective Pads (battle.ts 1303).
+  - Endure: `onDamage` at priority -10.
+  - `hitStepBreakProtect` (battle-actions.ts 821-845) matters only if a
+    protect-breaking move is in the pool.
+- **7b.** data/moves.ts 18311-18401, battle-actions.ts `tryPrimaryHitEvent`
+  and the `HIT_SUBSTITUTE` handling in `spreadMoveHit` (about 1118-1160).
+  The items and abilities that test `volatiles['substitute']` are listed by
+  grep at data/items.ts and data/abilities.ts. Resolve the LATENT comments
+  at Dispatch.hs 1302, 2005 and 2017. Status moves without `bypasssub`
+  fail against a substitute through `getDamage` returning undefined.
+- **7c.** Encore (data/moves.ts 4730-4789): `onStart` fails without
+  `lastMove` and in the other listed cases, and adds 1 to the duration if
+  `!queue.willMove(target)`; `onOverrideAction` swaps in the encored move;
+  residual order 16 with the 0-PP check; `onDisableMove`.
+  - Taunt (18981-19010): +1 duration if `activeTurns && !willMove`;
+    `onBeforeMovePriority` 5; residual order 15.
+  - `lastMove` is set by `pokemon.moveUsed` (pokemon.ts 920-935) and
+    cleared by `clearVolatile`.
+  - `DisableMove` runs only at `endTurn` (battle.ts 1700-1712), which the
+    engine already does (Turn.hs 188-189).
+  - Check the LATENT at Turn.hs 528 (`BeforeMove` after the PP check).
+- **7d.** `onTry` (data/moves.ts 18403 and 19504) reads
+  `queue.willMove(target)`; the move fails if there is no move action, if
+  that move is a status move other than Me First, or if the target has
+  `mustrecharge`. If no recharge move is accepted, leave a LATENT.
+- **7e.** data/items.ts 971-1040; `choicelock` at data/conditions.ts 324-362.
+  - The items' `onModifyMove` adds `choicelock`, which records the active
+    move. `choicelock` has no `onRestart`, so the lock is never updated
+    while present. Their `onStart` removes it.
+  - `onBeforeMove` and `onDisableMove` drop the lock once the item is not a
+    Choice item.
+  - Knock Off and Thief leave the lock to be dropped lazily. Trick and
+    Switcheroo's `setItem` runs the new item's `Start`.
+  - A Choice Scarf arriving mid-turn is picked up by the gen 8+ resort in
+    `runAction` (battle.ts 2975-2985).
+  - Tera and the lock: not yet read.
+
+### 7a findings
+
+Protect, Spiky Shield, Baneful Bunker and Endure are accepted, with the `stall` condition and the four volatiles.
+
+- **The move.** The top-level `volatileStatus` (the move's own id) is the effect `EOwnVolatile`. `runMoveEffects` adds it before the move's own `onHit`, which adds `stall`. `stallingMove` is read by nothing in `sim/`, so it is an inert key.
+- **PrepareHit.** `movePrepareHit` is `singleEvent('PrepareHit')` for a move on the user. The body is `!!queue.willAct() && runEvent('StallMove')`. A move that goes last fails with no draw. Without a `stall` volatile there is no draw either. The new event `StallMove` is run only here.
+- **The stall draw.** `randomChance(1, counter)` is `random(counter) < 1`: one draw of range `[0, counter)`. It sits in `PrepareHit`, after `Try` and before any hit step. A failure deletes `stall`. The counter is `esA`; `onRestart` triples it below 729 and sets the duration to 2.
+- **Restart.** `addVolatile` on a volatile that is already there now runs `Restart` when the condition has a handler for it, as `pokemon.addVolatile` does. A condition without one still fails. Only `stall` has one.
+- **The block.** `TryHit` (priority 3) blocks a move with the `protect` flag and returns `NOT_FAIL`, a falsy value that is not `false`. The flag is live: `mrProtect`, and Struggle has it. The block runs once per move, before accuracy, so a multi-hit move is blocked whole and a pivot never sets its flag. Spiky Shield's damage is `baseMaxhp / 8` and Baneful Bunker's poison goes through `trySetStatus`, both only for a contact move.
+- **Endure.** The `Damage` event is new. It runs in `hitMove`, after the clamp to 1 and before the damage is dealt, with the move as the effect. Endure returns `hp - 1`, which is 0 for a holder at 1 HP: no damage, and the hit loop goes on. Other `battle.damage` calls (residuals, recoil, Rocky Helmet, Spiky Shield) do not run it: Endure acts only on a Move effect.
+- **Mid-turn state.** A protect volatile lasts to the turn's Residual. A decision point can still see one in a mid-turn switch request (a pivot hit an Endure holder) and when the battle has just ended (Spiky Shield killed the attacker). The property allows exactly those.
+- **LATENT.** Protective Pads, Unseen Fist, `breaksProtect` moves (Feint, Phantom Force, Shadow Force, Hyperspace Hole and Fury) and Outrage's `lockedmove` reset are not accepted, so they are not built. The hit steps of a self-targeted move are skipped; nothing could act on them.
+- **The set.** `slice7a` has 1,000 battles. Ghost teams with a protect move and a low-PP move run to Struggle, which Protect blocks. The stall counter reaches 81 in the set; 243 and 729 need 5 and 6 straight successes (odds 1 in 3^10 and worse), and a seed search did not find one.
+
+### 7b findings
+
+Substitute is accepted. Its set is `local/traces/slice7b` (1000 battles).
+
+What the code does, in Showdown's order:
+
+- `spreadMoveHit` step 0 (battle-actions.ts 1115-1119) runs
+  `runEvent('TryPrimaryHit')` for a hit that is not secondary and not on the
+  user. The engine runs it in `hitMove` (damaging moves) and `statusMoveHit`
+  (status moves on the foe). `EvTryPrimaryHit` is the new event; only the
+  Substitute volatile listens.
+- The volatile's HP is the state's `esA`. `onStart` sets it to
+  `floor(maxhp / 4)`. A Substitute has no duration.
+- The test is `NSubstituteTryPrimaryHit` (Dispatch.hs). It lets the move
+  through when the target is the user or the move has `bypasssub`
+  (`mrBypassSub`, now live and off the inert list). `infiltrates` is
+  LATENT: no accepted ability or move sets it (Infiltrator, Pollen Puff
+  and Present are not accepted).
+- The damage is `hitSubstitute` (Turn.hs), because `getDamage` lives there:
+  `getDamage` as usual (crit and random draws), capped at the Substitute's
+  HP, taken off it. At 0 the volatile goes.
+- Recoil is `max 1 (round (damage * n / d))` of the capped damage, taken at
+  once. Struggle's is a quarter of max HP. Drain heals
+  `ceil (damage * n / d)`: the Substitute path rounds up, where
+  `spreadDamage` rounds.
+- The hit loop's total counts only hits on the Pokemon, so each hit on a
+  Substitute has its own recoil, and a Struggle whose last hit was on a
+  Substitute takes no second recoil.
+- A status move on the foe finds `getDamage` undefined and fails (`-fail`).
+  Its result is `null`, not `false`, so the hit loop still counts the hit:
+  the Update events run and the move counts as succeeded.
+- The cost: `substitute.onTryHit` fails with a Substitute already, with
+  `hp <= maxhp / 4` (`4 * hp <= maxhp`), or with a max HP of 1. Then
+  `runMoveEffects` adds the volatile before `onHit` pays
+  `directDamage(maxhp / 4)`: floor, at least 1, no Damage event. Both are
+  in `NSubstituteHit`.
+
+What a hit on a Substitute skips, and what it keeps (spreadMoveHit leaves
+a null target after `HIT_SUBSTITUTE`):
+
+- Skipped: the target's damage (spreadDamage gives 0), every
+  `runMoveEffects` step on the target (onHit, status, boosts, items taken),
+  the force switch (`target &&`), `DamagingHit` (Rocky Helmet, frz),
+  `onAfterHit` (Knock Off, Thief, Rapid Spin's own), `EmergencyExit`, and
+  `AfterMoveSecondary` when the last hit was on a Substitute (the target
+  array is empty: Eject Button and Red Card do not act).
+- Kept: `onAfterSubDamage` (Rapid Spin, Mortal Spin, Ice Spinner,
+  Ceaseless Edge, Stone Axe: their `onAfterHit` body behind `source.hp`),
+  the `selfSwitch` flag (U-turn, Volt Switch and Flip Turn still switch:
+  the damage is 0, a number, so the hit "did something"), the self drops
+  (the `random(100)` and the drop), and the secondaries: the roll is
+  drawn, the effect on the target is lost, a `secondary.self` still
+  applies.
+- Defog's evasion drop needs no Substitute on the target. Tidy Up removes
+  every active Substitute and counts it as a success. Brick Break's screen
+  shatter runs before the Substitute (the `TryHit` of the move comes first).
+- Moves with `bypasssub` (sound moves, Defog, Roar, Whirlwind, Parting
+  Shot, Confide, Growl, Haze ...) act on a Substitute holder as usual.
+- No accepted item or ability tests `volatiles['substitute']` (the berries,
+  Disguise, Ice Face, Intimidate, Air Balloon are not accepted), so none
+  has code.
+
+Properties (test/props): every Substitute has an active holder with HP, no
+duration and HP in 1..floor(maxhp / 4) (`checkBattle`); `substituteCost`
+(a use in isolation costs exactly a quarter and leaves a Substitute of that
+size, a failed one changes nothing; the foe switches so that nothing else
+hits the user, and the case is dropped when a status, an item, weather or
+terrain could change its HP); the pivot-heavy playouts now carry Substitute,
+and must make and hit Substitutes often (`cover`). A step-level "HP drops by
+exactly a quarter" is not stated for ordinary playouts: the user's HP also
+moves with residuals, drain, recoil and other hits in the same step.
+
+What the escape hatch does that no rule could:
+
+- It answers a hit with a different target: the later steps of the hit read
+  a null target (`HIT_SUBSTITUTE`), which no rule slot expresses.
+- It runs `getDamage` (with its draws) from inside an event handler and
+  caps the result at state held by the target's volatile.
+- It computes recoil and drain from that capped damage, and a different
+  rounding for drain, outside the hit loop's total.
+- It keeps some later steps (self drops, selfSwitch flag, secondary draws)
+  and drops others (force switch, `DamagingHit`, `onAfterHit`,
+  `AfterMoveSecondary`).
+- It makes a status move fail through `getDamage`'s undefined, with a hit
+  that still counts.
+- One volatile start adds a volatile and pays HP in a fixed order.
+
+The escape hatch is in two places: the test (a `NativeId` body, so the
+event is real) and the damage (`hitSubstitute`, in Turn.hs, because
+`getDamage` is there and Dispatch cannot import it).
+
+Interactions with the other step-4 phases (checked against the stacked
+sets; no new traces):
+
+- 7a: Protect, Spiky Shield and Baneful Bunker block in the hit steps
+  (`TryHit`, priority 3), before the first `spreadMoveHit`, so before
+  `TryPrimaryHit`: a blocked move never reaches a Substitute. Endure's
+  `Damage` event runs only in `hitTarget`: a hit on a Substitute is not
+  `spreadDamage`, so Endure does not act on it.
+- 7c: Encore and Taunt are `bypasssub`; they reach a Substitute holder.
+- 7d: Sucker Punch and Thunderclap are damaging moves; their `onTry` runs
+  before the hit, and a hit on a Substitute is as any other.
+- 7e: a Choice-locked attacker locks on the move in use whatever it hits;
+  Trick and Thief on a Substitute fail or are skipped as above.
+- Substitute is `[EOwnVolatile, EOwnHit]` on the user, like the protect
+  family: the volatile is added, then `onHit` pays the cost; `onTryHit`
+  (`moveStatusTryHit`) runs first, after `PrepareHit`.
+
+### 7c findings
+
+Encore and Taunt are accepted. Both are `volatileStatus` moves, and their volatiles are `CEncore` and `CTaunt`, read from the
+`condition` block of the move (as Roost's is).
+
+- **How the volatile is added.** `volatileStatus` is the move's own id, so it is 7a's `EOwnVolatile` (encore and taunt are in
+  `ownVolatileMoves`), the whole of the move's `mrOnHit`. `statusMove` calls `addVolatile` (`condByName` of the move id), and the move
+  fails (no Update events) exactly when it returns false (battle-actions.ts 1305-1308).
+- **`failencore` is live.** `mrFailEncore` is the flag, translated like `contact` and `powder`; the inert entry is gone. Only Encore
+  and Struggle have it among moves that can be a last move here.
+- **State.** `monLastMove` (a Dex move index, -1 for null) and `monActiveTurns`. `lastMove` is set in `runMove` after `BeforeMove` and
+  the PP check (battle-actions.ts 339-354, `pokemon.moveUsed`), so a flinch, a full paralysis or Taunt leaves it alone. Struggle sets
+  it too (Struggle is a Dex move; Encore then fails: no slot and `failencore`). A Tera move sets it like any move. `clearVolatile`
+  clears it: the switch-out in `switchIn` and the faint in `resolveFaints`. `activeTurns` is 0 at switch-in and +1 in `endTurn`
+  for each active Pokemon that has not fainted (battle.ts 1782; it is in `endTurn`, not in the residual).
+- **OverrideAction.** `runEvent('OverrideAction', pokemon, target, baseMove)` is the first thing in `runMove` (battle-actions.ts
+  277-287), skipped for Struggle. Encore's handler returns the encored move's id when the chosen move differs. `runMove` then uses
+  the encored move: its `BeforeMove`, its slot's PP, its target. The queue is not re-sorted, and the move in use keeps the chosen
+  move's priority (`baseMove.priority = priority`): an Encored Bullet Punch used in place of Taunt is not blocked by Psychic Terrain
+  (seed 704 of the set found this).
+- **PP check order (the old LATENT).** `runMove` now runs `BeforeMove` first and then the PP check, as Showdown does
+  (a move with no PP left returns before `useMove`, no `lastMove`, no `AfterMove`). The override can name a move whose PP ran
+  out this turn, so the path can be reached.
+- **Encore start (`onStart`).** Fails with no `lastMove`, a `failencore` last move, no slot for it, or a slot with 0 PP. Then
+  `effectState.move` is the move (`esA`) and the duration (3) gets +1 if `willMove target` is Nothing: the target already moved
+  this turn. A second Encore fails in `addVolatile` (no `onRestart`).
+- **Encore end.** Residual order 16: the duration counts down first, and at 0 the volatile goes; otherwise it goes when the encored
+  move has no PP. `onDisableMove` disables every other slot. Struggle comes from the generic rule: all slots disabled or empty.
+- **Taunt.** Duration 3, +1 if `activeTurns > 0` and `willMove target` is Nothing (so never on the turn it came in or its
+  first turn: `activeTurns` is 0 until the first `endTurn`). `onBeforeMove` (priority 5, between flinch 8 and paralysis 1) blocks a
+  Status move other than Me First and returns false: no PP, no `lastMove`. `onDisableMove` disables Status moves (the helper
+  of Assault Vest). Residual order 15.
+- **Request and trace.** A disabled move shows `disabled: true` in the request and the trace; the record's legal choices leave it
+  out, as `legalChoices` does. A Pokemon with every move disabled is offered `move 1` (Struggle) alone, with no Tera.
+- **Parity.** The trace records `encore`'s `move`; the parity test compares it from `esA` (the lead's change).
+- **LATENT.** Oblivious, Aroma Veil and Mental Herb are not accepted, so nothing refuses or clears the volatiles; Magic Bounce and
+  Magic Coat (`reflectable`) are not accepted; Substitute (7b) does not stop either move (`bypasssub`).
+- **Interactions with the stack** (checked only by the four step-4 sets, no new traces). Protect (7a): its `protect` flag is live and
+  Encore and Taunt carry it, so a protecting target blocks them in `TryHit` after `PrepareHit`; Taunt in turn blocks Protect (a Status
+  move) in `BeforeMove`, before `PrepareHit` and its stall draw. Choice items (7e): the override runs before `BeforeMove`, so a Choice
+  holder locked into another move that Encore swaps in meets choicelock's `-fail` for the encored move (no PP lost), as 7e's
+  LATENT(7c) says; Showdown's order is the same, and Encore's `DisableMove` and choicelock's both run at `endTurn`. Sucker Punch (7d):
+  its `onTry` reads the queued action (`willMove`), which Encore's override does not change, as in Showdown (the override happens in
+  `runMove`).
+- **Properties** (both tiers, in `Playout.checkBattle`): an encored Pokemon whose encored move can be used is offered no other
+  move; a taunted Pokemon is offered no Status move other than Me First (unless it must Struggle); a Pokemon that is not active has
+  no last move, no encore and no taunt; encore and taunt durations and the encored move are in bounds. `pivotPlayouts` covers
+  both volatiles at move requests, and `genPivotTeams` carries Encore and Taunt.
+- **Set.** `slice7c`, 1000 battles from `gen-slice7c.js` (about 59% scripted). Its tally shows each Encore fail reason, the +1 turn, the
+  override, the 0-PP end, Taunt's +1 and its block, Struggle with everything disabled, and a switch while encored or taunted.
+
+### 7d findings
+
+Sucker Punch and Thunderclap have priority 1 and one handler, `onTry`
+(data/moves.ts 18412 and 19513). Both bodies are `NSuckerPunchTry`, run by
+`moveTry`. It reads `queue.willMove(target)` and fails the move unless
+the target has a queued move action whose move is not a Status move (Me
+First aside) and has no `mustrecharge`.
+
+- **Where Try runs.** In `trySpreadMoveHit` (battle-actions.ts 656), before
+  `PrepareHit`, `TryHit`, the immunity checks and the accuracy roll. A
+  failed move therefore makes no accuracy, crit or damage draw. PP is
+  already spent, and the speed-tie shuffles of the events before Try
+  (BeforeMove and the like) still happen.
+- **No move action.** The target moved already (its action left the queue),
+  is switching (a `switch` action is not a `move` action), has fainted
+  (`willMove` returns null). All of these fail.
+- **Struggle.** The queued action is a move action for Struggle, whose
+  category is Physical, so the move works.
+- **Tera.** The Tera action is a separate queue entry. The move action is
+  still there, so Tera does not change the result.
+- **Category.** `action.move` is `getActiveMove` of the chosen move
+  (battle-queue.ts 261), so the category is the base one. Showdown changes a
+  move's category only later, in `onModifyMove`, for moves like Shell Side
+  Arm. None of them changes what the queue holds.
+- **Status.** Me First is not accepted, so every queued status move fails
+  the move.
+- **Order.** Priority 1 is the generic action priority. Two priority-1 moves
+  tie on speed and draw, as any tie does. A switch has a lower order
+  number than any move, so it always runs first.
+- The engine's slot lookup is inlined in `moveTry`, because `Engine.Queue`
+  imports `Engine.Dispatch`.
+- `runMove` is now exported from `Engine.Turn`, for the property.
+- LATENT: no recharge move is accepted, so `mustrecharge` never holds.
+- Encore swaps the move at `runMove` (`onOverrideAction`), not in the queue,
+  so the queued move stays the one chosen. Slice 7f shows it cannot matter in
+  singles (see 7f findings).
+- Property: whatever else is in the queue, `moveTry` gives the result that
+  the target's own move actions alone give, and a failed move makes no accuracy,
+  crit or damage draw and changes no HP.
+- Set: `slice7d`, 600 battles.
+
+### 7e findings
+
+Choice Band, Choice Specs and Choice Scarf are accepted, with the `choicelock` volatile.
+Knock Off, Trick, Switcheroo and Thief are unchanged: they already did the
+right thing, and this phase records them against Choice items for the first
+time.
+
+- **The lock is added in `ModifyMove`.** `useMoveInner` runs
+  `runEvent('ModifyMove')` (battle-actions.ts 495-503) after `BeforeMove` and
+  after PP is deducted. So the lock is added even if the move then misses or
+  fails, and by Struggle. The item's `onModifyMove` calls
+  `addVolatile('choicelock')`, and the volatile's `onStart` records
+  `activeMove.id`. The engine records the move in the item's handler, right
+  after `addVolatile` succeeds, because `Start` has no move to read.
+- **No `onRestart`.** A holder that is already locked fails `addVolatile`, so
+  the lock never moves. `esA` is the locked move's `Dex` index. A lock made by
+  Struggle has `esA = -1` (Struggle is no `Dex` move). `hasMove('struggle')` is
+  false, so `DisableMove` removes it at the next `endTurn`.
+- **Stat boosts.** `onModifyAtk`, `onModifySpA` and `onModifySpe` are
+  `chainModify(1.5)`, a plain `RChainModify 3 2`. The Dynamax test is moot.
+- **The item's `onStart` removes the lock.** `setItem` runs it, so a Choice
+  item that arrives by Trick, Switcheroo or Thief starts with no lock.
+- **Stale locks go lazily.** Nothing removes a lock when the Choice item
+  leaves (Knock Off, Thief, Trick). The volatile drops itself the next time
+  its `onBeforeMove` or `onDisableMove` runs and the holder has no Choice item
+  (or, for `onDisableMove`, the locked move is not among its slots). A Trick
+  user locks itself into Trick before the swap, so after it gives its Choice
+  item away it keeps the lock until the next `endTurn`.
+  `onBeforeMove` removes the lock and lets the move go on (it returns
+  nothing, not false).
+- **`DisableMove` runs only in `endTurn`.** It disables every slot but the
+  locked one (`disableMove(id, false)`). A locked move with no PP counts as
+  disabled through the request's PP test, so `mustStruggle` already gives
+  Struggle. The existing `legalChoices` needed no change.
+- **The request.** The locked-out slots appear with `disabled: true`; the
+  legal list drops them (record.js). The Tera variant of the locked move stays
+  offered: `getMoveRequestData` (pokemon.ts 1133-1169) only drops
+  `canTerastallize` for `getLockedMove()`, which is a different thing from
+  `choicelock`. A Pokemon that must Struggle is offered `move 1` alone.
+- **The trace.** The volatile appears as `choicelock` with `move`, the locked
+  move's id (record.js keeps `effectState.move`).
+  **The parity test needed one change** to compare it: `diffMon` writes only
+  `duration` for a volatile, so any volatile with a `move`, `hp` or `counter`
+  key fails. This phase adds the `move` key for `choicelock` (a separate
+  commit; the other phases will meet the same gap for their volatiles).
+- **Switch-out.** `clearVolatile` removes the lock, with every other volatile.
+- **`BeforeMove` `-fail`.** The engine has the path (a move other than the
+  locked move and Struggle fails with no PP lost) but no trace reaches it:
+  the request offers only the locked move. It becomes reachable with Encore
+  (`-- LATENT(7c)`).
+- **Scarf mid-turn.** The gen 8+ re-sort in `runAction` already exists
+  (`afterAction`). In singles it cannot change the order of two move actions,
+  so it shows only in the cached `speed` the trace compares. A Scarf that
+  moves by Trick is picked up there.
+- **The set.** `local/traces/slice7e`, 1000 battles from `gen-slice7e.js`.
+  About 57% are scripted openings (lock, trick, knock, thief, scarf, pivot,
+  pp, tera, pair); the rest are random play over slice 6's teams with
+  Choice items and the item moves added. The tally counts, from Showdown's
+  own events, locks added per item, removals by the item's `onStart`, by
+  `DisableMove` and by `BeforeMove`, locked requests (including one for a
+  locked move with no PP), Struggle by a locked holder, Knock Off and Thief
+  on a Choice item, Trick in each direction, a Scarf speed tie, Tera while
+  locked, and a locked pivot.
+- **Properties.** At a move request a live lock (1) is on a Pokemon with a
+  Choice item and the locked move is in its slots, and (2) leaves no other
+  move in `legalChoices` (Struggle when the move has no PP). The pivot
+  playouts' teams hold Choice items and the item moves.
+
+### 7f findings
+
+The combined set `slice7f` (2000 battles, `tools/oracle/gen-slice7f.js`) records the crossings between the five phases. About 61% are
+scripted (1227; 175 more scripts were dropped because a faint asked for a switch, and were recorded as random play). It passed on the
+first full run: no engine divergence was found. The only failures were seven traces whose generator wrote a team with a duplicate move
+(a generator bug, fixed; the engine rejects such a team and Showdown does not).
+
+The scripts keep any Pokemon that Encore, Taunt or a Choice item may constrain on one move (the same slot every turn, or all-status
+moves, whose slot 1 is Struggle once taunted), because a script cannot branch on the state. The tally is read from Showdown's own
+events. Every counter is above zero. The kinds, with what they reach:
+
+- **punchprot**, **punchsub**, **punchstate**: Sucker Punch and Thunderclap into a protect move or Endure, a Substitute, and an
+  encored, taunted or Choice-locked target. A protect move (priority 4) always moves before a punch (priority 1), so the target has no
+  move action left and `onTry` fails before any block. No punch is ever blocked by `TryHit`. A punch works on a Substitute 163 times.
+- **protsub**, **protchoice**, **protencore**, **prottaunt**: a protect move before and after a Substitute (never in one turn: Protect
+  is priority 4 and Substitute 0, so one Pokemon cannot hold both volatiles at a decision point), Spiky Shield and Baneful Bunker
+  against a Choice-locked contact attacker, and Encore into Protect (the override runs the protect move: the stall draw fails 2 times
+  in 3). Taunt cannot block a protect move in `BeforeMove`: Protect goes before any Taunt that could land. It does block a queued
+  Substitute (192 times).
+- **subbypass**, **itemsub**: Encore and Taunt on a Substitute holder (`bypasssub`), Substitute under Taunt and under Encore at low
+  HP, Trick, Switcheroo, Knock Off, Thief and a Choice-locked U-turn into a Substitute.
+- **encchoice**, **duo**: Encore on a Choice-locked target, a Choice item handed by Trick to an encored (24) or taunted (26) Pokemon,
+  Encore and Taunt on one Pokemon with Struggle (82).
+- **endure**, **scarf**: Endure against a multi-hit move that breaks a Substitute (47 breaks, 41 saves) and a Choice Scarf against
+  priority 1 and 4 (the Scarf holder's speed is in the cached `speed` the trace compares).
+
+What the interactions turned out to be:
+
+- **Choice-lock `-fail` with Encore (the old LATENT(7c)) cannot be reached.** The lock is added in `ModifyMove`, the same step that sets
+  `lastMove`. Encore names `lastMove`, so the encored move is the locked move. The engine keeps the path, as Showdown has it
+  (`onOverrideAction` before `BeforeMove`), but no trace can reach it.
+- **The queued punch cannot be overridden.** A punch (priority 1) moves before the Encore (priority 0) that could replace it. A target
+  that is encored while it has a queued move is encored by a Pokemon that is not using a punch that turn. A puncher that is encored
+  after its punch is encored into the punch.
+- **Encore into Protect** climbs the stall counter as any use does; the roll at a counter of 9 or more under Encore happens 3 times.
+- Counters with no trace by construction: a Substitute while protected, an override over a queued punch, a Choice-lock `-fail`, and
+  Taunt's block of a protect move.
+
+Properties (both tiers):
+
+- `disableRules` in `checkBattle`: at a move request, the move slots in `legalChoices` are exactly the slots that every disabling effect
+  allows together (an encore, a taunt, a live choicelock and an Assault Vest, each by its Showdown rule, and PP), or move 1 (Struggle)
+  when there are none. This checks both directions, so a missed effect and a double-applied one both fail. It does not read `msDisabled`.
+  A `cover` on `pivotPlayouts` requires a request with a Pokemon under two of the four (about 15% of playouts; threshold 7%).
+- The heavy-team generator draws a move from every kit at once, and Assault Vest joins the pivot-heavy item mix, so the kits meet
+  on one set.
+
+LATENT comments: `LATENT(7c)` in `Dispatch.hs` (two) are resolved and now say why. The two `LATENT(7a)` in `Turn.hs` stay as plain
+`LATENT` (Dancer and Instruct; Sturdy, Magic Guard and Focus Sash), since the mechanics are still unsupported.
+
+
+## Abilities (slice 8)
+
+Roadmap step 5, first part, designed 2026-11-27. Before slice 8, 24 of the
+whitelist's 85 abilities are supported (36.4% by usage). Slice 8 adds 58 more,
+in six phases built in parallel from `slice8-base`, then an integration phase,
+8g. That brings abilities to about 98% by usage. The weights below are usage
+weights from `data/usage/gen9ou.json` (2026-10), as `whitelist-report` prints
+them.
+
+| Phase | Abilities | Weight |
+|---|---|---|
+| 8a, stat stages and switch-in | Intimidate, Dauntless Shield, Defiant, Contrary, Clear Body, Guard Dog, Inner Focus, Big Pecks, Mirror Armor, Keen Eye, Weak Armor, Justified, Gooey, Speed Boost | 0.639 |
+| 8b, damage and stats | Multiscale, Sharpness, Tinted Lens, Guts, Transistor, Sniper, Heatproof, Purifying Salt, Water Bubble, Flash Fire, Supreme Overlord, Vessel of Ruin, Unaware | 1.005 |
+| 8c, immunities and damage guards | Good as Gold, Water Absorb, Levitate, Sturdy, Magic Guard, Poison Heal, Sap Sipper, Soundproof, Bulletproof, Sweet Veil, Shell Armor | 0.827 |
+| 8d, on-hit and after-move | Flame Body, Static, Rough Skin, Toxic Chain, Bad Dreams, Synchronize, Magician, Pickpocket, Berserk, Moxie, Shield Dust | 0.384 |
+| 8e, the move pipeline | Pressure, Prankster, Libero, Protean, Liquid Voice, Infiltrator | 0.521 |
+| 8f, suppression and reflection | Mold Breaker, Neutralizing Gas, Magic Bounce | 0.192 |
+
+Three abilities wait for a mechanic the engine lacks:
+- **Poison Puppeteer** (0.083) confuses the Pokémon it poisons, and confusion
+  is not modelled.
+- **Cute Charm** (0.008) needs Attract.
+- **Disguise** (0.006) needs a forme change.
+
+They come with those mechanics. Sleep is not modelled either. Bad Dreams and
+Sweet Veil act only on sleep (and Yawn), which nothing can inflict yet, so
+their handlers are written exactly but cannot fire. Each carries
+`-- LATENT(sleep)`, and the slice that adds sleep traces them.
+
+### Base (`slice8-base`, built before the phases)
+
+The phases share four paths through the engine. Each is built once, in the
+base, so that no two phases write it. The base changes no behaviour on the
+existing corpus: parity must pass with the same draws.
+
+1. **A wider event mask.** `cnEvents` and `cnEventsBy` become a two-word
+   mask (`EvMask !Word64 !Word64`, 128 events), so that phases can add
+   events. The property that checks the bound changes from 64 to 128.
+2. **The boost path.** `boostMon` follows `battle.boost` (battle.ts 2037-2100)
+   step for step:
+   - the early returns;
+   - `runEvent('ChangeBoost')`, then the cap;
+   - `runEvent('TryBoost')`;
+   - each stat applied, then `runEvent('AfterEachBoost')` when something
+     changed;
+   - `runEvent('AfterBoost')`.
+
+   `ChangeBoost`, `TryBoost` and `AfterEachBoost` are new events. The boost
+   events carry the effect that caused the boost, as Showdown's `effect`
+   argument does: a move, an ability, an item, or a condition. When the
+   argument is null, Showdown uses the running effect, and this is how
+   Intimidate's boost is recognised (`effect.name === 'Intimidate'`).
+   `statsRaisedThisTurn` and `statsLoweredThisTurn` stay LATENT: no
+   whitelisted reader is supported.
+3. **Damage through one path.** Every place Showdown damages through
+   `battle.damage` or `spreadDamage` (battle.ts) runs the `Damage` event with
+   the damaging effect, through one function. That covers residual damage,
+   hazards, recoil, Struggle, Rocky Helmet, weather and items, as well as the
+   hit path, where 7a's call site moves into it. Magic Guard
+   (`effect.effectType !== 'Move'`), Poison Heal (`psn`, `tox`), Heatproof
+   (`brn`) and Sturdy all read the effect. With no listener, the event does
+   nothing and draws nothing.
+4. **The move in use.**
+   - A transient battle field, `bActiveMove`, holds the user and the move's
+     `ignoreAbility`, which `suppressingAbility` reads (battle.ts 366-369). It
+     is set where `useMoveInner` calls `setActiveMove`, restored after a
+     nested `useMove` (battle-actions.ts 363, 416), and cleared where
+     Showdown clears it. At every decision point it is empty; a property
+     checks this.
+   - Flags Showdown writes on the `ActiveMove` travel on the move-in-use copy
+     of `MoveData`, as Parting Shot's change already does. The fields are in
+     the state table below.
+
+The base also adds:
+- **`hasAbility`,** the one helper for every direct ability test outside the
+  dispatcher (Levitate in `isGrounded`, a body's "does the target have X").
+  It is `pokemon.hasAbility`, which consults `ignoringAbility`.
+- **The Tera fix in `whitelist-report`:** it counts Tera types as supported,
+  as they have been since slice 5.
+
+### Decisions shared by every phase
+
+- **State.** These additions are allowed. Anything else goes to the lead.
+
+  | Where | Field | Meaning | Phase |
+  |---|---|---|---|
+  | `Mon` | `monShieldBoost :: !Bool` | `pokemon.shieldBoost`: Dauntless Shield fires once per battle per Pokémon, so this is never reset | 8a |
+  | `Side` | `sTotalFainted :: !Int` | `side.totalFainted` (battle.ts 2601, side.ts 263) | 8b |
+  | ability state `esA` | `fallen` | Supreme Overlord's count at its start, capped at 5 | 8b |
+  | ability state `esA` | `libero` / `protean` | 1 once the type has changed this switch-in | 8e |
+  | ability state `esA` | `checkedBerserk` | Berserk | 8d |
+  | ability state `esA` | `ending` | Neutralizing Gas | 8f |
+  | volatile | `flashfire` | Flash Fire's boost, a `Volatile` like the step-4 ones | 8b |
+  | move in use | `mvIgnoreEvasion` | Keen Eye | 8a |
+  | move in use | `mvRuinedSpA :: !Int` | `move.ruinedSpA`: the Ruin holder's slot, or -1 | 8b |
+  | move in use | `mvInfiltrates`, `mvPranksterBoosted` | Infiltrator, Prankster | 8e |
+  | move in use | `mvIgnoreAbility`, `mvHasBounced` | Mold Breaker, Magic Bounce | 8f |
+
+  The ability state is reset on switch-in, as Showdown does
+  (battle-actions.ts 185). The engine already does so at `Turn.hs` 467.
+  Check it at each use.
+- **Events.** A phase may add an event only where Showdown runs it, at the
+  same call site and in the same order, with a comment naming the file and
+  function. Expected:
+  - 8b: `ModifyBoost` (pokemon.ts 602 and 639; battle-actions.ts accuracy),
+    and `onAny` stat modifiers for Vessel of Ruin. The prefix already exists.
+  - 8c: `CriticalHit` (battle-actions.ts 1704).
+  - 8d: `AfterSetStatus` (pokemon.ts 1768), `AfterFaint` (battle.ts 2655),
+    `ModifySecondaries` (battle-actions.ts 1401). Berserk's `onTryEatItem`
+    has no reachable caller while berries are unsupported, so it stays
+    LATENT.
+  - 8e: `DeductPP` (battle-actions.ts 541-551, once per
+    `pressureTargets`), and the holder's halves of `ModifyPriority`
+    (battle.ts 2700) and `ModifyType` (battle-actions.ts 497), which today
+    run only the move's own handler.
+
+  Any other change to where sorts or draws happen goes to the lead first.
+- **Bodies.** Native (`BNative`) unless an existing rule kind fits exactly.
+  No rule kind is added in a phase. A pattern with three or more users
+  across phases (Water Absorb and Sap Sipper's absorb, say) is reported to
+  the lead for 8g to decide.
+- **Suppression.** `breakable` is already parsed from the data. A phase
+  writes its abilities as ordinary handlers reached through `runEvent`, and
+  any other ability test goes through `hasAbility`. Then 8f's gates, in the
+  handler loop (battle.ts ~843-896) and `ignoringAbility` (pokemon.ts
+  879-895), cover every ability at once. A phase must not test an ability by
+  reading `monAbility` directly.
+- **The escape hatch.** Magic Bounce is the second one. It reflects a move by
+  calling `useMove` again with a fresh move (abilities.ts 2438-2465), which
+  re-enters the move pipeline. It is marked `-- ESCAPE HATCH: magicbounce`.
+- **Interactions.** Each phase must be exact against everything on main,
+  which its own pool supplies. Interactions between phases belong to 8g.
+  Where a phase can see one coming, it leaves a `-- LATENT(8x):` comment.
+  Expected ones:
+  - Unaware against the boosts of 8a (8b × 8a);
+  - Magic Guard against Rough Skin, Rocky Helmet and recoil (8c × 8d);
+  - Sturdy against multi-hit moves and Substitute;
+  - Magic Bounce against Prankster (8f × 8e);
+  - Infiltrator against Substitute and the screens;
+  - Pressure against Encore and Choice lock;
+  - Mold Breaker against every breakable ability (8f × all).
+- **Parallel work.** As in slice 7:
+  - each phase keeps its additions to the shared lists in one block per list,
+    headed `-- slice 8x`;
+  - it does not reorder or reformat existing code;
+  - it writes its findings only in its own subsection below.
+- **Traces.** Each phase has `tools/oracle/gen-slice8x.js` and its own set,
+  recorded from its own branch's `engine-pool`, with teams biased toward its
+  abilities. Every newly accepted ability appears in some team. JSON is
+  recorded to `local/record/slice8x` and packed into `local/traces/slice8x`
+  (trace format v2) once it passes. 8g records one combined set from the
+  stacked engine, with Mold Breaker and Neutralizing Gas facing every
+  breakable ability.
+
+### Showdown pointers (read the source; these are leads, not facts)
+
+- The handler loop's suppression is in `runEvent` (battle.ts ~843-896). It
+  skips a `breakable` Ability when `suppressingAbility(holder)` holds, and any
+  Ability when `holder.ignoringAbility()` holds (except `End`).
+  `runEvent`'s early exit for `SwitchIn` is at 609-622.
+- `suppressingAbility` is at battle.ts 366-369. It holds only while
+  `activePokemon` is active and is not the target. Mold Breaker, Teravolt and
+  Turboblaze set `move.ignoreAbility` in `onModifyMove`, which runs at
+  battle-actions.ts 503, after `setActiveMove`.
+- `ignoringAbility` is pokemon.ts 879-895:
+  - not active;
+  - `cantsuppress`;
+  - Gastro Acid;
+  - Ability Shield;
+  - an active Neutralizing Gas that is not `ending`.
+- `cantsuppress` abilities include Disguise, Zen Mode, Commander and Tera
+  Shift.
+- Pressure's extra PP is at battle-actions.ts 540-551. Its targets come from
+  `getMoveTargets` (`pressureTargets`: none for `foeSide`, all foes for
+  `mustpressure`). The usual deduction is in `runMove` (battle-actions.ts
+  339).
+- `abilityState` is reset at battle-actions.ts 185 and pokemon.ts 1947.
+  `shieldBoost` is set only in the constructor (pokemon.ts 501-502) and
+  Dauntless Shield (abilities.ts 855-856).
+- Switch-in starts run as `fieldEvent('SwitchIn')`, which substitutes an
+  ability's or item's `onStart` (battle.ts 1028-1036). Both sides are sorted
+  together, at battle start too (battle.ts 2724-2751, battle-actions.ts
+  228-251).
+
+### 8-base findings
+
+What the base built, and where it differs from the design above. The corpus
+replays with the same draws as main: the decisions were checked against
+Showdown at 0.11.11 (`c7fa6f1`).
+
+**The event mask.** `cnEvents` is an `EvMask !Word64 !Word64`. `cnEventsBy`
+holds the same mask per prefix, flat, as two unboxed words each (`prefixMask`
+reads one back as an `EvMask`). `EventId` has room for 128 events; the
+property checks the bound (`fromEnum maxBound < 128`) and that each mask is
+exactly the handler list's events.
+
+The test is branch-free. `evBit i` is the one-bit query mask, built without a
+branch, and `evMaskHas mask query` is `(lo .&. qlo) .|. (hi .&. qhi) /= 0`.
+`eventHeard` builds the query once per event. A first version that chose the
+word by `if i < 64` cost 8% of the benchmark, because `eventHeard` tests a mask
+for every effect in reach of every `runEvent`. A boxed `Vector EvMask` for
+`cnEventsBy` cost another 3%. Keep both in mind when a phase touches
+`condSpec`, `hasEntry` or `eventHeard`.
 
 **The boost effect.** It travels as two of `runEvent`'s existing arguments, not
 in the relay value:
