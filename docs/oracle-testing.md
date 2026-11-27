@@ -240,6 +240,52 @@ Pokémon inside `state.sides[i].pokemon` are listed in Showdown's current slot
 order, which is the order `switch N` indexes. Showdown reorders slots when a
 Pokémon switches in. `orig` is the index into the original team.
 
+### Trace format v2
+
+`record.js` and the generators still write v1 JSON. Format v2 is a compact binary
+encoding of the same trace, for the parity test to read: decoding the JSON was
+35% of its run and comparing aeson values another 48%. A v2 file,
+`<name>.trace` beside the name of the JSON it came from, encodes every field
+of a v1 trace and nothing else.
+
+- **A typed model.** `test/trace/Trace.hs` (the internal library `trace`) holds
+  `Trace`, `Step` and `Snap`, which mirror `snapshot` in `record.js` field by
+  field, with exactly two sides. `fromV1 :: Value -> Either String Trace`
+  rejects any deviation from the schema (a missing or extra key, a wrong type,
+  not exactly two sides, a draw that is not three integers with lo < hi) with the
+  path of the offending value. `toV1` rebuilds the JSON.
+- **The lossless law.** `toV1 <$> fromV1 v == Right v` for every trace, by aeson
+  `Value` equality, so nulls and absent keys (`winner: null`,
+  `weatherDuration: null`, a `tera` key present or absent) come back as
+  recorded. `trace-pack pack` enforces it: for each trace it runs `fromV1` and
+  `encodeV2`, then requires `decodeV2 bytes == Right t` and `toV1 t == v`, and
+  writes the file only if both hold. A trace that fails stops the run with its
+  name and the reason, and nothing is written for it.
+- **The file.** The magic `PSTR`, a format version byte (2), then a
+  zlib-compressed body: a per-file string table (each distinct string once), then
+  the trace with strings as table indices and integers as zigzag varints. Each
+  snapshot is a delta against the previous one (the snapshot before step 0 is
+  empty, and `final` follows the last step): a Pokémon equal to the same side's
+  Pokémon with the same `orig` in the previous snapshot is a back-reference, and
+  otherwise is written in full. The field, side conditions and the rest are
+  always written in full. Teams are kept as JSON.
+- **The parity test reads either.** A set directory holds `*.json` or `*.trace`
+  traces; a set with both fails loudly. Both load into `Trace` and go through
+  the same comparison (`test/parity/Compare.hs`). Sampling is by name without the
+  extension, so the fast tier checks the same traces either way.
+
+```sh
+cabal run -v0 trace-pack -- pack local/traces/slice7f local/traces-v2/slice7f --jobs 6
+cabal run -v0 trace-pack -- unpack local/traces-v2/slice7f/slice7f-1000.trace          # JSON on stdout
+cabal run -v0 trace-pack -- unpack local/traces-v2/slice7f/slice7f-1000.trace out.json
+```
+
+`pack` copies every other file of the set (`*-moves.json` and the rest) unchanged,
+never modifies the source set, and writes `teams.json` in the destination: an
+array of `{"trace": name, "teams": teams}` in name order. Both benchmarks read
+it when it is there, and otherwise the teams of the first 20 traces. `unpack`
+writes the v1 JSON back, for reading a trace with `jq`.
+
 ### Exporting data
 
 ```sh
@@ -268,15 +314,17 @@ the pool checks always cover every set. `long`, the default when the variable
 is unset, replays every trace. The summary line names the tier and the sampled
 and total counts for each set.
 
-The test reads trace sets from `$POKESIM_TRACES`, defaulting to `local/traces`.
+The test reads trace sets from `$POKESIM_TRACES`, defaulting to `local/traces`
+(`local/traces-v2` for the packed corpus; see "Trace format v2").
 Each subdirectory is one set, such as `slice0` or `slice1`. Plain files there,
 such as the pool file, are ignored. It fails if there are no sets or a set has
 no traces.
 
 Besides replaying each trace, it checks that:
 
-- every draw is three integers with a non-empty range;
-- the trace is version 1, format `gen9ou`, with two sides in every snapshot;
+- every draw is three integers with a non-empty range, and every snapshot has
+  two sides (both enforced when the trace loads);
+- the trace is version 1, format `gen9ou`;
 - every snapshot field the engine does not model holds its default value, so a
   trace that uses a mechanic outside the current slice fails loudly;
 - each set's `<set>-moves.json` and `<set>-species.json`, written by its
@@ -288,7 +336,8 @@ Besides replaying each trace, it checks that:
 ## Debugging a divergence
 
 1. Read the failure: it names the trace, the step, the first differing field
-   and the draw index.
+   and the draw index. For a packed trace, `trace-pack unpack FILE.trace` writes
+   the v1 JSON to read with `jq`.
 2. A range mismatch means the engine made a draw Showdown did not, or skipped
    one. A state mismatch with matching draws means the arithmetic or the
    bookkeeping differs.

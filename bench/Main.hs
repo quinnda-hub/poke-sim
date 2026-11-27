@@ -18,6 +18,7 @@ import Data.List (isSuffixOf, sort)
 import Data.Maybe (fromMaybe)
 import qualified Data.Vector as V
 import System.CPUTime (getCPUTime)
+import System.Mem (performMajorGC)
 import System.Directory (doesDirectoryExist, doesFileExist, listDirectory)
 import System.Environment (lookupEnv)
 import System.Exit (die)
@@ -67,6 +68,9 @@ main = do
   if null sources then die ("bench: no trace files in " ++ dir) else pure ()
   dex <- loadDex dexDir
   teams <- mapM (\(f, load) -> load >>= \ts -> teamsOf dex f ts) sources
+  -- drop what loading the teams left behind (a decoded trace or teams.json): live data the timed loop would otherwise
+  -- keep copying, which made a packed set look about 9% slower for no reason of its own
+  performMajorGC
   let matchups = V.fromList teams
       budget = round (secs * 1e12 :: Double) :: Integer
   genRef <- newIORef (mkSMGen 20240601)

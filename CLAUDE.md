@@ -53,6 +53,9 @@ correct, fast simulator first, and no bot work until it exists.
   were each recorded from the pool of their own phase branch, built in
   parallel. 7f was recorded from the stacked engine and covers their
   interactions.
+  After recording a set, pack it: `cabal run -v0 trace-pack -- pack local/traces/<set> local/traces-v2/<set>`
+  (`POKESIM_TRACES=local/traces-v2` then runs the parity test on the packed
+  corpus; see `docs/oracle-testing.md`, "Trace format v2").
   When the engine accepts more moves, abilities or items, re-record only the
   newest slice's set, from a fresh pool. Earlier sets stay as recorded: their
   pools are still accepted, and the long tier's coverage check needs every

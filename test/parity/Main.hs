@@ -18,7 +18,6 @@ import Data.Char (isDigit)
 import Data.IORef
 import Data.List (isSuffixOf, nub, sort)
 import Data.Maybe (fromMaybe)
-import qualified Data.Map.Strict as M
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Vector as V
@@ -35,7 +34,6 @@ import Engine.Dex
 import Engine.State
 
 import Compare
-import CrossCheck
 import Trace
 import Trace.V2
 -- | A parity failure: where it happened, turn, draw index, message.
@@ -76,9 +74,6 @@ main = do
   checkPool "ability" (supportedAbilities dex) [(set, as) | (set, _, _, as, _) <- lists]
   checkPool "item" (supportedItems dex) [(set, is) | (set, _, _, _, is) <- lists]
   counts <- newIORef []
-  crossOn <- (== Just "1") <$> lookupEnv "POKESIM_PARITY_CROSSCHECK"
-  mutateEvery <- maybe 25 read <$> lookupEnv "POKESIM_PARITY_CROSSCHECK_EVERY"
-  stats <- newMutStats
   work <- fmap concat $ forM sets $ \set -> do
     names <- listDirectory (root </> set)
     let jsons = [n | n <- names, isTraceName ".json" n]
@@ -101,7 +96,7 @@ main = do
   -- the results, and any failure messages, come back in the same order as a sequential run.
   jobs <- parityJobs
   putStrLn ("parity: checking traces on " ++ show jobs ++ " thread(s)")
-  results <- inOrder jobs (\(ix, (_, f)) -> runFile dex (if crossOn then Just (stats, ix `mod` mutateEvery == 0) else Nothing) f) (zip [0 :: Int ..] work) $ \(_, (set, f)) (r, used) -> do
+  results <- inOrder jobs (\(_, f) -> runFile dex f) work $ \(set, f) (r, used) -> do
     case r of
       Left e -> do
         hPutStrLn stderr (render f e)
@@ -129,11 +124,6 @@ main = do
         ++ " species, " ++ show (Set.size usedAbilities) ++ " abilities and " ++ show (Set.size usedItems)
         ++ " items used by the traces' teams")
       pure (all null [unusedMoves, unusedSpecies, unusedAbilities, unusedItems])
-  when crossOn $ do
-    m <- readIORef stats
-    putStrLn ("parity: cross-check mutations applied (mutating every " ++ show mutateEvery ++ "th trace): "
-      ++ show (sum (M.elems m)) ++ " in all")
-    forM_ (M.toList m) $ \(n, c) -> putStrLn ("  " ++ show c ++ "\t" ++ n)
   forM_ sets $ \set -> do
     let rs = [r | (s, r, _) <- results, s == set]
         oks = [x | Right x <- rs]
@@ -259,13 +249,13 @@ loadTrace f
   | otherwise = (>>= fromV1) <$> eitherDecodeFileStrict' f
 
 -- | Load and check one trace; on success returns (decision points, draws). Also returns the ids its teams use.
-runFile :: Dex -> Maybe (MutStats, Bool) -> FilePath -> IO (Either Failure (Int, Int), Used)
-runFile dex cc f = do
+runFile :: Dex -> FilePath -> IO (Either Failure (Int, Int), Used)
+runFile dex f = do
   r <- loadTrace f
   case r of
     Left e -> pure (Left (Failure "load" Nothing 0 e), Used Set.empty Set.empty Set.empty Set.empty)
     Right t -> do
-      res <- checkTrace dex cc t
+      res <- checkTrace dex t
       let sets' = concatMap arr (arr (trTeams t))
           ids k = Set.fromList [toId x | s <- sets', String x <- [s .: k]]
           moveIds = Set.fromList [toId x | s <- sets', String x <- arr (s .: "moves")]
@@ -296,8 +286,8 @@ checkShape tr = do
   where
     expect w ok msg = if ok then Right () else Left (Failure ("trace shape (" ++ w ++ ")") Nothing 0 msg)
 
-checkTrace :: Dex -> Maybe (MutStats, Bool) -> Trace -> IO (Either Failure (Int, Int))
-checkTrace dex cc tr = case prepare of
+checkTrace :: Dex -> Trace -> IO (Either Failure (Int, Int))
+checkTrace dex tr = case prepare of
   Left e -> pure (Left e)
   Right (steps, teams, allDraws, cumulative) -> do
     ref <- newIORef ("setup" :: String)
@@ -329,9 +319,8 @@ checkTrace dex cc tr = case prepare of
         loop total b rs _ [] _ = finish total b rs
         loop total b rs i ((s, cum) : rest) sawUnasked = do
           writeIORef ref ("step " ++ show i)
-          cx <- crossIO b (stState s)
           let one = stepOne b rs i s cum sawUnasked
-          r <- evaluate (forceE (maybe one (\m -> Left (Failure ("crosscheck step " ++ show i) (Just (bTurn b)) 0 m)) cx))
+          r <- evaluate (forceE one)
           case r of
             Left e -> pure (Left e)
             Right (b', rs', saw') -> loop total b' rs' (i + 1) rest saw'
@@ -390,16 +379,7 @@ checkTrace dex cc tr = case prepare of
                   (_, Right (Left BattleFinished, _)) -> Right ()
                   (_, res) -> endFail ("step on a finished battle: expected BattleFinished, got " ++ showStepResult res)
                 Right (length (trSteps tr), total)
-          cx <- crossIO bEnd (trFinal tr)
-          evaluate (forceE (maybe check (\m -> Left (Failure "crosscheck final" (Just (bTurn bEnd)) 0 m)) cx))
-
-    -- cross-check mode: the typed and the JSON comparison agree on this state, and on its mutations
-    crossIO b snap = case cc of
-      Nothing -> pure Nothing
-      Just (stats, mutate) -> case crossState dex b snap of
-        Left m -> pure (Just m)
-        Right () | mutate -> either Just (const Nothing) <$> crossMutations dex b snap stats
-                 | otherwise -> pure Nothing
+          evaluate (forceE check)
 
     isMissing e = case e of
       MissingChoice _ -> True
