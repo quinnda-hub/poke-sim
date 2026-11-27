@@ -582,13 +582,13 @@ checkStep dx b b' (c1, c2) = (mappend (stallSeen <> seen8d <> pressureSeen) <$>)
             foeAfter = if sHasActive (sideOf foe b') then monActive (monOf b' (Actor foe foeBefore)) else False
             healed = min (monMaxHp m0) (monHp m0 + monMaxHp m0 `quot` 3)
         if fainted0 && monHp m1 /= 0 then Left (who ++ "a fainted Pokemon regained HP") else Right ()
-        let regen = wasOn && benched && abilityIs "regenerator" m0 && isSwitch (chose p) && noGas
+        let regen = wasOn && benched && abilityIs "regenerator" m0 && isSwitch (chose p) && noGas p
         if regen && monHp m1 /= healed
           then Left (who ++ "Regenerator holder switched out from " ++ show (monHp m0) ++ " HP and has " ++ show (monHp m1) ++ ", not " ++ show healed)
           else Right ()
         -- (the ability can change within the step: a Terastallizing Ogerpon takes Embody Aspect before it pivots out, so the
         -- holder must still have Natural Cure after the step)
-        let cure = wasOn && benched && abilityIs "naturalcure" m0 && abilityIs "naturalcure" m1 && noGas
+        let cure = wasOn && benched && abilityIs "naturalcure" m0 && abilityIs "naturalcure" m1 && noGas p
         if cure && monStatus m1 /= StatusNone then Left (who ++ "Natural Cure holder switched out with the status " ++ show (monStatus m1)) else Right ()
         let ejected = not stealing && wasOn && itemIs "ejectbutton" m0 && monItem m1 == noItem
             -- (slice 8a: a Guard Dog attacker is not forced out: its DragOut returns null, while the Red Card is still used up)
@@ -637,8 +637,9 @@ checkStep dx b b' (c1, c2) = (mappend (stallSeen <> seen8d <> pressureSeen) <$>)
             Left (show p ++ " member " ++ show i ++ " holds " ++ show (itemId dx (monItem m1)) ++ " after a step in which neither it nor the other side had it")
       _ -> Right ()
     -- slice 8f: Neutralizing Gas suppresses Regenerator and Natural Cure (their SwitchOut handlers are skipped for an ignored ability), so
-    -- those two checks hold only in a step with no gas holder in play at either end
-    noGas = null [() | bb <- [b, b'], p <- [P1, P2], sHasActive (sideOf p bb), let m = activeMon p bb, not (monFainted m), abilityId dx (monAbility m) == "neutralizinggas"]
+    -- those two checks hold only when no unfainted Neutralizing Gas holder is in play on the other side at the start or at the end of the
+    -- step: the holder that is there at the switch-out (the foe's own switch can come first in the step) is in play at one of the two
+    noGas p = null [() | bb <- [b, b'], sHasActive (sideOf (otherP p) bb), let m = activeMon (otherP p) bb, not (monFainted m), abilityId dx (monAbility m) == "neutralizinggas"]
     -- slice 8d: the three events the ability phase's covers count (see 'Seen')
     seen8d = mempty
       { seenMoxie = length [() | p <- [P1, P2], (m0, m1) <- pairs p, abilityIs "moxie" m0, monActive m0, monActive m1, monHp m1 > 0, bsAtk (monBoosts m1) > bsAtk (monBoosts m0), foeDown p]

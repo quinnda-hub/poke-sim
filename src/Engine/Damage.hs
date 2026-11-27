@@ -169,8 +169,8 @@ ignoringAbility dx b a
 -- abilities' own handlers (the four Ruin abilities, Dark Aura and Fairy Aura: data/abilities.ts 386, 838, 1269, 4823, 4876, 5289). Only Levitate is
 -- supported; each of the others calls this function when it arrives.
 -- | @battle.suppressingAbility(target)@ (battle.ts 366-369): the move in use (Mold Breaker and its kin set @ignoreAbility@) while its
--- user is in play and is not the target, and the target has no Ability Shield. 'bActiveMove' holds @ignoreAbility@, always False
--- until a phase sets it, so this is False.
+-- user is in play and is not the target, and the target has no Ability Shield. 'bActiveMove' holds @ignoreAbility@, which Mold Breaker's
+-- @onModifyMove@ sets ('Engine.Event.MEIgnoreAbility', applied by 'Engine.Turn.useMove').
 suppressingAbility :: Dex -> Battle -> Actor -> Bool
 suppressingAbility dx b a = case bActiveMove b of
   Just (MoveInUse user ignore) -> ignore && monActive (monOf b user) && user /= a && not (hasItemNamed dx "abilityshield" (monOf b a))

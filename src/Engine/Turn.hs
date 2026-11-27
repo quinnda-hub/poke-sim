@@ -603,7 +603,7 @@ runMovePrio fmt dx user@(Actor p _) slot qprio = do
             modify' (modifyMon user (\m -> m {monMoves = SV.imap (\j x -> if j == i then x {msPP = msPP x - 1} else x) (monMoves m)}))
           -- pokemon.moveUsed(move, targetLoc) (battle-actions.ts 354; pokemon.ts 920-935): `this.lastMove = move`
           modify' (modifyMon user (\m -> m {monLastMove = mix}))
-          useMove fmt dx user target mv
+          useMove fmt dx False user target mv
           -- runMove (battle-actions.ts 366-368), after useMove: `singleEvent('AfterMove', move, null, pokemon, target, move)` (no supported
           -- move has an onAfterMove) then `runEvent('AfterMove', pokemon, target, move)`: Eject Pack's onAnyAfterMove. The move is the
           -- one chosen: Showdown passes the ActiveMove after useMove's changes, which no handler of AfterMove reads.
@@ -618,8 +618,8 @@ runMovePrio fmt dx user@(Actor p _) slot qprio = do
 -- hit loop. Spread targets and @randomNormal@ reach the one foe in singles ('TargetFoe'); a move on the
 -- user ('TargetSelf') skips immunity and accuracy (@hitStepAccuracy@: a self-targeted status move).
 {-# INLINABLE useMove #-}
-useMove :: MonadChance m => Format -> Dex -> Actor -> Actor -> MoveData -> Eng m ()
-useMove fmt dx user target mv0 = do
+useMove :: MonadChance m => Format -> Dex -> Bool -> Actor -> Actor -> MoveData -> Eng m ()
+useMove fmt dx fromPPless user target mv0 = do
   -- useMoveInner (battle-actions.ts 494-497): singleEvent('ModifyType') and singleEvent('ModifyMove') on the move change
   -- the move in use (the copy made for this use: accuracy, type, power, ...), then runEvent('ModifyType') and
   -- runEvent('ModifyMove') run the other effects' handlers (a frozen user of a defrost move thaws:
@@ -657,11 +657,14 @@ useMove fmt dx user target mv0 = do
             TargetAllySide -> [user]
             TargetFoeSide -> []
             TargetAll -> [user, target]
-  drops <- mapM (\pt -> runEvent dx EvDeductPP pt (Just user) (Just mv) RNone) pressureTargets
-  let extraPP = sum [n | RInt n <- drops]
-      slotOf = SV.findIndex (\ms -> mvId (moveData dx (msMove ms)) == mvId mv) (monMoves (monOf b user))
-  when (extraPP > 0) $ forM_ slotOf $ \i ->
-    modify' (modifyMon user (\m -> m {monMoves = SV.imap (\j x -> if j == i && msPP x > 0 then x {msPP = max 0 (msPP x - extraPP)} else x) (monMoves m)}))
+  -- `if (!sourceEffect || callerMoveForPressure)` (540-541): a use called with a source effect that has no `pp` (Magic Bounce's nested use,
+  -- 'bounceMove': `sourceEffect` is the running effect, 451) runs no DeductPP at all
+  unless fromPPless $ do
+    drops <- mapM (\pt -> runEvent dx EvDeductPP pt (Just user) (Just mv) RNone) pressureTargets
+    let extraPP = sum [n | RInt n <- drops]
+        slotOf = SV.findIndex (\ms -> mvId (moveData dx (msMove ms)) == mvId mv) (monMoves (monOf b user))
+    when (extraPP > 0) $ forM_ slotOf $ \i ->
+      modify' (modifyMon user (\m -> m {monMoves = SV.imap (\j x -> if j == i && msPP x > 0 then x {msPP = max 0 (msPP x - extraPP)} else x) (monMoves m)}))
   useMoveWith fmt dx user target mv
 
 -- | 'useMove' after the @ModifyType@ and @ModifyMove@ events: the rest of @useMoveInner@ and the hit steps, which read the
@@ -767,7 +770,8 @@ useMoveWith fmt dx user target mv = case mrTarget rule of
 --   the move in use (battle-actions.ts 475: `move.priority = this.battle.activeMove.priority`), here the first use's.
 -- - @sourceEffect@ is the running effect, Magic Bounce (@this.battle.effect@, 451): it has no @pp@, so there is no @DeductPP@ for
 --   Pressure, and the move's @ignoreAbility@ is the ability's (none). The use costs the bouncer no PP either: this is @useMove@, not @runMove@.
---   LATENT(8e): Pressure's @DeductPP@ (@!sourceEffect || callerMoveForPressure@, 540-552) is skipped for the same reason.
+--   Pressure's @DeductPP@ does not run: `if (!sourceEffect || callerMoveForPressure)` (battle-actions.ts 540-541) is false, because Magic Bounce
+--   has no @pp@, so the bounced move costs the original user nothing extra ('useMove''s @fromPPless@ argument).
 -- - The nested use sets the active move and nothing restores it in Gen 9 (battle-actions.ts 414-416 is for @gen <= 4@), so the first
 --   use finishes with the bounced move active ('runMove' reads @activeMove@ for @AfterMove@).
 --   LATENT(8e): 'runMove' passes the first use's move to @AfterMove@; no handler reads a field that differs.
@@ -776,7 +780,7 @@ bounceMove :: MonadChance m => Dex -> Actor -> Actor -> MoveData -> Eng m ()
 bounceMove dx bouncer source mv = do
   fmt <- gets bFormat
   forM_ (M.lookup (mvId mv) (dxMoveIx dx)) $ \ix ->
-    useMove fmt dx bouncer source ((moveData dx ix) {mvPriority = mvPriority mv, mvHasBounced = True, mvPranksterBoosted = False})
+    useMove fmt dx True bouncer source ((moveData dx ix) {mvPriority = mvPriority mv, mvHasBounced = True, mvPranksterBoosted = False})
 
 -- | @tryMoveHit@ (battle-actions.ts 883-919) of a move on a side or the field (@foeSide@, @allySide@, @all@): no
 -- type immunity, accuracy or crit draw. The event points are @singleEvent('Try')@ (Aurora Veil's @onTry@: it needs snow),

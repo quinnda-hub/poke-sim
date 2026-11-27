@@ -2383,8 +2383,8 @@ runNative dx n c relay = do
     -- `speedSort(getAllActive())`: the Pokemon in play, the source included, by cached speed (a tie draws, as in 'eachEvent');
     -- every one but the source restarts its ability (`singleEvent('Start', ...)`) unless it is `cantsuppress` or holds an Ability Shield
     -- (it was never suppressed), and a Gluttony holder's `gluttony` state is reset (LATENT: Gluttony is not supported).
-    -- LATENT(8a): Intimidate, Download and the other abilities with an @onStart@ restart here once they are supported (the stat boosts they
-    -- make go through 'boostMon'); LATENT(8c): so do the abilities that log or set state in @onStart@ and that 8c's immunity abilities share.
+    -- The restart runs every supported ability's @onStart@: Intimidate, Dauntless Shield and the other switch-in abilities of 8a (their stat
+    -- boosts go through 'boostMon') and the log-only ones. LATENT: Download and the other @onStart@ abilities that are not supported yet.
     NNeutralizingGasEnd -> do
       b <- get
       let active = getAllActive False b
