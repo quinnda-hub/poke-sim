@@ -26,6 +26,7 @@ module Engine.Event
   , RuleCond (..)
   , NativeId (..)
   , Relay (..)
+  , MoveEdit (..)
   , relayTruthy
   , nativeBody
     -- * Sort keys
@@ -465,9 +466,27 @@ data Body
 
 -- | The value an event threads through its handlers (Showdown's @relayVar@). 'RNone' is the hidden @true@ of an
 -- event run without one: it is not passed to the handlers and it is relayTruthy.
-data Relay = RNone | RBool !Bool | RInt !Int | RText !T.Text | RBoosts ![(BoostStat, Int)]
+data Relay = RNone | RBool !Bool | RInt !Int | RText !T.Text | RBoosts ![(BoostStat, Int)] | RMoveEdits ![MoveEdit]
   -- ^ 'RText' is a type or status key (@Immunity@: @'frz'@, @'sandstorm'@). 'RBoosts' is the capped stage changes @AfterBoost@ passes
-  -- (@getCappedBoost@: a stat with no change is absent, as in Showdown's sparse table).
+  -- (@getCappedBoost@: a stat with no change is absent, as in Showdown's sparse table). 'RMoveEdits' is the relay of the
+  -- holders' @ModifyType@ and @ModifyMove@ events (see 'MoveEdit').
+  deriving (Eq, Show)
+
+-- | One change a holder's @ModifyType@ or @ModifyMove@ handler makes to the move in use. Showdown passes the ActiveMove
+-- itself as the relay of both events (@move = this.battle.runEvent('ModifyType', pokemon, target, move, move)@, then
+-- @'ModifyMove'@, battle-actions.ts 502-503) and a handler edits that one object. Here the relay starts as
+-- @RMoveEdits []@; a handler returns it with its edits appended, in order. The dispatcher applies the edits so far to the
+-- move the later handlers of the same event see ('Engine.Dispatch.applyMoveEdits'), and 'Engine.Turn.useMove' applies
+-- the result to the move in use. A phase that needs another kind of edit adds a constructor here.
+data MoveEdit
+  = MESetType !Int
+  -- ^ @move.type = ...@ (Liquid Voice: @'Water'@), a type index as in 'Engine.Dex.mvType'
+  | MEIgnoreEvasion
+  -- ^ @move.ignoreEvasion = true@ (Keen Eye)
+  | MEIgnoreAbility
+  -- ^ @move.ignoreAbility = true@ (Mold Breaker)
+  | MEInfiltrates
+  -- ^ @move.infiltrates = true@ (Infiltrator)
   deriving (Eq, Show)
 
 -- | Showdown's truthiness of a relay value: @false@ and 0 are falsy.

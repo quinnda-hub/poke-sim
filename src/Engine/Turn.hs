@@ -613,10 +613,14 @@ useMove fmt dx user target mv0 = do
   setActiveMove user mv0
   mvT <- singleMoveEvent dx EvModifyType user (Just eventTarget) mv0
   mv <- singleMoveEvent dx EvModifyMove user (Just eventTarget) mvT
-  void (runEvent dx EvModifyType user (Just eventTarget) (Just mv) RNone)
-  void (runEvent dx EvModifyMove user (Just eventTarget) (Just mv) RNone)
-  setActiveMove user mv
-  useMoveWith fmt dx user target mv
+  -- the holders' handlers edit the move ('MoveEdit'): ModifyType's result is the move ModifyMove sees (battle-actions.ts 502-503)
+  let edited r m = case r of
+        RMoveEdits es@(_ : _) -> applyMoveEdits es m
+        _ -> m
+  mvTy <- (`edited` mv) <$> runEvent dx EvModifyType user (Just eventTarget) (Just mv) (RMoveEdits [])
+  mvM <- (`edited` mvTy) <$> runEvent dx EvModifyMove user (Just eventTarget) (Just mvTy) (RMoveEdits [])
+  setActiveMove user mvM
+  useMoveWith fmt dx user target mvM
 
 -- | 'useMove' after the @ModifyType@ and @ModifyMove@ events: the rest of @useMoveInner@ and the hit steps, which read the
 -- move in use.

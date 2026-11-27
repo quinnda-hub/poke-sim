@@ -65,13 +65,14 @@ module Engine.Dispatch
   , win
   , applyDamage
   , damageMon
+  , applyMoveEdits
   , healMon
   , battleHeal
   ) where
 
 import Control.Monad (forM, forM_, unless, void, when)
 import Control.Monad.Trans.State.Strict (StateT, get, gets, modify')
-import Data.List (sortBy)
+import Data.List (foldl', sortBy)
 import qualified Data.Map.Strict as M
 import qualified Data.Text as T
 import Data.Maybe (fromMaybe, isJust, isNothing)
@@ -928,7 +929,11 @@ runEventFull dx crit onEffect eff ev target source mv relay0 = do
               (OwnField, _) -> modify' (\bb -> maybe bb (\st -> setOwnerState OwnField (hKey h) st {esHasTarget = True} bb) (ownerState bb OwnField (hKey h)))
               _ -> pure ()
             -- a side or field handler is called with the event's own arguments: the Pokemon is the event's target
-            Res out md' <- runBody dx body (Ctx (fromMaybe target (hHolder h)) (hOwner h) (hKey h) source mv md eff crit) r
+            -- a ModifyType or ModifyMove handler sees the move as the earlier handlers left it (one ActiveMove object in Showdown)
+            let mvNow = case r of
+                  RMoveEdits es@(_ : _) -> applyMoveEdits es <$> mv
+                  _ -> mv
+            Res out md' <- runBody dx body (Ctx (fromMaybe target (hHolder h)) (hOwner h) (hKey h) source mvNow md eff crit) r
             case out of
               Keep -> go fmt hs r md'
               Replace r'
@@ -2552,6 +2557,16 @@ boostMon dx source active cause a@(Actor p _) changes = do
       success <- visit False boost
       void (runEventEff dx cause EvAfterBoost a source active (RBoosts boost))
       pure success
+
+-- | Apply the edits a holder's @ModifyType@ or @ModifyMove@ handlers made to the move in use ('MoveEdit'), in order.
+applyMoveEdits :: [MoveEdit] -> MoveData -> MoveData
+applyMoveEdits es mv0 = foldl' edit mv0 es
+  where
+    edit m e = case e of
+      MESetType t -> m {mvType = t}
+      MEIgnoreEvasion -> m {mvIgnoreEvasion = True}
+      MEIgnoreAbility -> m {mvIgnoreAbility = True}
+      MEInfiltrates -> m {mvInfiltrates = True}
 
 -- | The effect of a boost caused by the move in use ('boostMon').
 moveCause :: Maybe EffectKey
