@@ -19,6 +19,7 @@ import Data.List (group, sort, sortOn, (\\))
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe)
 import qualified Data.Vector as V
+import qualified Data.Vector.Unboxed as U
 import qualified Data.Vector.Strict as SV
 import qualified Data.Text as T
 import Hedgehog
@@ -84,7 +85,7 @@ main = do
             withTests 1 (moveBasePowerSortsLast dex))
         , ("speedSort: a sorted permutation, drawing exactly Showdown's shuffle ranges over each tie run in order",
             withTests (fromIntegral n) speedSortDraws)
-        , ("every effect's event mask is exactly the events its handler list names, and every event fits the 64-bit mask",
+        , ("every effect's event mask, and its mask per prefix, is exactly the events its handler list names, and every event fits the 64-bit mask",
             withTests 1 (eventMasksExact dex))
         , ("Court Change and Haze: the sides exchange the listed conditions with their states and nothing else changes; Haze clears the stages in play",
             withTests (fromIntegral n) (fieldMoves dex))
@@ -506,6 +507,16 @@ eventMasksExact dex = withTests 1 $ property $ do
             wrong = [e | e <- [minBound .. maxBound :: EventId], testBit (cnEvents c) (fromEnum e) /= (e `elem` named)]
         footnote (what ++ " " ++ T.unpack (cnId c) ++ ": events whose bit is wrong: " ++ show wrong)
         wrong === []
+        -- the per-prefix masks, bit by bit against the same list
+        let wrongBy =
+              [ (p, e)
+              | p <- [minBound .. maxBound :: Prefix]
+              , e <- [minBound .. maxBound :: EventId]
+              , testBit (cnEventsBy c U.! fromEnum p) (fromEnum e) /= any (\(p', e', _) -> p' == p && e' == e) (cnHandlers c)
+              ]
+        footnote (what ++ " " ++ T.unpack (cnId c) ++ ": (prefix, event) pairs whose bit is wrong: " ++ show wrongBy)
+        wrongBy === []
+        U.length (cnEventsBy c) === fromEnum (maxBound :: Prefix) + 1
         -- no bit beyond the last event
         assert (cnEvents c `shiftR` (fromEnum (maxBound :: EventId) + 1) == 0)
   mapM_ (\(what, table) -> mapM_ (checkMask what) (V.toList table)) tables

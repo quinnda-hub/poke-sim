@@ -13,6 +13,8 @@ module Engine.Dex
   , conditionOf
   , condSpec
   , eventBits
+  , prefixBits
+  , hasEntry
   , dexCondLookup
   , moveSpec
   , effectOf
@@ -149,6 +151,9 @@ data Condition = Condition
   , cnEvents :: !Word64
   -- ^ The events 'cnHandlers' has an entry for, under any prefix, as a bit set over 'fromEnum' of the 'EventId'
   -- ('eventBits'). Derived from 'cnHandlers'; it lets 'condSpec' and the dispatcher answer "no handler" with one bit test.
+  , cnEventsBy :: !(U.Vector Word64)
+  -- ^ 'cnEvents' per prefix: element @fromEnum p@ has bit @fromEnum e@ for every entry @(p, e, _)@ of 'cnHandlers'
+  -- ('prefixBits'). 'condSpec' and the collectors test it before scanning the list.
   }
   deriving (Show)
 
@@ -250,7 +255,7 @@ supportedItems dx = "" : [cnId a | a <- V.toList (dxItems dx), cnSupported a]
 -- | The handler of a condition for a prefix and event (@on<Prefix><Event>@), if the engine has one.
 condSpec :: Condition -> Prefix -> EventId -> Maybe HandlerSpec
 condSpec cn p e
-  | not (testBit (cnEvents cn) (fromEnum e)) = Nothing
+  | not (testBit (U.unsafeIndex (cnEventsBy cn) (fromEnum p)) (fromEnum e)) = Nothing
   | otherwise = go (cnHandlers cn)
   where
     go [] = Nothing
@@ -263,6 +268,15 @@ condSpec cn p e
 -- constructors (a property checks it).
 eventBits :: [(Prefix, EventId, HandlerSpec)] -> Word64
 eventBits = foldl' (\w (_, e, _) -> setBit w (fromEnum e)) 0
+
+-- | The 'cnEventsBy' of a handler list: one mask per 'Prefix', indexed by 'fromEnum'.
+prefixBits :: [(Prefix, EventId, HandlerSpec)] -> U.Vector Word64
+prefixBits hs = U.fromList [foldl' (\w (p', e, _) -> if p' == p then setBit w (fromEnum e) else w) 0 hs | p <- [minBound .. maxBound]]
+
+-- | Whether the condition has an entry for the prefix and event: 'condSpec' is 'Just' exactly then.
+hasEntry :: Condition -> Prefix -> EventId -> Bool
+hasEntry cn p e = testBit (U.unsafeIndex (cnEventsBy cn) (fromEnum p)) (fromEnum e)
+{-# INLINE hasEntry #-}
 
 -- | Showdown's effectiveness code of an attacking type against a defending type.
 typeEffect :: Dex -> Int -> Int -> Int
@@ -525,7 +539,7 @@ effectFor ident typeOrder ownPfx startAsSwitchIn v mbodies = do
         Object o | Just (Object fl) <- KM.lookup "flags" o -> maybe False truthy (KM.lookup "breakable" fl)
         _ -> False
   let handlers = specs ++ startSwitchIn ++ residual
-  pure (Condition duration handlers (reject == Nothing) reject breakable ident boosts (eventBits handlers))
+  pure (Condition duration handlers (reject == Nothing) reject breakable ident boosts (eventBits handlers) (prefixBits handlers))
 
 speciesOf :: M.Map T.Text Int -> Value -> Either String SpeciesData
 speciesOf tix v = do
