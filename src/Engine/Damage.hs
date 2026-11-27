@@ -164,10 +164,13 @@ ignoringAbility dx b a
     isGas x = abilityId dx (monAbility x) == "neutralizinggas"
     gas o = let x = monOf b o in isGas x && not (monFainted x) && esA (monAbilityState x) /= 1
 
--- LATENT(8g): outside @runEvent@ Showdown asks @suppressingAbility@ in @Pokemon#isGrounded@ (Levitate: 'isGrounded', above), in
+-- Outside @runEvent@ Showdown asks @suppressingAbility@ in @Pokemon#isGrounded@ (Levitate: 'isGrounded', above), in
 -- @runEffectiveness@ (pokemon.ts 2241: Tera Shell), in Heal Bell's and Aromatherapy's @onHit@ (data/moves.ts 571, 8260) and in six
--- abilities' own handlers (the four Ruin abilities, Dark Aura and Fairy Aura: data/abilities.ts 386, 838, 1269, 4823, 4876, 5289). Only Levitate is
--- supported; each of the others calls this function when it arrives.
+-- abilities' own handlers (the four Ruin abilities, Dark Aura and Fairy Aura: data/abilities.ts 386, 838, 1269, 4823, 4876, 5289).
+-- Levitate is supported, and checked against Mold Breaker by slice 8g's set. Vessel of Ruin's @onStart@ (5289) asks only to decide whether to log
+-- `-ability`, so it changes no state and the engine's @NLogOnly@ need not ask. LATENT(8g): the rest are unreachable: Tera Shell, the other
+-- three Ruin abilities and the two Auras are not accepted abilities, and Heal Bell and Aromatherapy are not accepted moves; each of them calls
+-- this function when it arrives.
 -- | @battle.suppressingAbility(target)@ (battle.ts 366-369): the move in use (Mold Breaker and its kin set @ignoreAbility@) while its
 -- user is in play and is not the target, and the target has no Ability Shield. 'bActiveMove' holds @ignoreAbility@, which Mold Breaker's
 -- @onModifyMove@ sets ('Engine.Event.MEIgnoreAbility', applied by 'Engine.Turn.useMove').

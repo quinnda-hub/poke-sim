@@ -165,8 +165,8 @@ abilityBodies ty wx name = case name of
   "gooey" -> Just [(POwn, EvDamagingHit, BNative NGooeyDamagingHit)]
   "speedboost" -> Just [(POwn, EvResidual, BNative NSpeedBoostResidual)]
   -- slice 8b
-  -- LATENT(8f): multiscale, heatproof, purifyingsalt, waterbubble, flashfire and unaware are @breakable@: the dispatcher's ability gate skips their
-  -- handlers while the move in use ignores abilities (Mold Breaker and its kin), which is 8f's `ignoreAbility` and is not set yet.
+  -- multiscale, heatproof, purifyingsalt, waterbubble, flashfire and unaware are @breakable@: the dispatcher's ability gate skips their
+  -- handlers while the move in use ignores abilities (Mold Breaker and its kin: 8f's `ignoreAbility`). Slice 8g's set meets each with a Mold Breaker user.
   -- multiscale: onSourceModifyDamage, the holder at full HP -> chainModify(0.5)
   "multiscale" -> Just [(PSource, EvModifyDamage, BNative NMultiscale)]
   -- sharpness: onBasePower, `move.flags['slicing']` -> chainModify(1.5)
@@ -200,9 +200,10 @@ abilityBodies ty wx name = case name of
   -- unaware: onAnyModifyBoost
   "unaware" -> Just [(PAny, EvModifyBoost, BNative NUnawareModifyBoost)]
   -- slice 8c. The abilities that block a hit or guard against damage.
-  -- LATENT(8f): all of them but Magic Guard and Poison Heal are `breakable` (Good as Gold, Water Absorb, Levitate, Sturdy, Sap Sipper, Soundproof,
-  -- Bulletproof, Sweet Veil, Shell Armor): the dispatcher already skips their handlers while 'Engine.Damage.suppressingAbility' holds, and Levitate's
-  -- grounding reads it, but no move sets @ignoreAbility@ until Mold Breaker arrives. Magic Bounce's reflected moves reach Good as Gold the same way.
+  -- All of them but Magic Guard and Poison Heal are `breakable` (Good as Gold, Water Absorb, Levitate, Sturdy, Sap Sipper, Soundproof,
+  -- Bulletproof, Sweet Veil, Shell Armor): the dispatcher skips their handlers while 'Engine.Damage.suppressingAbility' holds, and Levitate's
+  -- grounding reads it (Mold Breaker sets @ignoreAbility@). Slice 8g's set meets each with a Mold Breaker user, and a Magic Bounce reflection
+  -- reaches Good as Gold the same way.
   -- goodasgold (abilities.ts 1631): onTryHit, a Status move from another Pokemon -> null
   "goodasgold" -> Just [(POwn, EvTryHit, BNative NGoodAsGoldTryHit)]
   -- waterabsorb (5365): onTryHit, a Water move from another Pokemon -> heal baseMaxhp / 4, null
