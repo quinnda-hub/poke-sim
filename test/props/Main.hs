@@ -34,7 +34,7 @@ import System.Random.SplitMix (mkSMGen)
 import Engine
 import Engine.Chance (runSample, speedSortWith)
 import Engine.Dex (Condition (..), Dex (..), MoveData (..), SpeciesData (..), abilityId, dexCondLookup, itemId, supportedAbilities, supportedItems, supportedMoves, supportedSpecies)
-import Engine.Dispatch (HitResult (..), addSideCondition, basePowerCallback, moveAfterHit, moveFieldHit, moveOwnHit)
+import Engine.Dispatch (HitResult (..), addSideCondition, basePowerCallback, moveAfterHit, moveFieldHit, moveOwnHit, moveTry)
 import Engine.Effects (abilityBodies, fieldCondBodies, itemBodies, moveBodies)
 import Engine.Event (CondId (..), EventId (..), HandlerSpec (..), Prefix (..), condName, parseHandlerName)
 import Engine.Format (trunc, truncBits)
@@ -42,7 +42,7 @@ import Engine.Rule (DamageKind (..), MoveRule (..), executable, moveRule)
 import Engine.State
 import Engine.Modifier (baseMod, chain, chainModify, finalModify, modify, modifyBy)
 import Engine.Stats (actionSpeed, boostedStat, finalSpeed, parSpe)
-import Engine.Turn (roundDiv, stagedAccuracy)
+import Engine.Turn (roundDiv, runMove, stagedAccuracy)
 import Playout
 
 main :: IO ()
@@ -91,6 +91,9 @@ main = do
             withTests (fromIntegral n) (fieldMoves dex))
         , ("Knock Off, Thief and Trick: an item removal never creates an item, a refusal keeps it, and a swap hands each item over whole",
             withTests (fromIntegral n) (itemMoves dex))
+        -- slice 7d
+        , ("Sucker Punch and Thunderclap: other queued actions never change whether onTry passes, and a failed move makes no accuracy, crit or damage draw and changes no HP",
+            withTests (fromIntegral n) (punchMoves dex))
         , ("a weight-based base power never decreases as the target gets heavier or the user lighter",
             withTests (fromIntegral n) (weightBands dex))
         , ("a base-power callback never lowers the move's own base power below what its condition adds",
@@ -812,3 +815,52 @@ itemMoves dex = property $ do
           if res == HitOk && itemOf b' user /= noItem && itemOf b' target /= noItem
             then assert (esOrder (monItemState (monOf b' target)) < esOrder (monItemState (monOf b' user)))
             else pure ()) ["trick", "switcheroo"]
+
+-- | Sucker Punch and Thunderclap (slice 7d). The move's @onTry@ reads only the target's queued @move@ actions (@queue.willMove@), so the
+-- result of 'moveTry' is the same whatever else the queue holds: the user's own actions, the target's switch or Terastallization, a
+-- residual. And a move that fails there stops before the accuracy roll: running it makes no accuracy, crit or damage draw (only the speed-tie shuffles of the events before Try), and no HP changes, on either side.
+punchMoves :: Dex -> Property
+punchMoves dex = property $ do
+  (t1, t2) <- forAll (genPivotTeams dex)
+  seed <- forAll (Gen.word64 Range.linearBounded)
+  steps <- forAll (Gen.int (Range.linear 0 40))
+  who <- forAll Gen.enumBounded
+  name <- forAll (Gen.element ["suckerpunch", "thunderclap" :: T.Text])
+  b0 <- evalEither (fst (runSample (mkSMGen seed) (startBattle dex t1 t2 >>= advanceWhile dex steps (const True))))
+  let user = activeActor who b0
+      target = activeActor (other who) b0
+      ix = fromMaybe (-1) (M.lookup name (dxMoveIx dex))
+      mv = dxMoves dex V.! ix
+      act k a arg = Action {acKind = k, acOrder = 0, acPriority = 0, acSpeed = 0, acActor = Just a, acArg = arg}
+      nMoves = SV.length (monMoves (monOf b0 target))
+  case request b0 of
+    Finished _ -> success
+    Awaiting {} | not (monActive (monOf b0 user) && monActive (monOf b0 target) && monHp (monOf b0 user) > 0 && monHp (monOf b0 target) > 0) -> success
+    Awaiting {} -> do
+      -- the actions that count (the target's moves, possibly Struggle) and the ones that must not
+      relevant <- forAll (Gen.list (Range.linear 0 2) (act KMove target <$> Gen.int (Range.linear (-1) (nMoves - 1))))
+      noise <- forAll (Gen.list (Range.linear 0 4) (Gen.choice
+        [ act KMove user <$> Gen.int (Range.linear 0 3)
+        , act KSwitch target <$> Gen.int (Range.linear 0 5)
+        , pure (act KTerastallize target 0)
+        , pure (act KResidual target 0)
+        ]))
+      interleaved <- forAll (Gen.shuffle (relevant ++ noise))
+      let clean m = m {monStatus = StatusNone, monVolatiles = SV.empty}
+          withQueue q = (modifyMon user (\m -> (clean m) {monMoves = SV.singleton (MoveSlot ix 5 5 False)}) b0) {bQueue = SV.fromList q}
+          bA = withQueue interleaved
+          bB = withQueue [a | a <- interleaved, acKind a == KMove, acActor a == Just target]
+          tryOf bb = fst (runCounter (evalStateT (moveTry dex user target mv) bb))
+      tryOf bA === tryOf bB
+      cover 10 "onTry fails" (not (tryOf bA))
+      cover 10 "onTry passes" (tryOf bA)
+      if tryOf bA
+        then success
+        else do
+          let (((), b'), draws) = runTape [] (runStateT (runMove (bFormat bA) dex user 0) bA)
+          -- (speed-tie shuffles of the events before Try (BeforeMove, ModifyMove ...) are draws of a few values; the accuracy roll, the
+          -- crit roll and the damage roll, random(100), random(24) and random(16), are never made)
+          footnote (show draws)
+          assert (all (\(lo, hi) -> hi - lo < 16) draws)
+          monHp (monOf b' user) === monHp (monOf bA user)
+          monHp (monOf b' target) === monHp (monOf bA target)

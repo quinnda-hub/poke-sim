@@ -1349,6 +1349,8 @@ runNative dx n c relay = do
       _ -> keep
     -- slice 6a: run by 'moveTry', 'moveOwnHit' and 'movePriorityCharge'
     NTeleportTry -> keep
+    -- slice 7d: run by 'moveTry'
+    NSuckerPunchTry -> keep
     NPartingShotHit -> keep
     NChillyReceptionCharge -> keep
     -- regenerator.onSwitchOut(pokemon): `pokemon.heal(pokemon.baseMaxhp / 3)`. Pokemon.heal (pokemon.ts 1662-1672), not battle.heal: no
@@ -2133,6 +2135,18 @@ moveTry dx user target mv = case moveSpec mv POwn EvTry >>= hsBody of
   -- teleport.onTry(source): `return !!this.canSwitch(source.side)`
   Just (BNative NTeleportTry) -> gets (\b -> canSwitch b (playerOf user) > 0)
   Just (BNative NAuroraVeilTry) -> gets (maybe False (`elem` fieldIds dx ["hail", "snowscape"]) . effectiveWeather)
+  -- slice 7d. suckerpunch.onTry, thunderclap.onTry (data/moves.ts 18412, 19513): `const action = this.queue.willMove(target);
+  -- const move = action?.choice === 'move' ? action.move : null; if (!move || (move.category === 'Status' && move.id !== 'mefirst')
+  -- || target.volatiles['mustrecharge']) return false`. The queued action's move is the base move of the slot chosen (resolveAction's
+  -- getActiveMove, battle-queue.ts 261), Struggle included; a Tera action is a separate action, so the move action still counts.
+  -- A fainted target has no move action ('willMove'). Me First is not supported, so every status move fails it.
+  -- LATENT: no recharge move is supported, so `mustrecharge` never holds.
+  -- LATENT(7c): onOverrideAction (Encore) swaps the move at runAction, not in the queue, so the queued move stays the chosen one.
+  Just (BNative NSuckerPunchTry) -> gets (\b -> case willMove b target of
+    -- the move of the slot ('Engine.Queue.moveInSlot', which this module cannot import); Struggle is slot -1
+    Just ac | acArg ac < 0 -> not (mvStatus (dxStruggle dx))
+            | Just ms <- monMoves (monOf b target) SV.!? acArg ac -> not (mvStatus (moveData dx (msMove ms)))
+    _ -> False)
   -- poltergeist.onTry(source, target): `return !!target.item`
   Just (BNative NPoltergeistTry) -> gets (\b -> monItem (monOf b target) /= noItem)
   _ -> pure True

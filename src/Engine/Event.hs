@@ -629,6 +629,9 @@ data NativeId
   -- ^ teleport @onTry@: fails when the side cannot switch.
   | NPartingShotHit
   -- ^ partingshot @onHit@: drops the target's Attack and Special Attack; when neither drops, the move loses its @selfSwitch@.
+  -- slice 7d
+  | NSuckerPunchTry
+  -- ^ suckerpunch, thunderclap @onTry@: fails unless the target has a queued attacking move.
   | NChillyReceptionCharge
   -- ^ chillyreception @priorityChargeCallback@: the user takes the move's volatile.
   | NRegeneratorSwitchOut

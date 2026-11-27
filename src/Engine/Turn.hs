@@ -15,6 +15,8 @@ module Engine.Turn
   , step
   , stagedAccuracy
   , roundDiv
+    -- slice 7d
+  , runMove
   ) where
 
 import Control.Monad (forM_, unless, void, when)
