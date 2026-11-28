@@ -825,7 +825,8 @@ statusMoveHit dx user tgt mv0 = do
     -- onTryHit), Aroma Veil (onAllyTryAddVolatile) and Mental Herb (onUpdate) are not supported; nor are Magic Bounce and Magic Coat.
     [EOwnVolatile] -> (\r -> (r, mv0)) <$> maybe (pure False) (addVolatile dx tgt) (condByName (mvId mv0))
     -- `target.trySetStatus(moveData.status, ...)`; `!hitResult && move.status` fails the move
-    [EStatus st] -> (\r -> (r, mv0)) <$> trySetStatus dx tgt st
+    -- (slice 8d: `target.trySetStatus(moveData.status, source, move)`: the user is the source and the move the effect, which Synchronize reads)
+    [EStatus st] -> (\r -> (r, mv0)) <$> trySetStatusFx dx tgt st (Just user) moveCause
     -- runMoveEffects (battle-actions.ts 1319-1322): `if (moveData.forceSwitch) hitResult = !!canSwitch(target.side)`, the move's only
     -- effect (Roar, Whirlwind), so it did something only if the target's side can switch
     [] | mrForceSwitch (mvRule mv0) -> (\bb -> (canSwitch bb (playerOfActor tgt) > 0, mv0)) <$> get
@@ -931,7 +932,7 @@ afterHits dx user target mv total lastSub = do
     -- struggleRecoil: round(baseMaxhp / 4), at least 1, as directDamage (battle-actions.ts 1449): no Damage event
     -- (slice 7b: `move.totalDamage || (move.struggleRecoil && damage.some((val, i) => val === 0 && !!targetsCopy[i]))`: a last hit on a
     -- Substitute leaves no target in targetsCopy, and its recoil was taken inside the hit ('hitSubstitute'))
-    (True, _) | not lastSub -> modify' (applyDamage user (max 1 (roundDiv (monMaxHp um) 4)))
+    (True, _) | not lastSub -> modify' (applyDamage user (Just user) (Just (EffectKey EffRecoil 0)) (max 1 (roundDiv (monMaxHp um) 4)))
     -- recoil: round(totalDamage * n / d), at least 1, as battle.damage(recoil, pokemon, pokemon, 'recoil'): the Damage event runs
     -- with the 'EffRecoil' effect (Magic Guard and Rock Head read it)
     (_, Just (n, d)) | total > 0 -> void (damageMon dx user (Just user) Nothing (Just (EffectKey EffRecoil 0)) (max 1 (roundDiv (total * n) d)))
@@ -943,7 +944,9 @@ afterHits dx user target mv total lastSub = do
   -- a thawsTarget move (conditions.ts). The target is passed as a one-element array in Showdown.
   -- slice 7b: `afterMoveSecondaryEvent(targetsCopy.filter(val => !!val), ...)`, and targetsCopy is the last hit's: a last hit that went
   -- to a Substitute left a null there, so the array is empty and no handler (Eject Button, Red Card, frz) runs.
-  unless lastSub (void (runEvent dx EvAfterMoveSecondary target (Just user) (Just mv) RNone))
+  -- slice 8d: the relay value is @move.totalDamage@ ('RInt'), which Berserk's @onAfterMoveSecondary@ reads from the move; Showdown's event has no
+  -- relay value, and no other handler reads it.
+  unless lastSub (void (runEvent dx EvAfterMoveSecondary target (Just user) (Just mv) (RInt total)))
 
 -- | The steps of @spreadMoveHit@ after the damage, run once per hit: @selfDrops@ (4), @secondaries@ (5), then
 -- the @DamagingHit@ event. They run even when the hit fainted the target (its faint is only queued), so the
@@ -960,7 +963,15 @@ hitEffects dx user target mv onSub = do
     _ -> pure ()
   -- secondaries: for each, random(100); below the chance it hits the target (moveHit with isSecondary), then
   -- its `self` effects (selfDrops with isSecondary draws nothing)
-  forM_ (mrSecondaries rule) $ \sec -> do
+  -- slice 8d, @secondaries@ (battle-actions.ts 1401): `runEvent('ModifySecondaries', target, source, moveData, secondaries.slice())` once per hit,
+  -- before the draws, and the loop runs over the list it returns (Shield Dust keeps only the secondaries with a `self` effect). A hit on a
+  -- Substitute has a null target, whose own handlers are not collected: the list is whole.
+  secs <- if null (mrSecondaries rule) || onSub
+    then pure (mrSecondaries rule)
+    else do
+      res <- runEvent dx EvModifySecondaries target (Just user) (Just mv) (RSecondaries (mrSecondaries rule))
+      pure (case res of RSecondaries xs -> xs; _ -> [])
+  forM_ secs $ \sec -> do
     r <- roll 0 100
     when (r < secChance sec) $ do
       -- slice 7b: a hit that went to a Substitute has a null target: `secondaries` (1398-1411) still draws and still calls moveHit,
@@ -997,7 +1008,8 @@ forceSwitchStep dx user target mv = when (mrForceSwitch (mvRule mv)) $ do
 applyEffect :: MonadChance m => Dex -> Actor -> MoveData -> Actor -> Effect -> Eng m ()
 applyEffect dx user mv a e = case e of
   EBoost bs -> void (boostMon dx (Just user) (Just mv) moveCause a bs)
-  EStatus st -> void (trySetStatus dx a st)
+  -- (slice 8d: a secondary's status: `target.trySetStatus(moveData.status, source, move)`)
+  EStatus st -> void (trySetStatusFx dx a st (Just user) moveCause)
   -- addVolatile('flinch'): needs HP (no affectsFainted), fails if it is already there; no immunity, no
   -- TryAddVolatile handler, duration 1
   EFlinch -> void (addVolatile dx a CFlinch)
@@ -1070,7 +1082,7 @@ hitSubstitute fmt dx user target mv = do
     else modify' (modifyMon target (\x -> x {monVolatiles = SV.map (\v@(Volatile j st) -> if j == fromEnum CSubstitute then Volatile j st {esA = left} else v) (monVolatiles x)}))
   -- `if (damage) this.actions.applyRecoilDamage(damage, move, source)`
   when (dealt > 0) $ case (mvStruggleRecoil mv, mrRecoil rule) of
-    (True, _) -> modify' (applyDamage user (max 1 (roundDiv (monMaxHp um) 4)))
+    (True, _) -> modify' (applyDamage user (Just user) (Just (EffectKey EffRecoil 0)) (max 1 (roundDiv (monMaxHp um) 4)))
     (_, Just (n, d)) -> void (damageMon dx user (Just user) Nothing (Just (EffectKey EffRecoil 0)) (max 1 (roundDiv (dealt * n) d)))
     _ -> pure ()
   -- `if (move.drain) this.heal(Math.ceil(damage * move.drain[0] / move.drain[1]), source, target, 'drain')`

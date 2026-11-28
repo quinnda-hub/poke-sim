@@ -6,6 +6,8 @@ module Playout
   , genPivotTeams
   , genStatTeams
   , genGuardTeams -- slice 8c
+  -- slice 8d
+  , genAbilityTeams
   , playChecked
   , Seen (..)
   , advanceWhile
@@ -66,14 +68,22 @@ genStatTeams dx = genTeamsWith dx True True
 -- moves that target a foe, hazards, a sandstorm and a move that crits often), so that the playouts reach the damage events and the blocked hits
 -- that a uniform draw over every ability and item seldom does. The other generators draw as they did before.
 genGuardTeams :: Dex -> Gen (Team, Team)
-genGuardTeams dx = genTeamsK dx True False True
+genGuardTeams dx = genTeamsK dx True False True False
 
 genTeamsWith :: Dex -> Bool -> Bool -> Gen (Team, Team)
-genTeamsWith dx pivotHeavy statHeavy = genTeamsK dx pivotHeavy statHeavy False
+genTeamsWith dx pivotHeavy statHeavy = genTeamsK dx pivotHeavy statHeavy False False
 
--- | 'genTeamsWith', with the slice 8c share of guard abilities, items and moves when the last argument is set.
-genTeamsK :: Dex -> Bool -> Bool -> Bool -> Gen (Team, Team)
-genTeamsK dx pivotHeavy statHeavy guardHeavy = (,) <$> genTeam <*> genTeam
+-- | slice 8d: teams of one to three Pokemon, mostly level 100, weighted toward the on-hit and after-move abilities (Flame Body, Static, Rough
+-- Skin, Toxic Chain, Synchronize, Magician, Pickpocket, Berserk, Moxie, Shield Dust, Bad Dreams) and the moves and items they meet (contact and
+-- multi-hit moves, burns, paralyses and poisons, the item moves, Rocky Helmet, Life Orb, the Choice items, an empty hand): their events are
+-- rare in uniform random play.
+genAbilityTeams :: Dex -> Gen (Team, Team)
+genAbilityTeams dx = genTeamsK dx False False False True
+
+-- | 'genTeamsWith', with the slice 8c share of guard abilities, items and moves when 'guardHeavy' is set and the slice 8d share of on-hit
+-- abilities when 'abilityHeavy' is.
+genTeamsK :: Dex -> Bool -> Bool -> Bool -> Bool -> Gen (Team, Team)
+genTeamsK dx pivotHeavy statHeavy guardHeavy abilityHeavy = (,) <$> genTeam <*> genTeam
   where
     -- slice 8c (used only when guardHeavy)
     guardAbilities = [a | a <- ["goodasgold", "waterabsorb", "levitate", "sturdy", "magicguard", "poisonheal", "sapsipper", "soundproof", "bulletproof", "sweetveil", "shellarmor"], a `elem` abilities]
@@ -114,13 +124,19 @@ genTeamsK dx pivotHeavy statHeavy guardHeavy = (,) <$> genTeam <*> genTeam
                         , "stickyweb", "partingshot", "knockoff", "suckerpunch", "crunch", "bite", "darkpulse", "tackle", "doubleironbash", "bulletseed", "uturn", "roar", "dragontail"
                         , "substitute", "sandattack", "doubleteam", "minimize", "agility", "shellsmash", "curse"], m `elem` moves]
     pickMove
+      | abilityHeavy && not (null kit8d) = Gen.frequency [(5, Gen.element kit8d), (3, Gen.element moves)]
       | pivotHeavy && not (null step4Kits) && not (null pivots) && not (null dragKit) =
           Gen.frequency ([(3, Gen.element pivots), (3, Gen.element dragKit), (2, Gen.element moves)] ++ step4Kits)
       | pivotHeavy && not (null pivots) && not (null dragKit) = Gen.frequency [(3, Gen.element pivots), (3, Gen.element dragKit), (2, Gen.element moves)]
       | pivotHeavy && not (null pivots) = Gen.frequency [(3, Gen.element pivots), (2, Gen.element moves)]
       | otherwise = Gen.element moves
+    -- slice 8d: the moves the abilities of the phase meet
+    kit8d = [m | m <- [ "doublehit", "armthrust", "furyswipes", "bulletseed", "pinmissile", "scald", "nuzzle", "flamethrower", "thunderbolt", "sludgebomb"
+                      , "toxic", "willowisp", "thunderwave", "toxicspikes", "knockoff", "thief", "trick", "uturn", "recover", "closecombat", "earthquake"
+                      , "tackle", "bodyslam", "suckerpunch" ], m `elem` moves]
     -- Rocky Helmet, and the two items that switch their holder out or force the attacker out (slice 6c)
     pickItem
+      | abilityHeavy = Gen.frequency [(3, Gen.element (filter (`elem` items) ["rockyhelmet", "lifeorb", "leftovers", "choiceband", "choicescarf", "flameorb", "toxicorb", ""])), (2, Gen.element items)]
       | pivotHeavy && not (null switchItems) && not (null choiceItems) =
           Gen.frequency [(8, Gen.element switchItems), (4, Gen.element ("rockyhelmet" : switchItems)), (4, Gen.element items), (4, Gen.element choiceItems), (2, Gen.element ("assaultvest" : choiceItems))]
       | pivotHeavy && not (null switchItems) = Gen.frequency [(4, Gen.element switchItems), (2, Gen.element ("rockyhelmet" : switchItems)), (2, Gen.element items)]
@@ -133,11 +149,14 @@ genTeamsK dx pivotHeavy statHeavy guardHeavy = (,) <$> genTeam <*> genTeam
     pickAbility
       -- slice 8a: the stage and switch-in abilities, on most sets of the 'genStatTeams' teams
       | statHeavy && not (null statAbilities) = Gen.frequency [(1, Gen.element abilities), (3, Gen.element statAbilities)]
+      | abilityHeavy && not (null abilities8d) = Gen.frequency [(5, Gen.element abilities8d), (1, Gen.element abilities)]
       -- slice 8b: the damage abilities join the pivot-heavy mix, where Supreme Overlord meets switch-ins after faints and Flash Fire meets
       -- the switch-outs that end its volatile
       | pivotHeavy && not (null switchAbilities) && not (null damageAbilities) = Gen.frequency [(3, Gen.element switchAbilities), (3, Gen.element damageAbilities), (3, Gen.element abilities)]
       | pivotHeavy && not (null switchAbilities) = Gen.frequency [(3, Gen.element switchAbilities), (3, Gen.element abilities)]
       | otherwise = Gen.element abilities
+    -- slice 8d
+    abilities8d = [a | a <- ["flamebody", "static", "roughskin", "toxicchain", "synchronize", "magician", "pickpocket", "berserk", "moxie", "shielddust", "baddreams"], a `elem` abilities]
     switchAbilities = [a | a <- ["regenerator", "naturalcure"], a `elem` abilities]
     -- slice 8a
     statAbilities = [a | a <- ["intimidate", "dauntlessshield", "defiant", "contrary", "clearbody", "guarddog", "innerfocus", "bigpecks", "mirrorarmor", "keeneye", "weakarmor", "justified", "gooey", "speedboost"], a `elem` abilities]
@@ -152,7 +171,7 @@ genTeamsK dx pivotHeavy statHeavy guardHeavy = (,) <$> genTeam <*> genTeam
     -- every real type, and Stellar, which a quarter of the sets take (its rules are the rarest to reach at random)
     teraTypes = [t | t <- V.toList (dxTypeNames dx), t `notElem` ["Stellar", "???"]]
     genTeam = do
-      n <- Gen.int (Range.linear 1 6)
+      n <- if abilityHeavy then Gen.int (Range.linear 1 3) else Gen.int (Range.linear 1 6)
       sets <- Gen.list (Range.singleton n) genSet
       either (\e -> error ("genTeams: parseTeam rejected a generated team: " ++ e)) pure
         (parseTeam dx (toJSONArray sets))
@@ -161,7 +180,8 @@ genTeamsK dx pivotHeavy statHeavy guardHeavy = (,) <$> genTeam <*> genTeam
       sp <- pickSpecies
       ms <- nub <$> Gen.list (Range.linear 1 4) (if guardHeavy then move8c else pickMove)
       nat <- Gen.element natures
-      lvl <- Gen.int (Range.linear 1 100)
+      -- (slice 8d: mostly level 100 for the ability-heavy teams, so that a Moxie or Berserk holder's hits take foes down)
+      lvl <- if abilityHeavy then Gen.frequency [(3, pure 100), (1, Gen.int (Range.linear 1 100))] else Gen.int (Range.linear 1 100)
       evs <- Gen.list (Range.singleton 6) (Gen.int (Range.linear 0 252))
       ab <- if guardHeavy then ability8c else pickAbility
       it <- if guardHeavy then item8c else pickItem
@@ -267,6 +287,13 @@ data Seen = Seen
   -- ^ a Magic Guard holder with burn, poison or toxic that went through a step in play
   , seenAbsorbed :: !Int
   -- ^ a Water Absorb holder that is in play before and after the step with more HP
+  -- slice 8d
+  , seenMoxie :: !Int
+  -- ^ a Moxie holder in play before and after the step, with HP after it, whose Attack stage rose in a step where the foe in play before it fainted
+  , seenThief :: !Int
+  -- ^ a Magician or Pickpocket holder with no item before the step and an item after it
+  , seenBerserk :: !Int
+  -- ^ a Berserk holder in play before and after the step, with HP after it, that lost HP and whose Special Attack stage rose
   }
   deriving (Eq, Show)
 
@@ -302,6 +329,10 @@ instance Semigroup Seen where
       -- slice 8c
       , seenGuarded = f seenGuarded
       , seenAbsorbed = f seenAbsorbed
+      -- slice 8d
+      , seenMoxie = f seenMoxie
+      , seenThief = f seenThief
+      , seenBerserk = f seenBerserk
       }
     where
       f g = g x + g y
@@ -337,6 +368,10 @@ instance Monoid Seen where
       -- slice 8c
       , seenGuarded = 0
       , seenAbsorbed = 0
+      -- slice 8d
+      , seenMoxie = 0
+      , seenThief = 0
+      , seenBerserk = 0
       }
 
 -- | Play with random legal choices, checking every state on the way, until the battle ends (or the cap).
@@ -382,7 +417,7 @@ playChecked dx t1 t2 = startBattle dx t1 t2 >>= go 0 mempty
 -- could bring it back.
 -- Returns what the step went through.
 checkStep :: Dex -> Battle -> Battle -> (Maybe Choice, Maybe Choice) -> Either String Seen
-checkStep dx b b' (c1, c2) = (mappend stallSeen <$>) $ mapM_ one [(p, i) | (p, side) <- [(P1, bP1), (P2, bP2)], i <- [0 .. SV.length (sMons (side b)) - 1]] >> turnOk >> (((,) <$> drag (P1, c1) <*> drag (P2, c2)) >>= \ds -> pivotsOk ds >> switchOuts >>= \so -> pure (so <> mempty {seenDrags = length (filter id [fst ds, snd ds]), seenEncore = volatileAtRequest CEncore, seenTaunt = volatileAtRequest CTaunt, seenLocked = length lockedNow, seenLockStruggle = length (filter (mustStruggle b) lockedNow), seenMultiDisable = multiDisabled dx b'}))
+checkStep dx b b' (c1, c2) = (mappend (stallSeen <> seen8d) <$>) $ mapM_ one [(p, i) | (p, side) <- [(P1, bP1), (P2, bP2)], i <- [0 .. SV.length (sMons (side b)) - 1]] >> turnOk >> itemsNeverCreated >> (((,) <$> drag (P1, c1) <*> drag (P2, c2)) >>= \ds -> pivotsOk ds >> switchOuts >>= \so -> pure (so <> mempty {seenDrags = length (filter id [fst ds, snd ds]), seenEncore = volatileAtRequest CEncore, seenTaunt = volatileAtRequest CTaunt, seenLocked = length lockedNow, seenLockStruggle = length (filter (mustStruggle b) lockedNow), seenMultiDisable = multiDisabled dx b'}))
   where
     -- slice 7c: the step ended at a move request with an active Pokemon that has the volatile
     volatileAtRequest c = case request b' of
@@ -399,7 +434,12 @@ checkStep dx b b' (c1, c2) = (mappend stallSeen <$>) $ mapM_ one [(p, i) | (p, s
     knownMoves m = [mvId (dxMoves dx V.! msMove ms) | ms <- SV.toList (monMoves m)]
     inPlay = [monOf b (activeActor p b) | p <- [P1, P2], sHasActive (sideOf p b)]
     removers = ["knockoff", "thief", "trick", "switcheroo"]
+    -- (slice 8d: Magician and Pickpocket take an item too, but only a holder that was in play during the step: active at its start or at its
+    -- end, which includes one that came in during it (a pivot's replacement or a drag). A Pokemon that came in and left again inside one step
+    -- cannot be told from the two states, but a switch-in during a step ends it at the next request, and a drag leaves the dragged one in play.)
     stealing = any (any (`elem` removers) . knownMoves) inPlay
+      || or [ abilityIs "magician" m0 || abilityIs "pickpocket" m0 || abilityIs "magician" m1 || abilityIs "pickpocket" m1
+            | p <- [P1, P2], (m0, m1) <- zip (SV.toList (sMons (sideOf p b))) (SV.toList (sMons (sideOf p b'))), monActive m0 || monActive m1 ]
     -- (a later forced switch in the same step, a Roar after a Red Card, can bring the attacker back in)
     forcing = any (any (`elem` ["roar", "whirlwind", "dragontail", "circlethrow"]) . knownMoves) inPlay
     switchOuts = mconcat <$> mapM switchOut [(p, i) | p <- [P1, P2], i <- [0 .. SV.length (sMons (sideOf p b)) - 1]]
@@ -461,6 +501,23 @@ checkStep dx b b' (c1, c2) = (mappend stallSeen <$>) $ mapM_ one [(p, i) | (p, s
           }
       _ -> Right mempty
     isSwitch c = case c of Just (Switch _) -> True; _ -> False
+    -- slice 8d. Nothing supported creates an item: an item that a Pokemon holds after a step it held before the step, or a Pokemon of the
+    -- other side did (Trick, Thief, Magician and Pickpocket move items between the sides; Knock Off and the consumed items only remove them).
+    itemsNeverCreated = mapM_ itemOk [(p, i) | p <- [P1, P2], i <- [0 .. SV.length (sMons (side' p)) - 1]]
+    itemOk (p, i) = case (sMons (side0 p) SV.!? i, sMons (side' p) SV.!? i) of
+      (Just m0, Just m1)
+        | monItem m1 /= noItem && monItem m1 /= monItem m0 && monItem m1 `notElem` [monItem x | x <- SV.toList (sMons (side0 (otherP p)))] ->
+            Left (show p ++ " member " ++ show i ++ " holds " ++ show (itemId dx (monItem m1)) ++ " after a step in which neither it nor the other side had it")
+      _ -> Right ()
+    -- slice 8d: the three events the ability phase's covers count (see 'Seen')
+    seen8d = mempty
+      { seenMoxie = length [() | p <- [P1, P2], (m0, m1) <- pairs p, abilityIs "moxie" m0, monActive m0, monActive m1, monHp m1 > 0, bsAtk (monBoosts m1) > bsAtk (monBoosts m0), foeDown p]
+      , seenThief = length [() | p <- [P1, P2], (m0, m1) <- pairs p, abilityIs "magician" m0 || abilityIs "pickpocket" m0, monItem m0 == noItem, monItem m1 /= noItem]
+      , seenBerserk = length [() | p <- [P1, P2], (m0, m1) <- pairs p, abilityIs "berserk" m0, monActive m0, monActive m1, monHp m1 > 0, monHp m1 < monHp m0, bsSpa (monBoosts m1) > bsSpa (monBoosts m0)]
+      }
+    pairs p = zip (SV.toList (sMons (side0 p))) (SV.toList (sMons (side' p)))
+    -- the foe's Pokemon in play before the step had HP and has fainted after it
+    foeDown p = sHasActive (sideOf (otherP p) b) && let a = activeActor (otherP p) b in monHp (monOf b a) > 0 && monFainted (monOf b' a)
     subOf m = any (\(Volatile i _) -> i == fromEnum CSubstitute) (SV.toList (monVolatiles m))
     subHp m = sum [esA st | Volatile i st <- SV.toList (monVolatiles m), i == fromEnum CSubstitute]
     otherP p = if p == P1 then P2 else P1
@@ -547,6 +604,8 @@ checkBattle dx b = do
   case bActiveMove b of
     Nothing -> Right ()
     Just mu -> Left ("a move in use at a decision point: " ++ show mu)
+  -- slice 8d: the faint queue is resolved by the action tail, so it is empty at every decision point
+  if SV.null (bFaintQueue b) then Right () else Left ("a faint queue at a decision point: " ++ show (bFaintQueue b))
   conditions
   choiceLocks
   disableRules
@@ -759,6 +818,9 @@ checkBattle dx b = do
       -- or Residual event of the same action, used or not, and by the item's End on switch-out and faint. So no Pokemon, on the field or
       -- off it, has it set at a decision point
       if monItem m /= noItem && itemId dx (monItem m) == "ejectpack" && esA (monItemState m) /= -1 then bad "an Eject Pack with eject set at a decision point" else Right ()
+      -- slice 8d: Berserk's checkedBerserk (the ability state's esA) is a flag: -1 before its first Damage or AfterMoveSecondary event, then 0 or 1
+      if abilityId dx (monAbility m) == "berserk" && esA (monAbilityState m) `notElem` [-1, 0, 1]
+        then bad ("Berserk's checkedBerserk is " ++ show (esA (monAbilityState m))) else Right ()
       if monStatus m == StatusTox && (stage < 0 || stage > 15) then bad ("badly poisoned with stage " ++ show stage) else Right ()
       if monStatus m /= StatusTox && stage /= -1 && not (monFainted m && stage >= 0 && stage <= 15)
         then bad ("stage " ++ show stage ++ " with status " ++ show (monStatus m) ++ " on a live Pokemon") else Right ()

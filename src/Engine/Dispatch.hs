@@ -59,6 +59,8 @@ module Engine.Dispatch
   , moveCause
   , clampStage
   , trySetStatus
+  -- slice 8d
+  , trySetStatusFx
   , clearStatus
   , resolveFaints
   , endAbilityAndItem
@@ -85,7 +87,7 @@ import Engine.Damage (hasAbility, hasItemNamed, hasTypeNamed, ignoringAbility, i
 import Engine.Dex
 import Engine.Event
 import Engine.Modifier (baseMod, chainModify, modify)
-import Engine.Rule (BoostStat (..), MoveRule (..), StatusId (..))
+import Engine.Rule (BoostStat (..), Hits (..), MoveRule (..), Secondary (..), StatusId (..))
 import Engine.State
 import Engine.Stats (actionSpeed, boostedStat, parSpe)
 
@@ -215,9 +217,15 @@ addVolatileFx dx a c eff = do
 -- | @pokemon.trySetStatus(status)@ -> @setStatus(this.status || status)@ (pokemon.ts) of a Pokemon, with no
 -- ability or field effect: fails with no HP, off the field, with any status already (including the same
 -- one) or when the type is immune; otherwise sets the status and its fresh @statusState@ (toxic's @onStart@
--- sets the stage to 0). @SetStatus@ and @AfterSetStatus@ have no handlers (draw nothing).
+-- sets the stage to 0). @SetStatus@ and @AfterSetStatus@ run with the Pokemon itself as source and no effect (slice 8d: see 'trySetStatusFx').
 trySetStatus :: MonadChance m => Dex -> Actor -> StatusId -> Eng m Bool
-trySetStatus dx a st = do
+trySetStatus dx a st = trySetStatusFx dx a st Nothing Nothing
+
+-- | slice 8d. 'trySetStatus' with the source and the effect of @setStatus(status, source, sourceEffect)@ (pokemon.ts 1708-1771): the Pokemon
+-- that inflicts it and the effect it comes from (a move: 'moveCause'; an ability, item or condition: its key), which @SetStatus@ and
+-- @AfterSetStatus@ hand to their handlers. With no source @setStatus@ takes the Pokemon itself (pokemon.ts 1713: `if (!source) source = this`).
+trySetStatusFx :: MonadChance m => Dex -> Actor -> StatusId -> Maybe Actor -> Maybe EffectKey -> Eng m Bool
+trySetStatusFx dx a st msrc eff = do
   b <- get
   let m = monOf b a
       has = monStatus m `elem` [StatusBrn, StatusPar, StatusPsn, StatusTox, StatusFrz]
@@ -228,7 +236,7 @@ trySetStatus dx a st = do
     else runStatusImmunity dx a (statusKey st)
   -- `runEvent('SetStatus', this, source, sourceEffect, status)`: a falsy result fails (Misty Terrain, Leaf Guard, Electric
   -- Terrain's sleep). It runs before the state is created, and `AfterSetStatus` (no handler) after it.
-  ok <- if ok0 then relayTruthy <$> runEvent dx EvSetStatus a Nothing Nothing (RText (statusId st)) else pure False
+  ok <- if ok0 then relayTruthy <$> runEventEff dx eff EvSetStatus a (Just source) Nothing (RText (statusId st)) else pure False
   if not ok
     then pure False
     else do
@@ -237,8 +245,14 @@ trySetStatus dx a st = do
       order <- stateOrderFor a
       modify' (modifyMon a (\x -> x {monStatus = monStatusOf st, monStatusState = noEffectState {esOrder = order, esDuration = cnDuration (conditionOf dx (condOf st))}}))
       -- singleEvent('Start', status, statusState, this, source, sourceEffect): toxic's onStart sets the stage to 0
-      relayTruthy <$> singleEvent dx EvStart (EffectKey EffStatus (fromEnum (condOf st))) (OwnMon a) Nothing Nothing RNone
+      started <- relayTruthy <$> singleEvent dx EvStart (EffectKey EffStatus (fromEnum (condOf st))) (OwnMon a) Nothing Nothing RNone
+      -- slice 8d, pokemon.ts 1768: `runEvent('AfterSetStatus', this, source, sourceEffect, status)` (Synchronize); a falsy result fails the call, but
+      -- the status is already set. (Showdown's Start failing restores the previous status, which the engine's Start handlers never do.)
+      if started
+        then relayTruthy <$> runEventEff dx eff EvAfterSetStatus a (Just source) Nothing (RText (statusId st))
+        else pure False
   where
+    source = fromMaybe a msrc
     statusId s = case s of
       Brn -> "brn"
       Par -> "par"
@@ -1443,7 +1457,8 @@ runNative dx n c relay = do
     -- and Fury) are not accepted; Outrage's lockedmove reset is not modelled.
     NProtectTryHit -> protectBlock Nothing
     NSpikyShieldTryHit -> protectBlock (Just (\src srcM -> void (damageMon dx src (Just holder) Nothing (Just (cKey c)) (max 1 (monMaxHp srcM `quot` 8)))))
-    NBanefulBunkerTryHit -> protectBlock (Just (\src _ -> void (trySetStatus dx src Psn)))
+    -- (slice 8d: `source.trySetStatus('psn', target)`: the holder is the source and the volatile the effect, which Synchronize reads)
+    NBanefulBunkerTryHit -> protectBlock (Just (\src _ -> void (trySetStatusFx dx src Psn (Just holder) (Just (cKey c)))))
     NInertZMaxHit -> keep
     -- endure.condition.onDamage(damage, target, source, effect): `if (effect?.effectType === 'Move' && damage >= target.hp)` the
     -- damage becomes `target.hp - 1` (data/moves.ts 4834-4839)
@@ -1545,8 +1560,9 @@ runNative dx n c relay = do
           void (damageMon dx src (Just holder) Nothing (Just (cKey c)) (max 1 (monMaxHp (monOf b src) `quot` 6))) >> keep
         _ -> keep
     -- flameorb, toxicorb .onResidual: pokemon.trySetStatus('brn' / 'tox', pokemon)
-    NFlameOrb -> void (trySetStatus dx holder Brn) >> keep
-    NToxicOrb -> void (trySetStatus dx holder Tox) >> keep
+    -- (slice 8d: the holder is its own source, so Synchronize does not answer; the effect is the item)
+    NFlameOrb -> void (trySetStatusFx dx holder Brn (Just holder) (Just (cKey c))) >> keep
+    NToxicOrb -> void (trySetStatusFx dx holder Tox (Just holder) (Just (cKey c))) >> keep
     -- assaultvest.onDisableMove: every Status move except Me First is disabled (pokemon.disableMove)
     NAssaultVestDisable -> do
       modify' (modifyMon holder (\x -> x {monMoves = SV.map disableStatus (monMoves x)}))
@@ -1623,7 +1639,10 @@ runNative dx n c relay = do
       | hasTypeNamed dx "Steel" m || boots -> keep
       | otherwise -> do
           layers <- getLayers
-          void (trySetStatus dx holder (if layers >= 2 then Tox else Psn))
+          -- (slice 8d: the source is the foe's active Pokemon and the effect Toxic Spikes, which Synchronize reads: `effect?.id === 'toxicspikes'`)
+          let Actor hp' _ = holder
+          b' <- get
+          void (trySetStatusFx dx holder (if layers >= 2 then Tox else Psn) (Just (activeActor (other hp') b')) (Just (cKey c)))
           keep
     -- stickyweb.onSwitchIn(pokemon): `if (!pokemon.isGrounded() || pokemon.hasItem('heavydutyboots')) return;`, then
     -- this.boost({spe: -1}, pokemon, foe.active[0], stickyweb)
@@ -2172,6 +2191,125 @@ runNative dx n c relay = do
              in if null zeroed then keep else returning (Replace (RBoosts [(s, if s `elem` zeroed then 0 else v) | (s, v) <- table]))
       _ -> keep
       where pokemon = cTarget c
+    -- slice 8d. flamebody, static .onDamagingHit(damage, target, source, move) (data/abilities.ts 1280-1290, 4094-4104): `if
+    -- (this.checkMoveMakesContact(move, source, target))` then `if (this.randomChance(3, 10)) source.trySetStatus('brn' / 'par', target)`. The
+    -- draw is made for every contact hit, whatever the attacker's state (a fainted, already statused or immune one included): only the
+    -- status is conditional. (Protective Pads, the other half of checkMoveMakesContact, is not accepted.) The holder is the defender
+    NFlameBodyDamagingHit -> contactStatus Brn
+    NStaticDamagingHit -> contactStatus Par
+    -- roughskin.onDamagingHit (order 1, so it runs before every other DamagingHit handler of the target): a contact move ->
+    -- this.damage(source.baseMaxhp / 8, source, target), by the ability
+    -- LATENT(8c): Magic Guard does not stop it yet (the Damage event's effect is an Ability, so Magic Guard would).
+    NRoughSkinDamagingHit -> do
+      b <- get
+      case (cMove c, cSource c) of
+        (Just mv, Just src) | mrContact (mvRule mv) ->
+          void (damageMon dx src (Just holder) Nothing (Just (cKey c)) (max 1 (monMaxHp (monOf b src) `quot` 8))) >> keep
+        _ -> keep
+    -- toxicchain.onSourceDamagingHit(damage, target, source, move): the holder is the attacker (the event's source) and the target is
+    -- the defender, the foe in singles. `if (target.hasAbility('shielddust') || target.hasItem('covertcloak')) return;` (no draw), then
+    -- `if (this.randomChance(3, 10)) target.trySetStatus('tox', source)`. It needs no contact and no move category.
+    -- LATENT(8f): hasAbility is not changed by Mold Breaker (only the handler of a breakable ability is), so a Mold Breaker attacker does
+    -- not get past Shield Dust here, as in Showdown; 8f need not touch this.
+    NToxicChainDamagingHit -> do
+      b <- get
+      let Actor hp' _ = holder
+          target = activeActor (other hp') b
+      unless (hasAbility dx b target "shielddust" || hasItemNamed dx "covertcloak" (monOf b target)) $ do
+        hit <- randomChance 3 10
+        when hit (void (trySetStatusFx dx target Tox (Just holder) (Just (cKey c))))
+      keep
+    -- baddreams.onResidual(pokemon) (data/abilities.ts 320-333): `if (!pokemon.hp) return; for (const target of pokemon.foes())`, a foe that is
+    -- asleep (`status === 'slp'`) or has Comatose takes this.damage(target.baseMaxhp / 8, target, pokemon)
+    -- LATENT(sleep): sleep is not modelled (no Pokemon can be asleep), so only Comatose, which no supported species has, can satisfy it.
+    NBadDreamsResidual -> do
+      b <- get
+      let Actor hp' _ = holder
+          foe = activeActor (other hp') b
+          fm = monOf b foe
+          asleep = False -- LATENT(sleep): `target.status === 'slp'`
+      when (monHp m > 0 && monHp fm > 0 && monActive fm && (asleep || hasAbility dx b foe "comatose")) $
+        void (damageMon dx foe (Just holder) Nothing (Just (cKey c)) (max 1 (monMaxHp fm `quot` 8)))
+      keep
+    -- synchronize.onAfterSetStatus(status, target, source, effect) (data/abilities.ts 4044-4056): the holder (target) was statused by another Pokemon,
+    -- not by Toxic Spikes, and not with sleep or freeze: `source.trySetStatus(status, target, {status: status.id, id: 'synchronize'})`.
+    -- The fake effect only ever shows in the log lines of the status-blocking handlers, so none is passed; a source that already has a
+    -- status fails at once, which ends a mutual Synchronize.
+    NSynchronizeAfterSetStatus -> do
+      let toxicSpikes = [EffectKey EffSideCond i | Just i <- [M.lookup "toxicspikes" (dxFieldIx dx)]]
+      case (cSource c, relay) of
+        (Just src, RText st)
+          | src /= holder
+          , maybe True (`notElem` toxicSpikes) (cEffect c)
+          , Just status <- lookup st [("brn", Brn), ("par", Par), ("psn", Psn), ("tox", Tox)] ->
+              void (trySetStatusFx dx src status (Just holder) Nothing) >> keep
+        _ -> keep
+    -- magician.onAfterMoveSecondarySelf(source, target, move) (data/abilities.ts 2397-2420): the holder is the user, and `target` the event's source.
+    -- Returns for a user that is forced out (`switchFlag === true`), or holds an item (or a gem: LATENT, no gem is supported), or for Fling or a Status
+    -- move. `move.hitTargets` is the targets the move got through to, the one target in singles whenever this event runs (a move that
+    -- fails earlier never reaches it). The target's item goes through takeItem(source) (Sticky Hold, Unburden, Booster Energy ask),
+    -- then setItem on the user; if that fails the item is put back by plain assignment. Only a target that gave its item ends the loop.
+    NMagicianAfterMoveSecondarySelf -> case (cSource c, cMove c) of
+      (Just target, Just mv)
+        | monSwitchFlag m /= SwitchForced, monItem m == noItem, mvId mv /= "fling", not (mvStatus mv), target /= holder -> do
+            taken <- takeItem dx target (Just holder)
+            case taken of
+              Took ix -> do
+                placed <- setItem dx holder ix
+                unless placed (restoreItem target taken)
+              _ -> pure ()
+            keep
+      _ -> keep
+    -- pickpocket.onAfterMoveSecondary(target, source, move) (data/abilities.ts 3241-3260): the holder is the target and `source` the attacker. A
+    -- contact move; returns if the holder has an item, is switching or being forced out, or the attacker is forced out
+    -- (`switchFlag === true`). `source.takeItem(target)`, then `target.setItem(yourItem)`, else the item goes back to the attacker.
+    NPickpocketAfterMoveSecondary -> case (cSource c, cMove c) of
+      (Just src, Just mv)
+        | src /= holder, mrContact (mvRule mv)
+        , monItem m == noItem, monSwitchFlag m == NoSwitch, not (monForceSwitchFlag m), monSwitchFlag (monOf b0 src) /= SwitchForced -> do
+            taken <- takeItem dx src (Just holder)
+            case taken of
+              Took ix -> do
+                placed <- setItem dx holder ix
+                unless placed (restoreItem src taken)
+              _ -> pure ()
+            keep
+      _ -> keep
+    -- berserk.onDamage(damage, target, source, effect) (data/abilities.ts 140-148): `checkedBerserk = !(effect.effectType === "Move" &&
+    -- !effect.multihit && !this.suppressingSecondaries())`, stored in the ability state's esA (1, 0; -1 before the first). It runs for every
+    -- damage the holder takes. LATENT: suppressingSecondaries is Sheer Force's, which is not supported.
+    NBerserkDamage -> do
+      let singleMove = case (cEffect c, cMove c) of
+            (Just (EffectKey EffMove _), Just mv) -> mrHits (mvRule mv) == OneHit
+            _ -> False
+      setState c (\st -> st {esA = if singleMove then 0 else 1})
+      keep
+    -- berserk.onAfterMoveSecondary(target, source, move) (data/abilities.ts 158-171): `checkedBerserk = true`; then for another Pokemon's move that
+    -- did damage and left the holder alive, `damage` is the move's total damage when it hit several times (`move.multihit`), else the damage of the
+    -- last hit it took (`getLastAttackedBy().damage`, pushed by the hit loop just before this event): both are the move's total here, which
+    -- the event's relay carries ('Engine.Turn.hitLoop'). A holder at or below half HP that was above it before the damage gets spa +1 (boost
+    -- from itself, effect Berserk).
+    -- LATENT(8c): Sturdy and Endure-like survivals change the damage, and so the HP before it, through the same total.
+    NBerserkAfterMoveSecondary -> do
+      setState c (\st -> st {esA = 1})
+      case (cSource c, relay) of
+        (Just src, RInt total)
+          | src /= holder, monHp m > 0, total > 0
+          , monHp m * 2 <= monMaxHp m, (monHp m + total) * 2 > monMaxHp m ->
+              void (boostMon dx (Just holder) Nothing (Just (cKey c)) holder [(BSpa, 1)])
+        _ -> pure ()
+      keep
+    -- moxie.onSourceAfterFaint(length, target, source, effect) (data/abilities.ts 2744-2750): `if (effect?.effectType === 'Move') this.boost({atk:
+    -- length}, source)`; the holder is the source and the effect arrives as 'cEffect' ('Engine.Dispatch.resolveFaints'). The boost is the ability's.
+    NMoxieAfterFaint -> case (cEffect c, relay) of
+      (Just (EffectKey EffMove _), RInt len) -> void (boostMon dx (Just holder) Nothing (Just (cKey c)) holder [(BAtk, len)]) >> keep
+      _ -> keep
+    -- shielddust.onModifySecondaries(secondaries) (data/abilities.ts 4231-4234): `secondaries.filter(effect => !!effect.self)`, so only the
+    -- secondaries with a self effect stay (and draw).
+    -- LATENT(8f): Shield Dust is `breakable`: Mold Breaker's suppression is the dispatcher's gate ('skipped'), not written here.
+    NShieldDustModifySecondaries -> case relay of
+      RSecondaries ss -> returning (Replace (RSecondaries (filter (not . null . secSelf) ss)))
+      _ -> keep
   where
     -- slice 8a: `source && target === source` of the TryBoost handlers: a boost the holder causes itself (Guard Dog's, Weak Armor's)
     selfCaused ctx = cSource ctx == Just (cHolder ctx)
@@ -2181,6 +2319,13 @@ runNative dx n c relay = do
       _ -> False
     -- vesselofruin: `move.ruinedSpA` names the holder; the slot is the side and the original position
     ruinSlot (Actor p o) = playerIx p * 6 + o
+    -- flamebody, static: a contact move and a 3 in 10 draw, then the attacker's status (effect: the ability, source: the holder)
+    contactStatus st = case (cMove c, cSource c) of
+      (Just mv, Just src) | mrContact (mvRule mv) -> do
+        hit <- randomChance 3 10
+        when hit (void (trySetStatusFx dx src st (Just (cHolder c)) (Just (cKey c))))
+        pure (Res Keep (cMod c))
+      _ -> pure (Res Keep (cMod c))
     -- the `eject` key of the holder's item state ('esA': 1 set, -1 absent)
     ejectSet mm = esA (monItemState mm) == 1
     -- a no-op when the state is gone (the item was used up or lost)
@@ -2415,7 +2560,7 @@ moveOwnHit dx user target mv = case moveSpec mv POwn EvHit >>= hsBody of
   -- at least 1, with no Damage event (battle.ts 2216-2240: directDamage never runs spreadDamage). onTryHit has kept a user at or under a quarter
   -- of its HP (and a Shedinja) out of here.
   Just (BNative NSubstituteHit) -> do
-    modify' (\b -> let t = monOf b target in applyDamage target (max 1 (monMaxHp t `quot` 4)) b)
+    modify' (\b -> let t = monOf b target in applyDamage target (Just user) moveCause (max 1 (monMaxHp t `quot` 4)) b)
     pure (HitOk, mv)
   _ -> (\r -> (r, mv)) <$> moveOwnHitResult dx user target mv
 
@@ -2943,16 +3088,17 @@ damageMon dx target source mv cause amount0 = do
                 Just v -> do
                   let requested = if v == 0 then 0 else max 1 v
                       dealt = min requested (monHp m)
-                  modify' (applyDamage target requested)
+                  modify' (applyDamage target source cause requested)
                   pure (Just dealt)
 
--- | @Pokemon.damage@ / @faint@: reduce HP and queue the faint when it reaches zero.
-applyDamage :: Actor -> Int -> Battle -> Battle
-applyDamage a d b
+-- | @Pokemon.damage(d, source, effect)@ / @faint(source, effect)@: reduce HP and queue the faint, with that source and effect, when it reaches zero
+-- (a Pokemon already fainted or queued is not queued again, pokemon.ts 1604).
+applyDamage :: Actor -> Maybe Actor -> Maybe EffectKey -> Int -> Battle -> Battle
+applyDamage a src eff d b
   | monHp m <= 0 || d <= 0 = b
   | monHp m - d <= 0 =
       (modifyMon a (\x -> x {monHp = 0, monSwitchFlag = NoSwitch, monFaintQueued = True}) b)
-        {bFaintQueue = if monFainted m || monFaintQueued m then bFaintQueue b else SV.snoc (bFaintQueue b) a}
+        {bFaintQueue = if monFainted m || monFaintQueued m then bFaintQueue b else SV.snoc (bFaintQueue b) (FaintEntry a src eff)}
   | otherwise = modifyMon a (\x -> x {monHp = monHp x - d}) b
   where
     m = monOf b a
@@ -2965,7 +3111,8 @@ resolveFaints dx checkWinIfNoFaints checkWin' = do
   when (bResult b == Ongoing) $
     case SV.toList (bFaintQueue b) of
       [] -> when checkWinIfNoFaints (void (checkWin Nothing))
-      q -> do
+      entries -> do
+        let q = map feTarget entries
         -- LATENT: faints queued while this loop runs (battle.ts ~2626, which forces checkWin) need a Faint
         -- event handler (Destiny Bond, ...); nothing queues a faint here.
         forM_ q $ \a@(Actor p _) -> do
@@ -2987,9 +3134,17 @@ resolveFaints dx checkWinIfNoFaints checkWin' = do
               , monTerastallized = False -- delete pokemon.terastallized (battle.ts 2617)
               }))
         modify' (\bb -> bb {bFaintQueue = SV.empty})
-        case reverse q of
-          (lastFaint : _) | checkWin' -> void (checkWin (Just lastFaint))
-          _ -> pure ()
+        ended <- case reverse q of
+          (lastFaint : _) | checkWin' -> checkWin (Just lastFaint)
+          _ -> pure False
+        -- slice 8d, battle.ts 2652-2656: `if (checkWin && this.checkWin(faintData)) return true; if (faintData && length)
+        -- this.runEvent('AfterFaint', faintData.target, faintData.source, faintData.effect, length)`. `faintData` is the last entry of the
+        -- queue and `length` the queue's length when the loop began.
+        unless ended $ forM_ (lastMaybe entries) $ \fd ->
+          void (runEventEff dx (feEffect fd) EvAfterFaint (feTarget fd) (feSource fd) Nothing (RInt (length entries)))
+
+lastMaybe :: [a] -> Maybe a
+lastMaybe xs = case reverse xs of (x : _) -> Just x; [] -> Nothing
 
 -- | The formeRegression branch of the faint path (battle.ts 2607-2611, 2618-2623) and @clearVolatile@'s @ability = baseAbility@
 -- and @setSpecies(baseSpecies)@ (pokemon.ts 1544, 1581), for a Pokemon that fainted. A Pokemon in a Tera forme (a battle-only

@@ -120,6 +120,9 @@ main = do
             withTests (fromIntegral nCover) (immunityAbilities dex))
         , ("Shell Armor: a move deals no more to its holder than to a Pokemon with no ability, whatever the crit roll, and draws the same",
             withTests (fromIntegral nCover) (shellArmor dex))
+        -- slice 8d
+        , ("random playouts over small teams heavy in Flame Body, Static, Rough Skin, Toxic Chain, Synchronize, Magician, Pickpocket, Berserk, Moxie, Shield Dust and Bad Dreams keep the invariants, and no item is ever created",
+            withTests (fromIntegral nCover) (abilityPlayouts dex))
         ]
     , checkSequential $ Group "arithmetic (against JavaScript semantics)"
         [ ("roundDiv is Math.round(n / d)", withTests (fromIntegral n) propRoundDiv)
@@ -194,6 +197,24 @@ statPlayouts dex = property $ do
       cover 5 "a Dauntless Shield holder spent its boost" (seenShieldBoost seen > 0)
       cover 5 "an Intimidate holder switched in" (seenIntimidateIn seen > 0)
       cover 10 "a holder of Clear Body, Guard Dog, Inner Focus, Big Pecks, Mirror Armor, Defiant or Contrary ended a step with a stage change" (seenDropAbility seen > 0)
+      case request b of
+        Finished _ -> success
+        Awaiting {} -> footnote "playout ended without a result" >> failure
+
+-- | slice 8d. 'playouts' over 'genAbilityTeams': the invariants of 'checkBattle' (Berserk's flag among them) and 'checkStep' (no step creates an
+-- item: Magician, Pickpocket, Thief and Trick only move them) at every state and step. The covers keep the generator reaching the events of
+-- the abilities: a Moxie holder boosted after a knockout, an item taken by Magician or Pickpocket (or Thief, Trick) into an empty hand, and a
+-- Berserk holder that lost HP and had its Special Attack rise.
+abilityPlayouts :: Dex -> Property
+abilityPlayouts dex = property $ do
+  (t1, t2) <- forAll (genAbilityTeams dex)
+  seed <- forAll (Gen.word64 Range.linearBounded)
+  case fst (runSample (mkSMGen seed) (playChecked dex t1 t2)) of
+    Left e -> footnote e >> failure
+    Right (b, seen) -> do
+      cover 1 "a Moxie holder's Attack rose in a step where the foe fainted" (seenMoxie seen > 0)
+      cover 1 "a Magician or Pickpocket holder with no item had one after the step" (seenThief seen > 0)
+      cover 2 "a Berserk holder lost HP and its Special Attack rose" (seenBerserk seen > 0)
       case request b of
         Finished _ -> success
         Awaiting {} -> footnote "playout ended without a result" >> failure
