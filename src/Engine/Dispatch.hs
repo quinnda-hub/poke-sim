@@ -1888,7 +1888,125 @@ runNative dx n c relay = do
           modify' (modifyMon holder (\x -> x {monAbilityState = (monAbilityState x) {esA = 1}}))
           void (boostMon dx Nothing Nothing (Just (cKey c)) holder [(BSpe, 1)]) >> keep
       | otherwise -> keep
+    -- slice 8a. The boost abilities. Each `this.boost(...)` of a handler runs inside an event, so Showdown fills the arguments it leaves
+    -- null from `this.event` (battle.ts 2044-2048): the target and source of the running event, and the effect, which is the
+    -- running ability (`this.effect`). The handler's own call passes them explicitly except where noted.
+    -- LATENT(8b): Unaware reads the stages these handlers change (it ignores the foe's boosts in the damage and accuracy steps).
+    -- LATENT(8f): Mold Breaker, Teravolt and Turboblaze suppress the `breakable` ones (Contrary, Clear Body, Big Pecks, Keen Eye, Inner Focus, Guard Dog,
+    -- Mirror Armor) through 'skipped' and 'suppressingAbility', which read the move in use: a drag-in after Roar sees that move still active
+    -- (battle.ts 2863-2875), so its Intimidate has the Roar user's `ignoreAbility` against the foe's breakable ability.
+    -- LATENT(8f): Magic Bounce reflects moves only (the `reflectable` flag), so it never meets Intimidate; Parting Shot is reflectable, and its
+    -- boost then runs against the user (see 'moveOwnHit').
+    -- intimidate.onStart(pokemon) (abilities.ts 1759-1776): for each adjacent foe (`side.foes()`: the foe's active Pokemon with HP),
+    -- a Substitute makes it immune (`-immune`), else `this.boost({atk: -1}, target, pokemon, null, true)`. The effect is Intimidate
+    -- itself (`effect.name === 'Intimidate'` is what Guard Dog and Inner Focus read).
+    NIntimidateStart -> do
+      b <- get
+      let foe = activeActor (other (playerOf holder)) b
+          fm = monOf b foe
+      when (sHasActive (sideOf (other (playerOf holder)) b) && monHp fm > 0 && isNothing (effectState fm (EffectKey EffVolatile (fromEnum CSubstitute)))) $
+        void (boostMon dx (Just holder) Nothing (Just (cKey c)) foe [(BAtk, -1)])
+      keep
+    -- dauntlessshield.onStart(pokemon): `if (pokemon.shieldBoost) return; pokemon.shieldBoost = true; this.boost({def: 1}, pokemon)`;
+    -- the event (SwitchIn through fieldEvent) has no source
+    NDauntlessShieldStart
+      | monShieldBoost m -> keep
+      | otherwise -> do
+          modify' (modifyMon holder (\x -> x {monShieldBoost = True}))
+          void (boostMon dx Nothing Nothing (Just (cKey c)) holder [(BDef, 1)])
+          keep
+    -- defiant.onAfterEachBoost(boost, target, source, effect): `if (!source || target.isAlly(source)) return;` then any negative stat of
+    -- `boost` (the one stat just changed) gives `this.boost({atk: 2}, target, target, null, false, true)`. The move in use stays what it was
+    NDefiantAfterEachBoost
+      | RBoosts t <- relay, Just src <- cSource c, playerOf src /= playerOf holder, any ((< 0) . snd) t -> do
+          void (boostMon dx (Just holder) (cMove c) (Just (cKey c)) holder [(BAtk, 2)])
+          keep
+      | otherwise -> keep
+    -- contrary.onChangeBoost(boost, target, source, effect): `if (effect?.id === 'zpower') return;` then every change is negated
+    -- (LATENT(8f): Mold Breaker suppresses it through the breakable gate)
+    NContraryChangeBoost
+      | RBoosts t <- relay -> returning (Replace (RBoosts [(st, negate v) | (st, v) <- t]))
+      | otherwise -> keep
+    -- clearbody.onTryBoost(boost, target, source, effect): `if (source && target === source) return;` then every negative stat is deleted
+    -- (the `-fail` line is the only use of `effect.secondaries` and `octolock`)
+    NClearBodyTryBoost
+      | RBoosts t <- relay, not (selfCaused c) -> returning (Replace (RBoosts (filter ((>= 0) . snd) t)))
+      | otherwise -> keep
+    -- bigpecks.onTryBoost: the same for a negative Defense; keeneye.onTryBoost: for a negative accuracy
+    NBigPecksTryBoost
+      | RBoosts t <- relay, not (selfCaused c) -> returning (Replace (RBoosts (filter (\(st, v) -> st /= BDef || v >= 0) t)))
+      | otherwise -> keep
+    NKeenEyeTryBoost
+      | RBoosts t <- relay, not (selfCaused c) -> returning (Replace (RBoosts (filter (\(st, v) -> st /= BAccuracy || v >= 0) t)))
+      | otherwise -> keep
+    -- keeneye.onModifyMove(move): `move.ignoreEvasion = true` (the edit 'MEIgnoreEvasion')
+    NKeenEyeModifyMove -> returning (Replace (RMoveEdits ((case relay of RMoveEdits es -> es; _ -> []) ++ [MEIgnoreEvasion])))
+    -- innerfocus.onTryBoost: `effect.name === 'Intimidate' && boost.atk` deletes the Attack drop; onTryAddVolatile: `status.id === 'flinch'`
+    -- returns null
+    NInnerFocusTryBoost
+      | RBoosts t <- relay, byAbility c "intimidate", any ((== BAtk) . fst) t -> returning (Replace (RBoosts (filter ((/= BAtk) . fst) t)))
+      | otherwise -> keep
+    NInnerFocusTryAddVolatile -> if relay == RText "flinch" then returning stop else keep
+    -- guarddog.onTryBoost(boost, target, source, effect) (priority 2): `effect.name === 'Intimidate' && boost.atk` deletes the drop, then
+    -- `this.boost({atk: 1}, target, target, null, false, true)`. `boost.atk` is a truthiness test (data/abilities.ts 1736): `getCappedBoost`
+    -- keeps a stat whose change caps to 0 (pokemon.ts 1236-1237, a holder at -6), and so does 'boostMon', so the value is tested, not the key
+    NGuardDogTryBoost
+      | RBoosts t <- relay, byAbility c "intimidate", any (\(st, v) -> st == BAtk && v /= 0) t -> do
+          void (boostMon dx (Just holder) (cMove c) (Just (cKey c)) holder [(BAtk, 1)])
+          returning (Replace (RBoosts (filter ((/= BAtk) . fst) t)))
+      | otherwise -> keep
+    -- guarddog.onDragOut (priority 1): `-activate`, `return null`. The null is falsy but is not `false`, which makes `forceSwitch` end
+    -- without failing a Status move (battle-actions.ts 1419-1423): the same here, where a falsy result sets no flag
+    NGuardDogDragOut -> returning stop
+    -- mirrorarmor.onTryBoost(boost, target, source, effect) (abilities.ts): `if (!source || target === source || !boost || effect.name ===
+    -- 'Mirror Armor') return;` then, for each stat of the table in order, a negative one (unless the holder is at -6) is deleted and, if
+    -- the source still has HP, reflected: `this.boost(negativeBoost, source, target, null, true)` runs at once, inside this loop
+    NMirrorArmorTryBoost
+      | RBoosts t <- relay, Just src <- cSource c, src /= holder, not (byAbility c "mirrorarmor") -> do
+          let reflect [] = pure []
+              reflect (e@(st, v) : rest)
+                | v >= 0 = (e :) <$> reflect rest
+                | otherwise = do
+                    bb <- get
+                    if boostOf st (monBoosts (monOf bb holder)) == -6
+                      then (e :) <$> reflect rest
+                      else do
+                        when (monHp (monOf bb src) > 0) (void (boostMon dx (Just holder) (cMove c) (Just (cKey c)) src [(st, v)]))
+                        reflect rest
+          t' <- reflect t
+          returning (Replace (RBoosts t'))
+      | otherwise -> keep
+    -- weakarmor.onDamagingHit(damage, target, source, move): `move.category === 'Physical'` -> `this.boost({def: -1, spe: 2}, target, target)`.
+    -- The move in use is the hit's move
+    NWeakArmorDamagingHit
+      | Just mv <- cMove c, mvPhysical mv -> do
+          void (boostMon dx (Just holder) (cMove c) (Just (cKey c)) holder [(BDef, -1), (BSpe, 2)])
+          keep
+      | otherwise -> keep
+    -- justified.onDamagingHit: `move.type === 'Dark'` -> `this.boost({atk: 1})`: target and source are the event's, the holder and the attacker
+    NJustifiedDamagingHit
+      | Just mv <- cMove c, typeIsNamed dx (mvType mv) "Dark" -> do
+          void (boostMon dx (cSource c) (cMove c) (Just (cKey c)) holder [(BAtk, 1)])
+          keep
+      | otherwise -> keep
+    -- gooey.onDamagingHit(damage, target, source, move): `this.checkMoveMakesContact(move, source, target, true)` (LATENT: Protective Pads is
+    -- not supported) -> `this.boost({spe: -1}, source, target, null, true)`
+    NGooeyDamagingHit
+      | Just mv <- cMove c, Just src <- cSource c, mrContact (mvRule mv) -> do
+          void (boostMon dx (Just holder) (cMove c) (Just (cKey c)) src [(BSpe, -1)])
+          keep
+      | otherwise -> keep
+    -- speedboost.onResidual(pokemon) (order 28, subOrder 2): `if (pokemon.activeTurns) this.boost({spe: 1})`; the Residual event has no source
+    NSpeedBoostResidual
+      | monActiveTurns m > 0 -> void (boostMon dx Nothing Nothing (Just (cKey c)) holder [(BSpe, 1)]) >> keep
+      | otherwise -> keep
   where
+    -- slice 8a: `source && target === source` of the TryBoost handlers: a boost the holder causes itself (Guard Dog's, Weak Armor's)
+    selfCaused ctx = cSource ctx == Just (cHolder ctx)
+    -- `effect.name === ...` for an ability as the boost's effect
+    byAbility ctx name = case cEffect ctx of
+      Just (EffectKey EffAbility i) -> abilityId dx i == name
+      _ -> False
     -- the `eject` key of the holder's item state ('esA': 1 set, -1 absent)
     ejectSet mm = esA (monItemState mm) == 1
     -- a no-op when the state is gone (the item was used up or lost)
@@ -2101,8 +2219,8 @@ battleHeal a amount = do
 -- body of its own @onHit@. @target@ is the Pokemon hit (the user for a move on itself) and @user@ its source. Its result
 -- is the move's 'HitResult'. A move with no @onHit@ body returns 'HitOk'. The @runEvent('Hit')@ that follows (1342) has
 -- no listener.
--- LATENT: Heal Block (@TryHeal@), Substitute, Dynamax and the abilities that change a drop (@TryBoost@, @ChangeBoost@:
--- Contrary, Clear Body, Defiant, Mirror Armor) have no supported user, so the bodies read none of them.
+-- LATENT: Heal Block (@TryHeal@) and Dynamax have no supported user, so the bodies read none of them. The abilities that change a drop
+-- (slice 8a) act through 'boostMon' and need nothing here, except Parting Shot's own Mirror Armor test.
 --
 -- It also returns the move in use, which a body may change (Showdown's handlers mutate the ActiveMove): Parting Shot deletes its
 -- @selfSwitch@ (see 'NPartingShotHit').
@@ -2111,11 +2229,13 @@ moveOwnHit dx user target mv = case moveSpec mv POwn EvHit >>= hsBody of
   -- partingshot.onHit(target, source, move): `const success = this.boost({atk: -1, spa: -1}, target, source)`; `if (!success &&
   -- !target.hasAbility('mirrorarmor')) delete move.selfSwitch` (data/moves.ts 13179-13184). It returns nothing, so the hit did
   -- whatever the rest of runMoveEffects says ('HitOk').
-  -- LATENT: Mirror Armor is not a supported ability, so `!target.hasAbility('mirrorarmor')` always holds; and no supported ability
-  -- changes the drop (Clear Body, White Smoke, Hyper Cutter, Contrary, Defiant, Competitive), so a drop fails only at -6 on both.
+  -- slice 8a: a Mirror Armor target reflects the drops, so the boost fails for it and the move still switches: `hasAbility` reads the
+  -- ability as it is after the boost (the reflected drop can KO nothing, and no supported effect changes an ability).
+  -- LATENT: White Smoke, Hyper Cutter and Competitive are not supported.
   Just (BNative NPartingShotHit) -> do
     boosted <- boostMon dx (Just user) (Just mv) moveCause target [(BAtk, -1), (BSpa, -1)]
-    pure (HitOk, if boosted then mv else mv {mvSelfSwitch = False})
+    b <- get
+    pure (HitOk, if boosted || hasAbility dx b target "mirrorarmor" then mv else mv {mvSelfSwitch = False})
   -- ESCAPE HATCH: substitute (slice 7b). `volatileStatus: 'substitute'` is added by runMoveEffects (1316) before the move's onHit ('statusMove',
   -- [EOwnVolatile, EOwnHit]): the volatile's onStart sets the hp. Then substitute.onHit(target): `this.directDamage(target.maxhp / 4)`: floor,
   -- at least 1, with no Damage event (battle.ts 2216-2240: directDamage never runs spreadDamage). onTryHit has kept a user at or under a quarter

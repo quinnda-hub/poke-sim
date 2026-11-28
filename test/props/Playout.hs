@@ -4,6 +4,7 @@
 module Playout
   ( genTeams
   , genPivotTeams
+  , genStatTeams
   , playChecked
   , Seen (..)
   , advanceWhile
@@ -41,7 +42,7 @@ stepCap = 5000
 -- | A pair of random legal teams (1 to 6 Pokemon each) built through 'parseTeam', the path the trace teams
 -- and the benchmark use.
 genTeams :: Dex -> Gen (Team, Team)
-genTeams dx = genTeamsWith dx False
+genTeams dx = genTeamsWith dx False False
 
 -- | 'genTeams' weighted toward Regenerator, Natural Cure, Eject Button and Red Card (slice 6c) and the status moves that give Natural Cure
 -- something to cure, and toward the moves that switch their user out (U-turn, Flip Turn, Volt Switch, Teleport, Parting Shot, Chilly
@@ -49,10 +50,17 @@ genTeams dx = genTeamsWith dx False
 -- Helmet and Shedinja (1 HP: a contact pivot into a Rocky Helmet faints its user after the flag is set), so that the playouts reach the
 -- mid-turn switch requests and the drags that a uniform draw over every move seldom does.
 genPivotTeams :: Dex -> Gen (Team, Team)
-genPivotTeams dx = genTeamsWith dx True
+genPivotTeams dx = genTeamsWith dx True False
 
-genTeamsWith :: Dex -> Bool -> Gen (Team, Team)
-genTeamsWith dx pivotHeavy = (,) <$> genTeam <*> genTeam
+-- | slice 8a: 'genPivotTeams' with a third of the sets holding one of the stage and switch-in abilities (Intimidate, Dauntless Shield,
+-- Defiant, Contrary, Clear Body, Guard Dog, Inner Focus, Big Pecks, Mirror Armor, Keen Eye, Weak Armor, Justified, Gooey, Speed Boost)
+-- and the moves that change stages or that those abilities answer (self-drops, boosts, contact and Dark moves, Sticky Web), so that the
+-- boost events meet their handlers. A separate generator, so that the pivot teams' own coverage shares are unchanged.
+genStatTeams :: Dex -> Gen (Team, Team)
+genStatTeams dx = genTeamsWith dx True True
+
+genTeamsWith :: Dex -> Bool -> Bool -> Gen (Team, Team)
+genTeamsWith dx pivotHeavy statHeavy = (,) <$> genTeam <*> genTeam
   where
     species = supportedSpecies dx
     moves = supportedMoves dx
@@ -77,6 +85,12 @@ genTeamsWith dx pivotHeavy = (,) <$> genTeam <*> genTeam
     step4Kits = [(3, Gen.element k) | k <- [protectKit, punches, encoreKit], not (null k)] ++ [(5, Gen.element substituteKit) | not (null substituteKit)] -- (slice 7b: its own weight)
       -- slice 7f: a draw over every kit's moves, so that the kits meet on one set (Encore with a Choice item and Taunt, Substitute with a protect move, ...)
       ++ [(6, Gen.element (concat [protectKit, punches, encoreKit, substituteKit])) | not (null (concat [protectKit, punches, encoreKit, substituteKit]))]
+      -- slice 8a: the moves that change stages (self-drops, boosts, drops on the foe) and the contact and Dark moves that Weak Armor, Gooey and Justified answer
+      ++ [(8, Gen.element statKit) | statHeavy, not (null statKit)]
+    -- slice 8a
+    statKit = [m | m <- ["closecombat", "superpower", "dracometeor", "swordsdance", "dragondance", "bulkup", "calmmind", "nastyplot", "snarl", "icywind", "growl", "tailwhip"
+                        , "stickyweb", "partingshot", "knockoff", "suckerpunch", "crunch", "bite", "darkpulse", "tackle", "doubleironbash", "bulletseed", "uturn", "roar", "dragontail"
+                        , "substitute", "sandattack", "doubleteam", "minimize", "agility", "shellsmash", "curse"], m `elem` moves]
     pickMove
       | pivotHeavy && not (null step4Kits) && not (null pivots) && not (null dragKit) =
           Gen.frequency ([(3, Gen.element pivots), (3, Gen.element dragKit), (2, Gen.element moves)] ++ step4Kits)
@@ -95,9 +109,13 @@ genTeamsWith dx pivotHeavy = (,) <$> genTeam <*> genTeam
     choiceItems = [i | i <- ["choiceband", "choicespecs", "choicescarf"], i `elem` items]
     -- Regenerator and Natural Cure act at every switch-out
     pickAbility
+      -- slice 8a: the stage and switch-in abilities, on most sets of the 'genStatTeams' teams
+      | statHeavy && not (null statAbilities) = Gen.frequency [(1, Gen.element abilities), (3, Gen.element statAbilities)]
       | pivotHeavy && not (null switchAbilities) = Gen.frequency [(3, Gen.element switchAbilities), (3, Gen.element abilities)]
       | otherwise = Gen.element abilities
     switchAbilities = [a | a <- ["regenerator", "naturalcure"], a `elem` abilities]
+    -- slice 8a
+    statAbilities = [a | a <- ["intimidate", "dauntlessshield", "defiant", "contrary", "clearbody", "guarddog", "innerfocus", "bigpecks", "mirrorarmor", "keeneye", "weakarmor", "justified", "gooey", "speedboost"], a `elem` abilities]
     -- every ability and item the engine accepts ("noability" and the empty item among them)
     abilities = supportedAbilities dx
     items = supportedItems dx
@@ -208,6 +226,13 @@ data Seen = Seen
   -- slice 7f
   , seenMultiDisable :: !Int
   -- ^ a move request with an active Pokemon under two or more of the disabling effects (encore, taunt, choicelock, Assault Vest)
+  -- slice 8a
+  , seenShieldBoost :: !Int
+  -- ^ a Pokemon whose Dauntless Shield boost was spent during the step
+  , seenIntimidateIn :: !Int
+  -- ^ an Intimidate holder that switched in (was benched before the step, is in play with HP after it)
+  , seenDropAbility :: !Int
+  -- ^ a Pokemon in play before and after the step, holding Clear Body, Guard Dog, Inner Focus, Big Pecks, Mirror Armor, Defiant or Contrary, that ended with a stage other than zero
   }
   deriving (Eq, Show)
 
@@ -236,6 +261,10 @@ instance Semigroup Seen where
       , seenSubHit = f seenSubHit
       -- slice 7f
       , seenMultiDisable = f seenMultiDisable
+      -- slice 8a
+      , seenShieldBoost = f seenShieldBoost
+      , seenIntimidateIn = f seenIntimidateIn
+      , seenDropAbility = f seenDropAbility
       }
     where
       f g = g x + g y
@@ -264,6 +293,10 @@ instance Monoid Seen where
       , seenSubHit = 0
       -- slice 7f
       , seenMultiDisable = 0
+      -- slice 8a
+      , seenShieldBoost = 0
+      , seenIntimidateIn = 0
+      , seenDropAbility = 0
       }
 
 -- | Play with random legal choices, checking every state on the way, until the battle ends (or the cap).
@@ -350,6 +383,8 @@ checkStep dx b b' (c1, c2) = (mappend stallSeen <$>) $ mapM_ one [(p, i) | (p, s
         let cure = wasOn && benched && abilityIs "naturalcure" m0 && abilityIs "naturalcure" m1
         if cure && monStatus m1 /= StatusNone then Left (who ++ "Natural Cure holder switched out with the status " ++ show (monStatus m1)) else Right ()
         let ejected = not stealing && wasOn && itemIs "ejectbutton" m0 && monItem m1 == noItem
+            -- (slice 8a: a Guard Dog attacker is not forced out: its DragOut returns null, while the Red Card is still used up)
+            guardDogFoe = sHasActive (sideOf foe b) && abilityIs "guarddog" (monOf b (Actor foe foeBefore))
             carded = not stealing && not forcing && wasOn && itemIs "redcard" m0 && monItem m1 == noItem
             -- an Eject Pack that is gone (slice 6d) was used because its holder dropped a stage, and the use flagged the holder: it is
             -- still in the active slot with the flag, or it was benched by the switch (a Red Card drag clears the flag) or fainted
@@ -361,8 +396,10 @@ checkStep dx b b' (c1, c2) = (mappend stallSeen <$>) $ mapM_ one [(p, i) | (p, s
             packedStillIn = monActive m1 && monHp m1 > 0 && monSwitchFlag m1 /= SwitchForced && not draggedBack
         if ejected && not ((monActive m1 && monSwitchFlag m1 == SwitchForced && monHp m1 > 0) || monFainted m1)
           then Left (who ++ "Eject Button used up, but its holder is neither flagged to switch nor fainted") else Right ()
-        if carded && foeAfter then Left (who ++ "Red Card used up, but the attacker was not forced out") else Right ()
+        if carded && foeAfter && not guardDogFoe then Left (who ++ "Red Card used up, but the attacker was not forced out") else Right ()
         if packed && packedStillIn then Left (who ++ "Eject Pack used up, but its holder is neither flagged to switch, nor benched, nor fainted") else Right ()
+        -- slice 8a: pokemon.shieldBoost is set once and never reset (not by a switch-out nor by a faint)
+        if monShieldBoost m0 && not (monShieldBoost m1) then Left (who ++ "lost its Dauntless Shield boost") else Right ()
         pure mempty
           { seenRegen = fromEnum (regen && monHp m0 < monMaxHp m0)
           , seenCure = fromEnum (cure && monStatus m0 /= StatusNone)
@@ -373,6 +410,10 @@ checkStep dx b b' (c1, c2) = (mappend stallSeen <$>) $ mapM_ one [(p, i) | (p, s
           -- slice 7b
           , seenSub = fromEnum (monActive m0 && monActive m1 && monHp m1 > 0 && not (subOf m0) && subOf m1)
           , seenSubHit = fromEnum (monActive m0 && monActive m1 && subOf m0 && subOf m1 && subHp m1 < subHp m0)
+          -- slice 8a
+          , seenShieldBoost = fromEnum (not (monShieldBoost m0) && monShieldBoost m1)
+          , seenIntimidateIn = fromEnum (not (monActive m0) && monActive m1 && monHp m1 > 0 && abilityIs "intimidate" m1)
+          , seenDropAbility = fromEnum (monActive m0 && monActive m1 && monHp m1 > 0 && any (`abilityIs` m1) ["clearbody", "guarddog", "innerfocus", "bigpecks", "mirrorarmor", "defiant", "contrary"] && monBoosts m1 /= noBoosts)
           }
       _ -> Right mempty
     isSwitch c = case c of Just (Switch _) -> True; _ -> False
@@ -601,6 +642,8 @@ checkBattle dx b = do
       let bs = monBoosts m
           stages = [bsAtk bs, bsDef bs, bsSpa bs, bsSpd bs, bsSpe bs, bsAccuracy bs, bsEvasion bs]
       if any (\x -> x < -6 || x > 6) stages then bad ("stage outside -6..6: " ++ show stages) else Right ()
+      -- slice 8a: only a Dauntless Shield holder has spent the boost
+      if monShieldBoost m && abilityId dx (monSetAbility m) /= "dauntlessshield" then bad "a Dauntless Shield boost on another ability" else Right ()
       if monFainted m && monHp m /= 0 then bad "fainted with hp > 0" else Right ()
       -- Only while the battle goes on. Once it has ended, `resolveFaints` returns at once (`if (this.ended) return;`,
       -- battle.ts 2563), but the action's phazing loop still drags a Pokemon in (2866-2873), with no check of `ended`. A Pokemon

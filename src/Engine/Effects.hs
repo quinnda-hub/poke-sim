@@ -149,6 +149,21 @@ abilityBodies ty wx name = case name of
   "filter" -> Just [(PSource, EvModifyDamage, BNative NFilterLike)]
   "solidrock" -> Just [(PSource, EvModifyDamage, BNative NFilterLike)]
   "prismarmor" -> Just [(PSource, EvModifyDamage, BNative NFilterLike)]
+  -- slice 8a
+  "intimidate" -> Just [(POwn, EvStart, BNative NIntimidateStart)]
+  "dauntlessshield" -> Just [(POwn, EvStart, BNative NDauntlessShieldStart)]
+  "defiant" -> Just [(POwn, EvAfterEachBoost, BNative NDefiantAfterEachBoost)]
+  "contrary" -> Just [(POwn, EvChangeBoost, BNative NContraryChangeBoost)]
+  "clearbody" -> Just [(POwn, EvTryBoost, BNative NClearBodyTryBoost)]
+  "guarddog" -> Just [(POwn, EvDragOut, BNative NGuardDogDragOut), (POwn, EvTryBoost, BNative NGuardDogTryBoost)]
+  "innerfocus" -> Just [(POwn, EvTryAddVolatile, BNative NInnerFocusTryAddVolatile), (POwn, EvTryBoost, BNative NInnerFocusTryBoost)]
+  "bigpecks" -> Just [(POwn, EvTryBoost, BNative NBigPecksTryBoost)]
+  "mirrorarmor" -> Just [(POwn, EvTryBoost, BNative NMirrorArmorTryBoost)]
+  "keeneye" -> Just [(POwn, EvModifyMove, BNative NKeenEyeModifyMove), (POwn, EvTryBoost, BNative NKeenEyeTryBoost)]
+  "weakarmor" -> Just [(POwn, EvDamagingHit, BNative NWeakArmorDamagingHit)]
+  "justified" -> Just [(POwn, EvDamagingHit, BNative NJustifiedDamagingHit)]
+  "gooey" -> Just [(POwn, EvDamagingHit, BNative NGooeyDamagingHit)]
+  "speedboost" -> Just [(POwn, EvResidual, BNative NSpeedBoostResidual)]
   _ -> Nothing
   where
     speed ws = do

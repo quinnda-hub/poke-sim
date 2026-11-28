@@ -67,6 +67,9 @@ main = do
         [ ("random playouts keep the decision-point and state invariants", withTests (fromIntegral n) (playouts dex))
         , ("random playouts over teams heavy in self-switch moves, Rocky Helmet, Shedinja, Regenerator, Natural Cure, Eject Button, Red Card and Eject Pack keep the invariants, switch flags and mid-turn requests included",
             withTests (fromIntegral nCover) (pivotPlayouts dex))
+        -- slice 8a
+        , ("random playouts over teams heavy in the stage and switch-in abilities (Intimidate, Dauntless Shield, Defiant, Contrary, Clear Body, Guard Dog, Inner Focus, Big Pecks, Mirror Armor, Keen Eye, Weak Armor, Justified, Gooey, Speed Boost) and the moves that change stages keep the invariants, the stage range and the once-only Dauntless Shield boost included",
+            withTests (fromIntegral nCover) (statPlayouts dex))
         -- slice 7b
         , ("Substitute: a successful use costs exactly a quarter of the maximum HP and leaves a substitute of that size; a failed one changes nothing",
             withTests (fromIntegral nCover) (substituteCost dex))
@@ -162,6 +165,22 @@ pivotPlayouts dex = property $ do
       cover 2 "a Substitute was hit" (seenSubHit seen > 0)
       -- slice 7f: a move request with a Pokemon under two disabling effects at once (the exact-moves check of checkBattle then combines them)
       cover 7 "a move request came with an active Pokemon under two disabling effects" (seenMultiDisable seen > 0)
+      case request b of
+        Finished _ -> success
+        Awaiting {} -> footnote "playout ended without a result" >> failure
+
+-- | slice 8a: 'playouts' over 'genStatTeams'. 'checkBattle' and 'checkStep' hold every stage in -6..6 and a Dauntless Shield boost to a
+-- holder of the ability that never goes back; the coverage statements fail the property if these teams stop reaching the abilities.
+statPlayouts :: Dex -> Property
+statPlayouts dex = property $ do
+  (t1, t2) <- forAll (genStatTeams dex)
+  seed <- forAll (Gen.word64 Range.linearBounded)
+  case fst (runSample (mkSMGen seed) (playChecked dex t1 t2)) of
+    Left e -> footnote e >> failure
+    Right (b, seen) -> do
+      cover 5 "a Dauntless Shield holder spent its boost" (seenShieldBoost seen > 0)
+      cover 5 "an Intimidate holder switched in" (seenIntimidateIn seen > 0)
+      cover 10 "a holder of Clear Body, Guard Dog, Inner Focus, Big Pecks, Mirror Armor, Defiant or Contrary ended a step with a stage change" (seenDropAbility seen > 0)
       case request b of
         Finished _ -> success
         Awaiting {} -> footnote "playout ended without a result" >> failure

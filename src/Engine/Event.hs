@@ -771,6 +771,41 @@ data NativeId
   -- ^ ESCAPE HATCH: substitute. @condition.onTryPrimaryHit@, the test only: the hit is the Substitute's (a result of @HIT_SUBSTITUTE@, 0)
   -- unless the user is the target or the move has @bypasssub@ or @infiltrates@; a status move fails (the @getDamage@ of a move with no
   -- base power is undefined, @null@ here). The damage is 'Engine.Turn.hitSubstitute', where @getDamage@ lives.
+  -- slice 8a
+  | NIntimidateStart
+  -- ^ intimidate @onStart@: Attack -1 to the foe, unless it has a Substitute.
+  | NDauntlessShieldStart
+  -- ^ dauntlessshield @onStart@: Defense +1, once per battle for each Pokemon ('Engine.State.monShieldBoost').
+  | NDefiantAfterEachBoost
+  -- ^ defiant @onAfterEachBoost@: a stat the foe lowered gives Attack +2.
+  | NContraryChangeBoost
+  -- ^ contrary @onChangeBoost@: every change is negated.
+  | NClearBodyTryBoost
+  -- ^ clearbody @onTryBoost@: the drops that the foe causes are deleted.
+  | NGuardDogTryBoost
+  -- ^ guarddog @onTryBoost@ (priority 2): Intimidate's Attack drop becomes Attack +1.
+  | NGuardDogDragOut
+  -- ^ guarddog @onDragOut@ (priority 1): returns null, so the Pokemon cannot be forced out.
+  | NInnerFocusTryAddVolatile
+  -- ^ innerfocus @onTryAddVolatile@: flinch returns null.
+  | NInnerFocusTryBoost
+  -- ^ innerfocus @onTryBoost@: Intimidate's Attack drop is deleted.
+  | NBigPecksTryBoost
+  -- ^ bigpecks @onTryBoost@: the foe's Defense drop is deleted.
+  | NMirrorArmorTryBoost
+  -- ^ mirrorarmor @onTryBoost@: each drop that the foe causes is deleted and reflected onto it.
+  | NKeenEyeTryBoost
+  -- ^ keeneye @onTryBoost@: the foe's accuracy drop is deleted.
+  | NKeenEyeModifyMove
+  -- ^ keeneye @onModifyMove@: @move.ignoreEvasion = true@ (the edit 'MEIgnoreEvasion').
+  | NWeakArmorDamagingHit
+  -- ^ weakarmor @onDamagingHit@: a Physical move gives Defense -1 and Speed +2.
+  | NJustifiedDamagingHit
+  -- ^ justified @onDamagingHit@: a Dark move gives Attack +1.
+  | NGooeyDamagingHit
+  -- ^ gooey @onDamagingHit@: a contact move gives the attacker Speed -1.
+  | NSpeedBoostResidual
+  -- ^ speedboost @onResidual@: Speed +1 once the Pokemon has been on the field a turn.
   deriving (Eq, Show)
 
 -- | The body of each handler the engine implements (written by hand: Showdown's handlers are code). A condition
