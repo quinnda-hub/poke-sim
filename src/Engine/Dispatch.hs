@@ -966,9 +966,10 @@ skipped dx ev b h = case (hKey h, hOwner h) of
   (EffectKey EffStatus _, OwnMon a) -> not (isJust (effectState (monOf b a) (hKey h))) -- it's changed
   -- battle.ts 843-847 (a breakable ability while Mold Breaker's move is in use) and 884-886
   -- (`eventid !== 'End' && effect.effectType === 'Ability' && effectHolder.ignoringAbility()`: Neutralizing Gas, an inactive holder)
-  -- LATENT(8g): every breakable ability that 8a, 8b, 8c and 8d add (Levitate, Sturdy, Multiscale, Clear Body, the absorb abilities, ...) is
-  -- gated here by its @breakable@ flag alone, as Showdown gates it; an ability that Showdown checks with a direct
-  -- @this.suppressingAbility(...)@ call instead (the Ruin abilities and the Aura abilities: data/abilities.ts 386, 838, 1269, 4823, 4876, 5289) must make that call itself.
+  -- Every breakable ability that 8a, 8b, 8c and 8d add (Levitate, Sturdy, Multiscale, Clear Body, the absorb abilities, ...) is gated here by its
+  -- @breakable@ flag alone, as Showdown gates it, and slice 8g's set runs a Mold Breaker user against each. An ability that Showdown checks with a
+  -- direct @this.suppressingAbility(...)@ call instead (the Ruin abilities and the Aura abilities: data/abilities.ts 386, 838, 1269, 4823, 4876,
+  -- 5289) must make that call itself; the only one accepted, Vessel of Ruin, asks only to log (see 'Engine.Damage.suppressingAbility').
   (EffectKey EffAbility _, OwnMon a) ->
     (maybe False cnBreakable (effectOf dx (hKey h)) && suppressingAbility dx b a)
       || (ev /= EvEnd && ignoringAbility dx b a)
@@ -1365,8 +1366,8 @@ runNative dx n c relay = do
     -- slice 8c. The holder is the event's target (`onTryHit(target, source, move)`, `onDamage(damage, target, source, effect)`), the
     -- source is the attacker. Each TryHit body returns null (a stop) to block the hit; the log lines are not modelled.
     -- goodasgold.onTryHit (data/abilities.ts 1631): `move.category === 'Status' && target !== source`.
-    -- LATENT(8f): Magic Bounce reflects a status move first (it runs at priority 2) and the reflected use comes back through here;
-    -- Mold Breaker (breakable) is 'skipped' in the dispatcher by 'suppressingAbility'.
+    -- Magic Bounce reflects a status move first (it runs at priority 2) and the reflected use comes back through here (slice 8g's set bounces
+    -- reflectable moves at a Good as Gold user); Mold Breaker (breakable) is 'skipped' in the dispatcher by 'suppressingAbility'.
     NGoodAsGoldTryHit -> case (cMove c, cSource c) of
       (Just mv, Just src) | mvStatus mv, src /= holder -> returning stop
       _ -> keep
@@ -1410,7 +1411,8 @@ runNative dx n c relay = do
     -- magicguard.onDamage (2466): `effect.effectType !== 'Move'` -> false. Every damageMon site passes its cause (a status, an item, a side
     -- condition, a weather, 'EffRecoil', a volatile: none is a Move), so it blocks them all; directDamage (Struggle's recoil, Substitute's
     -- cost) runs no Damage event and is not blocked.
-    -- LATENT(8d): Rough Skin's and Iron Barbs' damage has the ability as its effect, and Magic Guard then logs `-activate` and blocks it too.
+    -- Rough Skin's and Iron Barbs' damage has the ability as its effect and Rocky Helmet's has the item (neither is a move), so Magic Guard
+    -- blocks both; slice 8g's set meets Magic Guard with each.
     NMagicGuardDamage -> case cEffect c of
       Just (EffectKey EffMove _) -> keep
       _ -> returning stop
@@ -1991,12 +1993,15 @@ runNative dx n c relay = do
     -- slice 8a. The boost abilities. Each `this.boost(...)` of a handler runs inside an event, so Showdown fills the arguments it leaves
     -- null from `this.event` (battle.ts 2044-2048): the target and source of the running event, and the effect, which is the
     -- running ability (`this.effect`). The handler's own call passes them explicitly except where noted.
-    -- LATENT(8b): Unaware reads the stages these handlers change (it ignores the foe's boosts in the damage and accuracy steps).
-    -- LATENT(8f): Mold Breaker, Teravolt and Turboblaze suppress the `breakable` ones (Contrary, Clear Body, Big Pecks, Keen Eye, Inner Focus, Guard Dog,
-    -- Mirror Armor) through 'skipped' and 'suppressingAbility', which read the move in use: a drag-in after Roar sees that move still active
-    -- (battle.ts 2863-2875), so its Intimidate has the Roar user's `ignoreAbility` against the foe's breakable ability.
-    -- LATENT(8f): Magic Bounce reflects moves only (the `reflectable` flag), so it never meets Intimidate; Parting Shot is reflectable, and its
-    -- boost then runs against the user (see 'moveOwnHit').
+    -- Unaware reads the stages these handlers change (it ignores the foe's boosts in the damage and accuracy steps); slice 8g's set meets it with
+    -- Intimidate, Defiant, Contrary, Speed Boost and Weak Armor on both sides.
+    -- Mold Breaker, Teravolt and Turboblaze suppress the `breakable` ones (Contrary, Clear Body, Big Pecks, Keen Eye, Inner Focus, Guard Dog,
+    -- Mirror Armor) through 'skipped' and 'suppressingAbility', which read the move in use (slice 8g's set runs a Mold Breaker user against each).
+    -- LATENT(8g): a drag-in after Roar sees that move still active (battle.ts 2863-2875), so its Intimidate has the Roar user's `ignoreAbility`;
+    -- the only foe it meets is the Roar user, which is never its own target (`activePokemon !== target`), so no breakable ability is suppressed
+    -- that way and the case is unreachable; Teravolt and Turboblaze are not accepted.
+    -- Magic Bounce reflects moves only (the `reflectable` flag), so it never meets Intimidate; Parting Shot is reflectable, and its boost then runs
+    -- against the user (see 'moveOwnHit'; slice 8g's set bounces it).
     -- intimidate.onStart(pokemon) (abilities.ts 1759-1776): for each adjacent foe (`side.foes()`: the foe's active Pokemon with HP),
     -- a Substitute makes it immune (`-immune`), else `this.boost({atk: -1}, target, pokemon, null, true)`. The effect is Intimidate
     -- itself (`effect.name === 'Intimidate'` is what Guard Dog and Inner Focus read).
@@ -2023,7 +2028,7 @@ runNative dx n c relay = do
           keep
       | otherwise -> keep
     -- contrary.onChangeBoost(boost, target, source, effect): `if (effect?.id === 'zpower') return;` then every change is negated
-    -- (LATENT(8f): Mold Breaker suppresses it through the breakable gate)
+    -- (Mold Breaker suppresses it through the breakable gate)
     NContraryChangeBoost
       | RBoosts t <- relay -> returning (Replace (RBoosts [(st, negate v) | (st, v) <- t]))
       | otherwise -> keep
@@ -2103,7 +2108,7 @@ runNative dx n c relay = do
     -- slice 8b ---------------------------------------------------------------------------------------------------------------------------
     -- multiscale.onSourceModifyDamage(damage, source, target, move) (data/abilities.ts 2689): `target.hp >= target.maxhp` -> chainModify(0.5).
     -- The holder is the target (the event's source). It reads the HP as it is at each hit, so a multi-hit move is halved only on its first.
-    -- LATENT(8f): breakable, so Mold Breaker and its kin skip it (the dispatcher's gate), which needs 8f's `ignoreAbility`.
+    -- Breakable, so Mold Breaker and its kin skip it (the dispatcher's gate: `ignoreAbility`).
     NMultiscale
       | monHp m >= monMaxHp m -> chained (1, 2)
       | otherwise -> keep
@@ -2143,15 +2148,16 @@ runNative dx n c relay = do
       | relay == RText "brn" -> returning stop
       | otherwise -> keep
     -- waterbubble.onUpdate(pokemon): a burned holder is cured (`pokemon.cureStatus()`). A burn can only be there when the status was set past the
-    -- onSetStatus above (LATENT(8f): a Mold Breaker user's Will-O-Wisp, or a suppressed ability that comes back).
+    -- onSetStatus above (a Mold Breaker user's Will-O-Wisp, or a suppressed ability that comes back: both are in slice 8g's set).
     NWaterBubbleUpdate -> do
       when (monStatus m == StatusBrn) (modify' (cureStatus holder))
       keep
     -- flashfire.onTryHit(target, source, move) (data/abilities.ts 1342): `target !== source && move.type === 'Fire'`: `move.accuracy = true` (the
     -- move is dropped for this target right after, so no later step reads it), `target.addVolatile('flashfire')` (false when it is already there:
     -- only the `-immune` line differs), and `return null`, which fails the hit.
-    -- LATENT(8c): TryHit runs left to right (never a draw): the order among the holder's other TryHit handlers (Volt Absorb, Water Absorb, Protect,
-    -- Overcoat) and the immunity steps is the dispatcher's, and 8c's immunities must keep it. Mold Breaker's skip of it (breakable) is 8f's.
+    -- TryHit runs left to right (never a draw): the order among the holder's other TryHit handlers (Volt Absorb, Water Absorb, Protect,
+    -- Overcoat) and the immunity steps is the dispatcher's. Slice 8g's set runs Fire moves into a Flash Fire holder that protects and one that
+    -- has a Substitute; Mold Breaker's skip of it is the breakable gate.
     NFlashFireTryHit -> case (cMove c, cSource c) of
       (Just mv, Just src) | src /= holder, typeIsNamed dx (mvType mv) "Fire" -> do
         void (addVolatile dx holder CFlashFire)
@@ -2193,8 +2199,8 @@ runNative dx n c relay = do
     -- `unawareUser === this.activePokemon && pokemon === this.activeTarget`: the holder is using the move on the target, whose Defense, Special
     -- Defense and evasion count as 0; `pokemon === this.activePokemon && unawareUser === this.activeTarget`: the holder is the move's target, and
     -- the user's Attack, Defense, Special Attack and accuracy count as 0. The active target of a move that reaches a stage is the foe of its user.
-    -- LATENT(8a): it zeroes the stages that stat and accuracy reads see; the boost events (ChangeBoost, TryBoost, AfterEachBoost: Intimidate,
-    -- Defiant, Contrary) see the real ones. LATENT(8f): breakable, so Mold Breaker skips it.
+    -- It zeroes the stages that stat and accuracy reads see; the boost events (ChangeBoost, TryBoost, AfterEachBoost: Intimidate,
+    -- Defiant, Contrary) see the real ones (slice 8g's set checks it against each). Breakable, so Mold Breaker skips it.
     NUnawareModifyBoost -> case (relay, bActiveMove b0) of
       (RBoosts table, Just (MoveInUse active _))
         | pokemon /= holder ->
@@ -2213,7 +2219,7 @@ runNative dx n c relay = do
     NStaticDamagingHit -> contactStatus Par
     -- roughskin.onDamagingHit (order 1, so it runs before every other DamagingHit handler of the target): a contact move ->
     -- this.damage(source.baseMaxhp / 8, source, target), by the ability
-    -- LATENT(8c): Magic Guard does not stop it yet (the Damage event's effect is an Ability, so Magic Guard would).
+    -- Magic Guard stops it (the Damage event's effect is the ability, not a move: see NMagicGuardDamage).
     NRoughSkinDamagingHit -> do
       b <- get
       case (cMove c, cSource c) of
@@ -2223,8 +2229,8 @@ runNative dx n c relay = do
     -- toxicchain.onSourceDamagingHit(damage, target, source, move): the holder is the attacker (the event's source) and the target is
     -- the defender, the foe in singles. `if (target.hasAbility('shielddust') || target.hasItem('covertcloak')) return;` (no draw), then
     -- `if (this.randomChance(3, 10)) target.trySetStatus('tox', source)`. It needs no contact and no move category.
-    -- LATENT(8f): hasAbility is not changed by Mold Breaker (only the handler of a breakable ability is), so a Mold Breaker attacker does
-    -- not get past Shield Dust here, as in Showdown; 8f need not touch this.
+    -- LATENT(8g): hasAbility is not changed by Mold Breaker (only the handler of a breakable ability is), so a Mold Breaker attacker would not
+    -- get past Shield Dust here, as in Showdown; but the attacker is the Toxic Chain holder, which cannot also hold Mold Breaker, so it is unreachable.
     NToxicChainDamagingHit -> do
       b <- get
       let Actor hp' _ = holder
@@ -2303,7 +2309,8 @@ runNative dx n c relay = do
     -- last hit it took (`getLastAttackedBy().damage`, pushed by the hit loop just before this event): both are the move's total here, which
     -- the event's relay carries ('Engine.Turn.hitLoop'). A holder at or below half HP that was above it before the damage gets spa +1 (boost
     -- from itself, effect Berserk).
-    -- LATENT(8c): Sturdy and Endure-like survivals change the damage, and so the HP before it, through the same total.
+    -- Sturdy and Endure-like survivals change the damage, and so the HP before it, through the same total (slice 8g's set crosses half HP
+    -- against Sturdy and against multi-hit moves).
     NBerserkAfterMoveSecondary -> do
       setState c (\st -> st {esA = 1})
       case (cSource c, relay) of
@@ -2320,7 +2327,7 @@ runNative dx n c relay = do
       _ -> keep
     -- shielddust.onModifySecondaries(secondaries) (data/abilities.ts 4231-4234): `secondaries.filter(effect => !!effect.self)`, so only the
     -- secondaries with a self effect stay (and draw).
-    -- LATENT(8f): Shield Dust is `breakable`: Mold Breaker's suppression is the dispatcher's gate ('skipped'), not written here.
+    -- Shield Dust is `breakable`: Mold Breaker's suppression is the dispatcher's gate ('skipped'), not written here (slice 8g's set meets it).
     NShieldDustModifySecondaries -> case relay of
       RSecondaries ss -> returning (Replace (RSecondaries (filter (not . null . secSelf) ss)))
       _ -> keep
@@ -2332,7 +2339,8 @@ runNative dx n c relay = do
     -- prankster.onModifyPriority(priority, pokemon, target, move) (3427): `move?.category === 'Status'` -> `move.pranksterBoosted = true;
     -- return priority + 1`. The flag is on the ActiveMove in Showdown; here 'Engine.Turn.runMove' derives it for the move in use (a
     -- Status move of a Prankster holder), because a priority event has no move to write to.
-    -- LATENT(8f): Magic Bounce: a bounced move is not prankster-boosted (battle-actions.ts 476, `!move.hasBounced`).
+    -- Magic Bounce: a bounced move is not prankster-boosted (battle-actions.ts 476, `!move.hasBounced`; slice 8g's set bounces a Prankster
+    -- user's move into a Dark and a non-Dark type).
     NPranksterModifyPriority -> case (cMove c, relay) of
       (Just mv, RInt p) | mvStatus mv -> returning (Replace (RInt (p + 1)))
       _ -> keep
@@ -2341,8 +2349,8 @@ runNative dx n c relay = do
     -- '???' && source.getTypes().join() !== type) { if (!source.setType(type)) return; this.effectState.libero = true }`. The ability
     -- state's 'esA' is the flag (a fresh state at every switch-in). setType (pokemon.ts 2131-2151) refuses Stellar, a Terastallized
     -- Pokemon and Arceus and Silvally; it overwrites both types. getTypes().join() equals the type only for a single-typed Pokemon of it.
-    -- LATENT: `futuremove`, `snatch` and `callsMove` need moves the engine does not accept. LATENT(8f): Libero against a bounced move
-    -- (the base's 'mvHasBounced' is always False until Magic Bounce).
+    -- LATENT: `futuremove`, `snatch` and `callsMove` need moves the engine does not accept. Libero against a bounced move
+    -- ('mvHasBounced' is set by Magic Bounce; slice 8g's set bounces moves of Libero and Protean users).
     NLiberoPrepareHit -> case cMove c of
       Just mv
         | esA (monAbilityState m) /= 1

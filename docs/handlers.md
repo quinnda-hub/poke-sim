@@ -2085,4 +2085,59 @@ Every branch has a tally and none is zero except the structural one. Mutation ch
 
 ### 8g findings
 
-(To be written by phase 8g.)
+Built: the combined set (`tools/oracle/gen-slice8g.js`, 2,000 battles recorded from the stacked engine) and a statistical
+coverage check for the properties. **No engine behaviour changed**: the set passed parity on the first run, and a further
+6,000 battles from other seeds (not kept) passed as well. The only engine edits are comments (the LATENT notes below).
+Whitelist abilities: 82 of 85.
+
+**The set.** 28.8% plain random play over teams with the 58 abilities sprinkled on the sets (every one is on some team), and
+scripted openings, each with a pair of choices per decision point. A script that meets an unexpected request (a faint, a pivot)
+is cut to its longest prefix that Showdown accepts, and the random policy plays on, so no script is dropped (350 are cut).
+Kinds and what each reached, from Showdown's own events:
+- `breaker` (269): Mold Breaker against all 22 breakable abilities a move can meet, and Sweet Veil. Each was suppressed at least
+  6 times (Shell Armor 6, Shield Dust 26, Sweet Veil 11, the rest 27 to 178).
+- `gasenter`, `gasfaint`, `gastwo`, `gasintim` (438): the gas entering on the lead and from the bench, leaving by a switch and by a
+  faint (612 ends at a faint, 115 with a speed tie, 311 with two gases in play). Ignored under the gas: Intimidate, Dauntless
+  Shield, Supreme Overlord, Magic Guard, Multiscale, Speed Boost, Poison Heal, Pressure (1,000 to 4,000 times each).
+- `bounce` (225): Magic Bounce against Pressure users with a move both know (242), Prankster (57 into a Dark type, 141 into another),
+  Libero and Protean (89), Mirror Armor (215), Synchronize (171), Good as Gold (255), Parting Shot (45), and Mold Breaker (117).
+- `guarddog` (77): Intimidate at Attack -6 (102), at -5 (4) and elsewhere (540). `unaware` (81): Unaware against Intimidate (128),
+  Defiant, Contrary, Speed Boost and Weak Armor stages, on both sides. `guardhit`: Magic Guard against Rough Skin (141), Rocky Helmet
+  (272) and Life Orb. `sturdy`: multi-hit moves (333), a full-HP save (106), Berserk crossing half HP (88, 21 by a multi-hit move).
+  `flashfire`: Protect (157) and Substitute (242). `moxie`: Moxie boosts (147), Supreme Overlord with fallen allies (877).
+  `contrary`: drops reversed (1,244), Defiant triggered (770).
+- `faintend` (48): see below.
+
+**What the scripts showed about Neutralizing Gas and Intimidate.**
+- A restarted Intimidate meets the gas holder that is leaving, not the foe's new Pokemon: `switchIn` runs `End` on the old active
+  before it hands the slot over (battle-actions.ts 120), so the restart hits the gas holder (533 times) and the incoming Pokemon is
+  not hit. So an Intimidate "into Contrary, Defiant, Mirror Armor or Guard Dog under the gas" cannot happen in singles: with the
+  gas in play Intimidate is ignored, and when the gas has left it is no longer under it. The set counts instead Intimidate into those
+  four after a gas has been in the battle (45 to 117 each), which match.
+
+**The faint at the end of a battle.** `resolveFaints` returns at once when the battle has ended (battle.ts 2563) but the phazing loop
+still drags a Pokemon in (2866-2873), so a Shedinja dragged onto Stealth Rock or Spikes after the last foe fainted ends at 0 HP and not
+fainted (44 traces). The property that said otherwise is `checkBattle`'s "hp 0 but not fainted", which now holds only while the battle
+goes on (cherry-picked into this stack from `faint-bug`).
+
+**The coverage statements** are decided statistically. `statistical` in `test/props/Main.hs` wraps each property that has a `cover`:
+hedgehog's `verifiedTermination` runs it until every cover's interval (confidence one in a million) lies above its threshold
+(confirmed) or one lies below (the property fails), so a rate near a threshold no longer passes or fails by chance. No threshold
+changed and no cover was dropped. A cover whose true rate sits on its threshold would never be decided and the run would not end.
+Two facts about hedgehog 1.7 shaped it:
+- `wilsonBounds` divides the offset by the denominator twice, so its interval is too narrow, and at few cases it confirms a rare
+  cover with no hit (0 of 100 gives a lower bound of 1.9%). So the run needs a floor of cases: an always-true cover whose threshold
+  is the lowest percentage confirmed after exactly 400 cases. The same narrow interval limits the floor to about 600 cases.
+- An early-terminating run ignores `withTests` and stops at 100 cases once decided. So the long tier's 2000 cases are run again
+  beside it (`withoutCovers`: the same property with its coverage logs removed, "every case of: ..."), as the long tier ran them before.
+The fast tier's properties with covers now run 400 cases or more (more while a cover is undecided).
+
+**LATENT notes resolved.** Built and checked by the set, now plain comments: Mold Breaker against every breakable ability of 8a to 8d
+(Effects.hs, Dispatch.hs), Magic Bounce reaching Good as Gold, Prankster and Libero (8f), Magic Guard against Rough Skin and Rocky
+Helmet (the two stale notes at Dispatch.hs `NMagicGuardDamage` and `NRoughSkinDamagingHit`), the TryHit order of Flash Fire against
+Protect and Substitute, Unaware against the boost events, and Sturdy and Berserk. Vessel of Ruin's `onStart` asks `suppressingAbility`
+(abilities.ts 5289) only to decide whether to log, so it changes no state.
+**Kept as LATENT, with the reason:** the other `suppressingAbility` callers outside `runEvent` (Tera Shell, the three other Ruin abilities,
+Dark Aura, Fairy Aura, Heal Bell, Aromatherapy: not accepted); a drag-in Intimidate after a Mold Breaker Roar (it can only meet the Roar
+user, which is never its own target); Toxic Chain against Shield Dust under Mold Breaker (the attacker would need both abilities); 8e's
+`AfterMove` after a bounce (no handler reads a field that differs).

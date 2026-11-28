@@ -12,7 +12,8 @@ correct, fast simulator first, and no bot work until it exists.
 - Fast tests, for normal development:
   `POKESIM_TIER=fast cabal test --test-show-details=direct`. It replays every
   10th trace of each set, checks the trace pools in full, and runs the
-  hedgehog properties at 100 tests each.
+  hedgehog properties at 100 tests each (the ones with coverage thresholds
+  run on until those are decided, see `statistical` in `test/props/Main.hs`).
 - Long tests, before a PR merges into main: `cabal test --test-show-details=direct`.
   It replays every trace and runs the properties at 2000 tests each. With
   `POKESIM_TIER` unset the tier is long, so the default is never the
@@ -24,7 +25,7 @@ correct, fast simulator first, and no bot work until it exists.
 
   | Machine | CPU | Traces | Parity threads | Fast | Long |
   | --- | --- | --- | --- | --- | --- |
-  | `banana` (workstation) | Core Ultra 7 265K, pinned to P-cores 0-7 under `nice` | 15,600 packed | 8 | about 4 s | about 31 s |
+  | `banana` (workstation) | Core Ultra 7 265K, pinned to P-cores 0-7 under `nice` | 23,800 packed | 8 | 10 to 18 s (the coverage checks stop when decided) | about 50 s |
   | `blueberry` (laptop) | i7-10710U, 12 threads | 9,000 JSON (before trace format v2) | 6 | about 10 s | about 190 s |
 - Parity test only: `cabal test parity --test-show-details=direct`. It honours
   `POKESIM_TIER`.
@@ -53,6 +54,13 @@ correct, fast simulator first, and no bot work until it exists.
   for X = a, b, c, e with N = 1000, d with 600 and f with 2000. Sets 7a to 7e
   were each recorded from the pool of their own phase branch, built in
   parallel. 7f was recorded from the stacked engine and covers their
+  interactions.
+  Then for slice 8 (the abilities), the same way:
+  `cabal run -v0 engine-pool > local/traces/slice8X-pool.json` and
+  `node tools/oracle/gen-slice8X.js local/record/slice8X N local/traces/slice8X-pool.json`
+  for X = a, c, d, e, f with N = 1000, b with 1200 and g with 2000. Sets 8a
+  to 8f were each recorded from the pool of their own phase branch, built in
+  parallel. 8g was recorded from the stacked engine and covers their
   interactions.
   The parity test can read a JSON set directly
   (`POKESIM_TRACES=local/record`) while it is being debugged. Once it passes,
@@ -116,7 +124,7 @@ by nothing else.
   `tools/usage/gen-whitelist.js`; regenerate it, never edit it by hand.
 - `local/` is gitignored. It holds the Showdown checkout (`local/showdown`,
   read-only), the packed trace corpus and the pool files (`local/traces`,
-  about 165 MB for the current 15,600 battles), and JSON sets being recorded
+  about 255 MB for the current 23,800 battles), and JSON sets being recorded
   (`local/record`). Write throwaway scripts elsewhere.
 - Scope is bounded by Gen 9 OU usage. Do not implement mechanics for other
   generations or build a generation-agnostic framework.
