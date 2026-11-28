@@ -70,6 +70,7 @@ newBattle dx fmt t1 t2 = do
     , bMidTurn = True
     , bQueue = SV.singleton start
     , bFaintQueue = SV.empty
+    , bActiveMove = Nothing
     , bSpeedOrder = U.empty
     , bField = noField
     , bEffectOrder = 0
@@ -175,6 +176,14 @@ turnLoop dx = do
           unless stop loop
 {-# INLINABLE turnLoop #-}
 
+-- | @battle.setActiveMove@ (battle.ts 375-379): the move in use and its user.
+setActiveMove :: Monad m => Actor -> MoveData -> Eng m ()
+setActiveMove user mv = modify' (\b -> b {bActiveMove = Just (MoveInUse user (mvIgnoreAbility mv))})
+
+-- | @battle.clearActiveMove@ (battle.ts 381-389).
+clearActiveMove :: Monad m => Eng m ()
+clearActiveMove = modify' (\b -> case bActiveMove b of Nothing -> b; Just _ -> b {bActiveMove = Nothing})
+
 -- | @battle.endTurn@ (battle.ts): advance the turn counter, apply the 1000-turn limit and request moves.
 {-# INLINABLE endTurn #-}
 endTurn :: MonadChance m => Dex -> Eng m ()
@@ -239,6 +248,7 @@ runAction dx ac = do
       eachEvent dx EvBeforeTurn -- eachEvent('BeforeTurn')
       afterAction dx ac
     KResidual -> do
+      clearActiveMove -- battle.ts 2854: `this.clearActiveMove(true)` before `updateSpeed`
       updateSpeedAll dx
       fieldEvent dx EvResidual Nothing -- fieldEvent('Residual')
       afterAction dx ac
@@ -320,6 +330,8 @@ afterAction :: MonadChance m => Dex -> Action -> Eng m ()
 afterAction dx ac = do
   -- phazing (battle.ts 2866-2873): after the action and before the faints are resolved, whether or not the battle has ended
   phazing dx
+  -- battle.ts 2875: `if (this.gen > 4) this.clearActiveMove()`, after the phazing and before the faints are resolved
+  clearActiveMove
   -- fainting: resolveFaints({ checkWinIfNoFaints: true, checkWin: true })
   resolveFaints dx True True
   ended <- gets ((/= Ongoing) . bResult)
@@ -396,7 +408,8 @@ switchRequests dx = mapM one [P1, P2]
           modify' (modifyMon (activeActor p b) (\m -> m {monSwitchFlag = NoSwitch}))
           pure False
         else do
-          when (flagged && monHp (activeMon p b) > 0) (eachEvent dx EvUpdate)
+          -- runPursuitActivation: `this.battle.clearActiveMove()` (battle-actions.ts 65), then the Update
+          when (flagged && monHp (activeMon p b) > 0) (clearActiveMove >> eachEvent dx EvUpdate)
           pure flagged
 
 -- ---------------------------------------------------------------------------
@@ -438,7 +451,7 @@ switchIn dx how p target = do
       Just o | monHp (monOf b0 o) > 0 -> do
         -- runPursuitActivation(oldActive): eachEvent('Update') (the BeforeSwitchOut event has no handlers). It returns at once for a
         -- Pokemon whose `skipPursuit` is set, which a flagged one has ('switchRequests'): not for an instaswitch
-        when (how == HowSwitch) (eachEvent dx EvUpdate)
+        when (how == HowSwitch) (clearActiveMove >> eachEvent dx EvUpdate)
         -- battle-actions.ts 100: `if (!this.battle.runEvent('SwitchOut', oldActive)) return false` (Regenerator and Natural Cure listen,
         -- neither refuses; custom formats are the only thing that can)
         void (runEvent dx EvSwitchOut o Nothing Nothing RNone)
@@ -549,7 +562,11 @@ runMove fmt dx user@(Actor p _) slot = do
       -- (a move on the user targets the user: battle.getRandomTarget returns the Pokemon for 'self')
       -- (battle.getRandomTarget: `self`, `all`, `allySide` and `allyTeam` return the Pokemon; foeSide the foe)
       let eventTarget = if mrTarget (mvRule mv) `elem` [TargetSelf, TargetAllySide, TargetAll] then user else target
+      -- runMove (battle-actions.ts 302): `this.battle.setActiveMove(move, pokemon, target)`, before BeforeMove
+      setActiveMove user mv
       proceed <- relayTruthy <$> runEvent dx EvBeforeMove user (Just eventTarget) (Just mv) RNone
+      -- a move stopped here: `clearActiveMove(true)` (309)
+      unless proceed clearActiveMove
       when proceed $ do
         -- pokemon.deductPP (battle-actions.ts 339), after BeforeMove: `if (!pokemon.deductPP(baseMove, null, target) && move.id !== 'struggle')`
         -- the move fails (`cant nopp`) and returns. deductPP returns 0 for a move with no slot or no PP left. (A chosen move always has PP
@@ -560,6 +577,8 @@ runMove fmt dx user@(Actor p _) slot = do
             hasPP = case mslot of
               Just i -> maybe False ((> 0) . msPP) (monMoves um SV.!? i)
               Nothing -> False
+        -- the PP check fails: `cant nopp` and `clearActiveMove(true)` (341)
+        unless (struggling || hasPP) clearActiveMove
         when (struggling || hasPP) $ do
           forM_ mslot $ \i ->
             modify' (modifyMon user (\m -> m {monMoves = SV.imap (\j x -> if j == i then x {msPP = msPP x - 1} else x) (monMoves m)}))
@@ -588,11 +607,20 @@ useMove fmt dx user target mv0 = do
   -- conditions.ts frz.onModifyMove; no other supported effect changes the move). The target they see is the one
   -- `getRandomTarget` gives (a move on the user targets the user). Every later step of the use reads the changed move.
   let eventTarget = if mrTarget (mvRule mv0) `elem` [TargetSelf, TargetAllySide, TargetAll] then user else target
+  -- useMoveInner (battle-actions.ts 492): `this.battle.setActiveMove(move, pokemon, target)`, before the ModifyType and ModifyMove events.
+  -- Showdown's ActiveMove is one object that those handlers mutate: 'mvIgnoreAbility' of the changed move is set again after them
+  -- (Mold Breaker sets it in onModifyMove, 8f). There is no restore after a nested useMove in Gen 9 (battle-actions.ts 415-417 restores only for `gen <= 4`).
+  setActiveMove user mv0
   mvT <- singleMoveEvent dx EvModifyType user (Just eventTarget) mv0
   mv <- singleMoveEvent dx EvModifyMove user (Just eventTarget) mvT
-  void (runEvent dx EvModifyType user (Just eventTarget) (Just mv) RNone)
-  void (runEvent dx EvModifyMove user (Just eventTarget) (Just mv) RNone)
-  useMoveWith fmt dx user target mv
+  -- the holders' handlers edit the move ('MoveEdit'): ModifyType's result is the move ModifyMove sees (battle-actions.ts 502-503)
+  let edited r m = case r of
+        RMoveEdits es@(_ : _) -> applyMoveEdits es m
+        _ -> m
+  mvTy <- (`edited` mv) <$> runEvent dx EvModifyType user (Just eventTarget) (Just mv) (RMoveEdits [])
+  mvM <- (`edited` mvTy) <$> runEvent dx EvModifyMove user (Just eventTarget) (Just mvTy) (RMoveEdits [])
+  setActiveMove user mvM
+  useMoveWith fmt dx user target mvM
 
 -- | 'useMove' after the @ModifyType@ and @ModifyMove@ events: the rest of @useMoveInner@ and the hit steps, which read the
 -- move in use.
@@ -639,7 +667,7 @@ useMoveWith fmt dx user target mv = case mrTarget rule of
      when tryHit $
       -- hitStepTypeImmunity (before accuracy: an immune target consumes no draws); a move with
       -- ignoreImmunity (every status move but a few) skips it
-      unless (not (mrIgnoreImmunity rule) && isImmune dx (mvType mv) tm) $
+      unless (not (mrIgnoreImmunity rule) && isImmune dx b target (mvType mv)) $
        -- hitStepTryImmunity (battle-actions.ts 735): `gen >= 6 && move.flags['powder'] && target !== pokemon &&
        -- !this.dex.getImmunity('powder', target)`: Grass types are immune to a powder move (no draw)
        unless (mrPowder rule && typeImmuneTo dx "powder" tm) $
@@ -660,7 +688,7 @@ useMoveWith fmt dx user target mv = case mrTarget rule of
               -- once accuracy passed. A user with no HP gets nothing.
               -- LATENT: a first hit that fails (a move TryHit that returns false, as Low Kick's against a Dynamaxed target) would
               -- make `moveResult` false and skip the boost; no supported selfBoost move has one.
-              unless (null (mrSelfBoost rule)) (void (boostMon dx (Just user) (Just mv) user (mrSelfBoost rule)))
+              unless (null (mrSelfBoost rule)) (void (boostMon dx (Just user) (Just mv) moveCause user (mrSelfBoost rule)))
               -- useMoveInner: the move succeeded (`moveResult`), the user is queued to faint if it has no HP, then
               -- runEvent('AfterMoveSecondarySelf', pokemon, target, move): Life Orb's recoil. A status move
               -- raises it too, but no supported handler acts on one.
@@ -685,6 +713,8 @@ useMoveWith fmt dx user target mv = case mrTarget rule of
 {-# INLINABLE sideMove #-}
 sideMove :: MonadChance m => Dex -> Actor -> Actor -> MoveData -> Eng m ()
 sideMove dx user target mv = do
+  -- tryMoveHit (battle-actions.ts 887): `this.battle.setActiveMove(move, pokemon, targets[0])`
+  setActiveMove user mv
   -- tryMoveHit (battle-actions.ts 889-891): `singleEvent('Try') && singleEvent('PrepareHit') && runEvent('PrepareHit')`; the move's
   -- own onTry (Aurora Veil needs snow) comes first and a falsy result fails the move before anything else
   tried <- moveTry dx user target mv
@@ -766,7 +796,7 @@ statusMoveHit dx user tgt mv0 = do
           -- fail: `moveHit(source, source, move, moveData.self, ..., true)` adds roost's volatile (no draw)
           forM_ (mrSelf (mvRule mv0)) (applyEffect dx user mv0 tgt)
           pure (True, mv0)
-    [EBoost bs] -> (\r -> (r, mv0)) <$> boostMon dx (Just user) (Just mv0) tgt bs
+    [EBoost bs] -> (\r -> (r, mv0)) <$> boostMon dx (Just user) (Just mv0) moveCause tgt bs
     -- the move's own onHit (singleEvent('Hit'), battle-actions.ts 1338): its result decides whether the hit did
     -- something. A heal that fails with NOT_FAIL still counts as a hit (see 'HitResult'), a false return fails the move
     -- (the move in use comes back: Parting Shot's body deletes its selfSwitch)
@@ -847,12 +877,13 @@ hitLoop fmt dx user target mv = do
   -- applyRecoilDamage (after the loop, from move.totalDamage; battle-actions.ts ~1439)
   let um = monOf b user
   case (mvStruggleRecoil mv, mrRecoil rule) of
-    -- struggleRecoil: round(baseMaxhp / 4), at least 1, as directDamage
+    -- struggleRecoil: round(baseMaxhp / 4), at least 1, as directDamage (battle-actions.ts 1449): no Damage event
     -- (slice 7b: `move.totalDamage || (move.struggleRecoil && damage.some((val, i) => val === 0 && !!targetsCopy[i]))`: a last hit on a
     -- Substitute leaves no target in targetsCopy, and its recoil was taken inside the hit ('hitSubstitute'))
     (True, _) | not lastSub -> modify' (applyDamage user (max 1 (roundDiv (monMaxHp um) 4)))
-    -- recoil: round(totalDamage * n / d), at least 1, as damage(.., 'recoil')
-    (_, Just (n, d)) | total > 0 -> modify' (applyDamage user (max 1 (roundDiv (total * n) d)))
+    -- recoil: round(totalDamage * n / d), at least 1, as battle.damage(recoil, pokemon, pokemon, 'recoil'): the Damage event runs
+    -- with the 'EffRecoil' effect (Magic Guard and Rock Head read it)
+    (_, Just (n, d)) | total > 0 -> void (damageMon dx user (Just user) Nothing (Just (EffectKey EffRecoil 0)) (max 1 (roundDiv (total * n) d)))
     _ -> pure ()
   -- `if (!damage.some(val => !!val || val === 0)) return damage;` guards the next Update: a hit always
   -- yields a numeric damage here (0 counts), so the guard always passes
@@ -892,7 +923,7 @@ hitEffects dx user target mv onSub = do
   -- to the user. move.selfDropped stops a repeat only for a single hit (`if (!move.multihit)`), so a
   -- multi-hit move draws every hit.
   forM_ (mrSelf rule) $ \e -> case e of
-    EBoost bs -> roll 0 100 >> void (boostMon dx (Just user) (Just mv) user bs)
+    EBoost bs -> roll 0 100 >> void (boostMon dx (Just user) (Just mv) moveCause user bs)
     _ -> pure ()
   -- secondaries: for each, random(100); below the chance it hits the target (moveHit with isSecondary), then
   -- its `self` effects (selfDrops with isSecondary draws nothing)
@@ -932,7 +963,7 @@ forceSwitchStep dx user target mv = when (mrForceSwitch (mvRule mv)) $ do
 -- | One effect of a secondary on a Pokemon (@moveHit@ with @isSecondary@ -> @runMoveEffects@), of the move @mv@ used by @user@.
 applyEffect :: MonadChance m => Dex -> Actor -> MoveData -> Actor -> Effect -> Eng m ()
 applyEffect dx user mv a e = case e of
-  EBoost bs -> void (boostMon dx (Just user) (Just mv) a bs)
+  EBoost bs -> void (boostMon dx (Just user) (Just mv) moveCause a bs)
   EStatus st -> void (trySetStatus dx a st)
   -- addVolatile('flinch'): needs HP (no affectsFainted), fails if it is already there; no immunity, no
   -- TryAddVolatile handler, duration 1
@@ -949,8 +980,6 @@ applyEffect dx user mv a e = case e of
 {-# INLINABLE hitMove #-}
 hitMove :: MonadChance m => Format -> Dex -> Actor -> Actor -> MoveData -> Eng m (Int, MoveData, Bool)
 hitMove fmt dx user target mv = do
-  b <- get
-  let tm = monOf b target
   -- spreadMoveHit (battle-actions.ts 1101-1105): singleEvent('TryHit', moveData, {}, target, pokemon, move) opens every hit
   -- (lowkick, grassknot and heavyslam fail against a Dynamaxed target: never here). The hit steps' runEvent('TryHit') already ran.
   -- (Brick Break, Psychic Fangs and Raging Bull shatter the target's screens here, before getDamage: 'moveTryHit')
@@ -960,7 +989,7 @@ hitMove fmt dx user target mv = do
   primary <- runEvent dx EvTryPrimaryHit target (Just user) (Just mv) RNone
   case primary of
     RInt 0 -> hitSubstitute fmt dx user target mv
-    _ -> hitTarget fmt dx user target mv tm
+    _ -> hitTarget fmt dx user target mv
 
 -- | The damage of one hit (@getDamage@, battle-actions.ts 1650-1779) of a move on a Pokemon: the damage callback or a fixed damage, which
 -- draw nothing, or the full formula.
@@ -1009,7 +1038,7 @@ hitSubstitute fmt dx user target mv = do
   -- `if (damage) this.actions.applyRecoilDamage(damage, move, source)`
   when (dealt > 0) $ case (mvStruggleRecoil mv, mrRecoil rule) of
     (True, _) -> modify' (applyDamage user (max 1 (roundDiv (monMaxHp um) 4)))
-    (_, Just (n, d)) -> modify' (applyDamage user (max 1 (roundDiv (dealt * n) d)))
+    (_, Just (n, d)) -> void (damageMon dx user (Just user) Nothing (Just (EffectKey EffRecoil 0)) (max 1 (roundDiv (dealt * n) d)))
     _ -> pure ()
   -- `if (move.drain) this.heal(Math.ceil(damage * move.drain[0] / move.drain[1]), source, target, 'drain')`
   forM_ (mrDrain rule) $ \(n, d) -> modify' (healMon user ((dealt * n + d - 1) `quot` d))
@@ -1020,24 +1049,17 @@ hitSubstitute fmt dx user target mv = do
 
 -- | The rest of 'hitMove' for a hit on the Pokemon itself.
 {-# INLINABLE hitTarget #-}
-hitTarget :: MonadChance m => Format -> Dex -> Actor -> Actor -> MoveData -> Mon -> Eng m (Int, MoveData, Bool)
-hitTarget fmt dx user target mv tm = do
+hitTarget :: MonadChance m => Format -> Dex -> Actor -> Actor -> MoveData -> Eng m (Int, MoveData, Bool)
+hitTarget fmt dx user target mv = do
   (dmg, mv') <- hitDamage fmt dx user target mv
-  -- spreadDamage (battle.ts 2146): `targetDamage = this.runEvent('Damage', target, source, effect, targetDamage, true)` after the clamp to
-  -- at least 1 (unless 0) and before the damage is dealt, with the move as the effect: Endure's onDamage leaves the target 1 HP. The
-  -- result is clamped again (`if (targetDamage !== 0) targetDamage = clampIntRange(targetDamage, 1)`). A falsy result ends the damage
-  -- (`damage event failed`): no handler returns one.
-  -- LATENT: the other `battle.damage` calls (residuals, recoil, Rocky Helmet, Spiky Shield, ...) run no Damage event here: their
-  -- effect is not a Move, and Endure is its only listener and acts on a Move alone. An effect with a Damage handler of another kind
-  -- (Sturdy, Magic Guard, Focus Sash) must add the event to those paths. A hit on a Substitute ('hitSubstitute') is no spreadDamage
-  -- (its target is null there: the damage is `target.volatiles['substitute'].hp -= damage`), so Endure does not act on it.
-  let damage0 = if dmg == 0 then 0 else max 1 dmg
-  dmgR <- runEvent dx EvDamage target (Just user) (Just mv') (RInt damage0)
-  let damage1 = fromRelay damage0 dmgR
-  let -- spreadDamage: clamp to at least 1 unless 0, then Pokemon.damage; `dealt` is the damage returned
-      requested = if damage1 == 0 then 0 else max 1 damage1
-      dealt = min requested (monHp tm)
-  modify' (applyDamage target requested)
+  -- spreadDamage (battle.ts 2107-2154) through 'damageMon': the clamp to at least 1 (unless 0), `runEvent('Damage', target, source,
+  -- effect, targetDamage, true)` with the move as the effect (Endure's onDamage leaves the target 1 HP), the second clamp and
+  -- Pokemon.damage; `dealt` is the damage returned. A falsy result of the event (`damage event failed`) deals nothing.
+  -- LATENT(8c): the move's damage array then holds `false`, which fails the hit; none of the supported handlers returns one for a
+  -- Move (Magic Guard acts on every effect but a Move), and Sturdy returns a damage.
+  -- A hit on a Substitute ('hitSubstitute') is no spreadDamage (its target is null there: the damage is
+  -- `target.volatiles['substitute'].hp -= damage`), so no Damage event runs for it.
+  dealt <- fromMaybe 0 <$> damageMon dx target (Just user) (Just mv') moveCause dmg
   -- spreadDamage, effect.drain (battle.ts ~2187): heal the user round(dealt * n / d); battle.heal turns a
   -- positive amount below 1 into 1 and does nothing for 0, at full HP or when the user is down
   case mrDrain (mvRule mv) of

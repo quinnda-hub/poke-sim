@@ -26,6 +26,7 @@ module Engine.Event
   , RuleCond (..)
   , NativeId (..)
   , Relay (..)
+  , MoveEdit (..)
   , relayTruthy
   , nativeBody
     -- * Sort keys
@@ -175,6 +176,16 @@ data EventId
   -- ^ @runEvent('TryPrimaryHit', target, pokemon, moveData)@ in @tryPrimaryHitEvent@ (battle-actions.ts 1197-1205), step 0 of
   -- @spreadMoveHit@ (1115-1119) for a hit that is neither secondary nor on the user: its result is the damage array's entry.
   -- Only the Substitute volatile listens (priority -1).
+  -- slice 8 base
+  | EvChangeBoost
+  -- ^ @runEvent('ChangeBoost', target, source, effect, {...boost})@ in @battle.boost@ (battle.ts 2048), before the cap: the relay value is the
+  -- stage changes as given ('RBoosts', zeros included); a handler returns the table that replaces it (Contrary, Simple).
+  | EvTryBoost
+  -- ^ @runEvent('TryBoost', target, source, effect, {...boost})@ in @battle.boost@ (battle.ts 2050), after @getCappedBoost@: the relay value is the
+  -- capped table ('RBoosts'); a handler returns the table that replaces it (Clear Body, Hyper Cutter, Mirror Armor).
+  | EvAfterEachBoost
+  -- ^ @runEvent('AfterEachBoost', target, source, effect, currentBoost)@ in @battle.boost@ (battle.ts 2091), after each stat whose stage changed, with
+  -- that stat alone as the relay value ('RBoosts'). Opportunist's and Defiant's kin read it.
   deriving (Eq, Show, Enum, Bounded)
 
 -- | How @runEvent@ orders the handlers of an event (battle.ts 797-803).
@@ -279,6 +290,10 @@ eventName e = case e of
   EvOverrideAction -> "OverrideAction"
   -- slice 7b
   EvTryPrimaryHit -> "TryPrimaryHit"
+  -- slice 8 base
+  EvChangeBoost -> "ChangeBoost"
+  EvTryBoost -> "TryBoost"
+  EvAfterEachBoost -> "AfterEachBoost"
 
 -- | Which Pokemon a handler reacts to: the holder (@onX@), its allies (@onAllyX@), its foes (@onFoeX@), the
 -- source of the event (@onSourceX@) or anyone (@onAnyX@).
@@ -381,6 +396,9 @@ data EffectKind
   | -- | A move, as the effect of a @runEvent@ with @onEffect@ (@BasePower@): its state is @initEffectState({})@, which
     -- has no id, so it is not in the state and the key's id is unused (the handler carries the move's spec).
     EffMove
+  | -- | The effect of recoil damage (@effect: 'recoil'@ of @applyRecoilDamage@, battle-actions.ts 1451): Showdown's @Condition@ with
+    -- @effectType: 'Recoil'@ (dex-conditions.ts 700). It is no Move, and no state holds it; the key's id is unused.
+    EffRecoil
   deriving (Eq, Show)
 
 -- | The prefix of the callbacks an effect of this kind keeps for itself, as @singleEvent@ reads them: a side
@@ -448,9 +466,27 @@ data Body
 
 -- | The value an event threads through its handlers (Showdown's @relayVar@). 'RNone' is the hidden @true@ of an
 -- event run without one: it is not passed to the handlers and it is relayTruthy.
-data Relay = RNone | RBool !Bool | RInt !Int | RText !T.Text | RBoosts ![(BoostStat, Int)]
+data Relay = RNone | RBool !Bool | RInt !Int | RText !T.Text | RBoosts ![(BoostStat, Int)] | RMoveEdits ![MoveEdit]
   -- ^ 'RText' is a type or status key (@Immunity@: @'frz'@, @'sandstorm'@). 'RBoosts' is the capped stage changes @AfterBoost@ passes
-  -- (@getCappedBoost@: a stat with no change is absent, as in Showdown's sparse table).
+  -- (@getCappedBoost@: a stat with no change is absent, as in Showdown's sparse table). 'RMoveEdits' is the relay of the
+  -- holders' @ModifyType@ and @ModifyMove@ events (see 'MoveEdit').
+  deriving (Eq, Show)
+
+-- | One change a holder's @ModifyType@ or @ModifyMove@ handler makes to the move in use. Showdown passes the ActiveMove
+-- itself as the relay of both events (@move = this.battle.runEvent('ModifyType', pokemon, target, move, move)@, then
+-- @'ModifyMove'@, battle-actions.ts 502-503) and a handler edits that one object. Here the relay starts as
+-- @RMoveEdits []@; a handler returns it with its edits appended, in order. The dispatcher applies the edits so far to the
+-- move the later handlers of the same event see ('Engine.Dispatch.applyMoveEdits'), and 'Engine.Turn.useMove' applies
+-- the result to the move in use. A phase that needs another kind of edit adds a constructor here.
+data MoveEdit
+  = MESetType !Int
+  -- ^ @move.type = ...@ (Liquid Voice: @'Water'@), a type index as in 'Engine.Dex.mvType'
+  | MEIgnoreEvasion
+  -- ^ @move.ignoreEvasion = true@ (Keen Eye)
+  | MEIgnoreAbility
+  -- ^ @move.ignoreAbility = true@ (Mold Breaker)
+  | MEInfiltrates
+  -- ^ @move.infiltrates = true@ (Infiltrator)
   deriving (Eq, Show)
 
 -- | Showdown's truthiness of a relay value: @false@ and 0 are falsy.

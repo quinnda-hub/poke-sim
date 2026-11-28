@@ -15,6 +15,9 @@ module Engine.Damage
   , hasItemNamed
   , typeIdNamed
   , isGrounded
+  , ignoringAbility
+  , suppressingAbility
+  , hasAbility
   , isSemiInvulnerable
   , typeIsNamed
   , typeMod
@@ -35,7 +38,7 @@ import Engine.Event (Body (..), CondId, EventId (..), HandlerSpec (..), NativeId
 import Engine.Format (Format, trunc, truncBits)
 import Engine.Modifier (modify)
 import Engine.Rule (Hits (..), MoveRule (..), StatusId (..))
-import Engine.State (Mon (..), MonStatus (..), Volatile (..), noItem)
+import Engine.State (Actor, Battle (..), Mon (..), MonStatus (..), MoveInUse (..), Volatile (..), monOf, noItem)
 
 -- | Denominator of the crit chance for a crit stage, or 'Nothing' when the move cannot crit
 -- (gen 7+ table @[0, 24, 8, 2, 1]@ indexed by the clamped @critRatio@).
@@ -102,13 +105,13 @@ monTypesPreTera dx m
 -- @isGrounded(negateImmunity)@ (a Roosted Flying type is grounded, so Ground hits it), every other type through
 -- @dex.getImmunity(type, this)@ on @getTypes()@ ('monTypes').
 -- LATENT: @runEvent('NegateImmunity')@ (Scrappy, Ring Target, Iron Ball) has no listener.
-isImmune :: Dex -> Int -> Mon -> Bool
-isImmune dx atkType m
+isImmune :: Dex -> Battle -> Actor -> Int -> Bool
+isImmune dx b a atkType
   | atkType == noType = False
-  | typeIsNamed dx atkType "Ground" = not (isGrounded dx m)
+  | typeIsNamed dx atkType "Ground" = not (isGrounded dx b a)
   | otherwise = typeEffect dx t1 atkType == 3 || (t2 /= noType && typeEffect dx t2 atkType == 3)
   where
-    (t1, t2) = monTypes dx m
+    (t1, t2) = monTypes dx (monOf b a)
 
 -- | Whether a Pokemon has the type with this name (@pokemon.hasType@, which reads @getTypes()@: 'monTypes').
 hasTypeNamed :: Dex -> T.Text -> Mon -> Bool
@@ -133,8 +136,31 @@ typeIdNamed dx name = V.findIndex (== name) (dxTypeNames dx)
 -- Eelevate), Magnet Rise and Telekinesis (volatiles), Air Balloon (item). None of these is supported, so a Pokemon is
 -- grounded exactly when it does not have the Flying type. (The Burn Up clause, a @???@ Roosted type, is not modelled.)
 -- The terrains' bodies also read @isSemiInvulnerable()@ ('isSemiInvulnerable').
-isGrounded :: Dex -> Mon -> Bool
-isGrounded dx m = not (hasTypeNamed dx "Flying" m)
+-- Levitate: `this.hasAbility('levitate') && !this.battle.suppressingAbility(this)` (pokemon.ts 2185) returns null, not grounded. It goes
+-- through 'hasAbility', so Gastro Acid, Neutralizing Gas and Mold Breaker all reach it.
+isGrounded :: Dex -> Battle -> Actor -> Bool
+isGrounded dx b a = not (hasTypeNamed dx "Flying" (monOf b a)) && not (hasAbility dx b a "levitate" && not (suppressingAbility dx b a))
+
+-- | @pokemon.ignoringAbility()@ (pokemon.ts 879-895): a Pokemon not in play (gen >= 5). It is the one function that 'hasAbility' and
+-- the dispatcher's ability gate ('Engine.Dispatch.runEvent', battle.ts 884-891) consult.
+-- LATENT(8f): Gastro Acid, Neutralizing Gas (and the Ability Shield and @cantsuppress@ exceptions) and a transformed Pokemon's
+-- @notransform@ ability are not modelled: no effect suppresses an ability yet.
+ignoringAbility :: Battle -> Actor -> Bool
+ignoringAbility b a = not (monActive (monOf b a))
+
+-- | @battle.suppressingAbility(target)@ (battle.ts 366-369): the move in use (Mold Breaker and its kin set @ignoreAbility@) while its
+-- user is in play and is not the target, and the target has no Ability Shield. 'bActiveMove' holds @ignoreAbility@, always False
+-- until a phase sets it, so this is False.
+suppressingAbility :: Dex -> Battle -> Actor -> Bool
+suppressingAbility dx b a = case bActiveMove b of
+  Just (MoveInUse user ignore) -> ignore && monActive (monOf b user) && user /= a && not (hasItemNamed dx "abilityshield" (monOf b a))
+  Nothing -> False
+
+-- | @pokemon.hasAbility(ability)@ (pokemon.ts): false while 'ignoringAbility', otherwise the ability's id is @ability@. Every test of a
+-- Pokemon's ability outside the dispatcher's handler collection goes through here.
+-- LATENT: Showdown's version takes a list and compares @this.ability@ only; 'monAbility' is that.
+hasAbility :: Dex -> Battle -> Actor -> T.Text -> Bool
+hasAbility dx b a name = not (ignoringAbility b a) && abilityId dx (monAbility (monOf b a)) == name
 
 -- | @pokemon.isSemiInvulnerable()@ (pokemon.ts 2184): the @fly@, @bounce@, @dive@, @dig@, @phantomforce@, @shadowforce@
 -- and @skydrop@ volatiles.
