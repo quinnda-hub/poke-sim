@@ -487,6 +487,7 @@ conditionFor conditionsV abilitiesV movesV c = do
       CProtosynthesis -> Just "protosynthesis"
       CQuarkDrive -> Just "quarkdrive"
       CUnburden -> Just "unburden"
+      CFlashFire -> Just "flashfire" -- slice 8b
       _ -> Nothing
     moveOf' x = case x of
       CRoost -> Just "roost"
@@ -561,7 +562,7 @@ effectFor ident typeOrder ownPfx startAsSwitchIn v mbodies = do
     Object o | Just hs <- KM.lookup "handlers" o -> asArray hs >>= traverse asText
     _ -> Right []
   -- the @condition.on...@ handlers of these abilities belong to their volatile ('conditionFor'), not to the ability
-  let names1 = if ident `elem` ["protosynthesis", "quarkdrive", "unburden"] && startAsSwitchIn
+  let names1 = if ident `elem` ["protosynthesis", "quarkdrive", "unburden", "flashfire" {- slice 8b -}] && startAsSwitchIn
         then filter (not . ("condition." `T.isPrefixOf`)) names0
         else names0
       -- naturalcure.onCheckShow (abilities.ts 2813, run only by a plain switch action, battle.ts 2818) returns at once in singles

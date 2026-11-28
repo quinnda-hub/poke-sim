@@ -1772,7 +1772,72 @@ by `tools/oracle/gen-slice8a.js`.
 
 ### 8b findings
 
-(To be written by phase 8b.)
+Thirteen abilities: Multiscale, Sharpness, Tinted Lens, Guts, Transistor, Sniper, Heatproof, Purifying Salt, Water Bubble, Flash Fire, Supreme
+Overlord, Vessel of Ruin and Unaware. Their bodies are in `abilityBodies`. Transistor, and the Atk and SpA halving or doubling of Heatproof, Purifying
+Salt and Water Bubble, are `RChainModify` rules with a `CMoveType` condition; the rest are natives. Parity passes on the new set (1,200 traces).
+
+**What was added.**
+- `sTotalFainted` on `Side` (side.ts 263, battle.ts 2601): +1 at each faint while below 100, in `resolveFaints` beside `sLeft`. A property checks
+  that it equals the number of fainted members.
+- `CFlashFire`, the volatile of the ability's `condition` block (no duration). The ability's `onEnd` removes it, and the faint and switch-out
+  `End` events reach that handler, as they do for Unburden.
+- `EvModifyBoost` (`runEvent('ModifyBoost', ...)`), run at the three places Showdown reads a stage: `calculateStat` for the attack and the defense
+  stat of `getDamage` (pokemon.ts 602, on the stat user, which is the move's user for the attack even with Foul Play), `getStat('spe')`
+  (pokemon.ts 639, in `getActionSpeed`) and the accuracy step (battle-actions.ts 782, 786). `modifyBoost` reads one stage through it.
+- `cTarget` in `Ctx`: the event's target. An `onAny` handler needs it (`pokemon` of Unaware, `source` of Vessel of Ruin). It is the holder for
+  `singleEvent`.
+- `mrSlicing` in `MoveRule` (`flags.slicing`), taken out of `inertFlags`. A flag field, as `mrBypassSub` is: no rule kind.
+- Guts: `modifyDamage` takes `hasAbility('guts')` of the user as a Bool and skips the burn's halving then (battle-actions.ts 1874).
+- `Engine.Turn` exports `getDamage`, for the property.
+
+**Things that were not as the design had them.**
+- Heatproof's `onDamage` returns `damage / 2`, which is not an integer for an odd burn damage. `spreadDamage` floors it and raises it to 1
+  (`clampIntRange`, battle.ts 2145), so a burn of 1 HP still deals 1. The handler returns `max 1 (d / 2)`.
+- Unaware reads `activePokemon` and `activeTarget`. `activeTarget` is set in `hitStepAccuracy` (battle-actions.ts 748), and the state has only the
+  user. In singles it is the foe of the user for every move that reaches a stage read here, so the handler derives it. The handler zeroes a stage in
+  the table of the one stat read; Showdown zeroes keys of a larger table that nothing reads.
+- Unaware never changes Speed, so the `getStat('spe')` event is run but cannot change a stage. It still sorts its handlers, and two Unaware
+  holders of equal speed draw there. The parity set has such battles (mirror teams).
+- The accuracy events run for every move with an accuracy (`accuracy !== true`, battle-actions.ts 779), Toxic by a Poison type included: `accuracy =
+  true` comes after them (797). The engine ran no event for that Toxic; it now does, for the draws a tie in them makes.
+- Vessel of Ruin writes `move.ruinedSpA` the first time it runs and later holders compare against it (abilities.ts 5271). In singles the attacker
+  is never a holder when the defender's handler lowers, so the only possible holder is the defender and the mark is unobservable. The handler reads
+  `mvRuinedSpA` (the slot) and never writes it. A handler cannot change the move in use. Two holders of equal speed tie in the sort and draw, as in
+  Showdown; the set has 117 such hits.
+- Water Bubble's and Purifying Salt's `onSetStatus` return false for any cause (Showdown logs `-immune` only for a move). Purifying Salt's
+  `onTryAddVolatile` acts on `yawn`, which is not supported, so it never fires.
+- Flash Fire sets `move.accuracy = true` before `return null`. The hit is over by then, so the engine does not write it.
+- Supreme Overlord's `fallen` is the ability state's `esA` (-1 when absent). The ability state is new at each switch-in, so the count is read
+  again. The count is at most 5 for a side of six, since the holder cannot be one of the faints it enters after.
+- `findEventHandlers` (battle.ts 1049-1110) lists the target's own handlers, then each ally's (the target included) `onAlly` and `onAny`, then each
+  foe's `onFoe` and `onAny`, then the source's, then the sides' and the field's. The engine's collection is in that order; the `onAny` stat handlers need no
+  change.
+
+**Properties.** One property, `damageAbilities`, through `getDamage` on a state from a random playout. The Pokemon in play lose abilities, items,
+statuses and volatiles, get random stages and use a random damaging move with the same draws in every variant. Each ability joins one Pokemon:
+- the damage rises (Sharpness on a slicing move, Tinted Lens on a resisted hit, Transistor on Electric, Sniper, Water Bubble on Water, Flash Fire's
+  volatile on Fire, Supreme Overlord at counts 1 to 5, Guts on a Physical hit with a status) or falls (Multiscale at full HP, Heatproof and Water Bubble
+  on Fire, Purifying Salt on Ghost, Vessel of Ruin on a Special hit) or stays the same for the hits it does not name, with Multiscale below full HP the same;
+- Supreme Overlord's damage does not fall as the count rises;
+- two Vessel of Ruin holders, or one attacking, change nothing (when the speeds differ: a tie draws);
+- Unaware on the target equals the damage with the user's Attack, Defense and Special Attack stages at 0 (and the target's Attack for Foul Play), and on
+  the user equals the damage with the target's Defense and Special Defense at 0.
+  Moves with a base-power callback are left out of the Unaware equalities: Stored Power reads the stages itself, and Unaware does not zero those.
+
+`checkBattle` also checks `sTotalFainted`, a Supreme Overlord holder's count, and the `flashfire` volatile (no duration, held only by a holder of the
+ability). The pivot-heavy teams carry the thirteen abilities.
+
+**The set.** `tools/oracle/gen-slice8b.js`, 1,200 battles: 30% random play, the rest scripted (a script that Showdown rejects, because a Pokemon
+fainted early, is dropped and the battle recorded as random play). Every branch of every ability has a nonzero count in the tally. Showdown has no
+move in this pool that always crits, so Sniper's crits come from the raised crit stage of the high-crit moves, repeated over many turns.
+
+**LATENT.**
+- 8a: Unaware ignores stages only where stats and accuracy are read. The boost events (Intimidate, Defiant, Contrary) see the real stages.
+- 8f: Multiscale, Heatproof, Purifying Salt, Water Bubble, Flash Fire and Unaware are `breakable`: the dispatcher already skips them under
+  `suppressingAbility`, so Mold Breaker needs nothing more here. Water Bubble's `onUpdate` cures a burn that Mold Breaker's Will-O-Wisp puts past `onSetStatus`.
+- 8c: Flash Fire's `TryHit` runs left to right with the other `TryHit` handlers and before the type-immunity step. 8c's immunities (Volt Absorb, Water
+  Absorb, Levitate) must keep that order.
+- Vessel of Ruin does not write `ruinedSpA` (needs more than one foe in play).
 
 ### 8c findings
 

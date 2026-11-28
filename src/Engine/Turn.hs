@@ -17,6 +17,8 @@ module Engine.Turn
   , roundDiv
     -- slice 7d
   , runMove
+    -- slice 8b
+  , getDamage
   ) where
 
 import Control.Monad (forM_, unless, void, when)
@@ -674,10 +676,16 @@ useMoveWith fmt dx user target mv = case mrTarget rule of
         -- hitStepTryImmunity, the move's own onTryImmunity (battle-actions.ts 739): Trick and Switcheroo against Sticky Hold
         moveTryImmunity dx target mv >>= \tryImm -> when tryImm $ do
         -- hitStepAccuracy
-        hits <- if mvAccuracy mv == neverMisses || (isToxic && hasTypeNamed dx "Poison" um) then pure True
-          -- `if (!move.ignoreEvasion)` the target's evasion stage joins the accuracy stage (battle-actions.ts 785-788)
-          else randomChance (stagedAccuracy fmt (mvAccuracy mv) (monBoosts um)
-                 (if mrIgnoreEvasion rule || mvIgnoreEvasion mv then (monBoosts tm) {bsEvasion = 0} else monBoosts tm)) 100
+        hits <- if mvAccuracy mv == neverMisses then pure True
+          else do
+            -- slice 8b. `accuracy !== true` (battle-actions.ts 779-791): the user's @ModifyBoost@ event, then (`if (!move.ignoreEvasion)`) the
+            -- target's, each read for its one stage (Unaware zeroes the foe's evasion and the foe's accuracy). They run for Toxic by a Poison type
+            -- too, which `accuracy = true` (797) then overrides: only an event's tie-break draws could tell.
+            accStage <- modifyBoost dx user BAccuracy (bsAccuracy (monBoosts um))
+            evaStage <- if mrIgnoreEvasion rule || mvIgnoreEvasion mv then pure 0 else modifyBoost dx target BEvasion (bsEvasion (monBoosts tm))
+            -- the target's evasion stage joins the accuracy stage (battle-actions.ts 785-788)
+            let staged = stagedAccuracy fmt (mvAccuracy mv) ((monBoosts um) {bsAccuracy = accStage}) ((monBoosts tm) {bsEvasion = evaStage})
+            if isToxic && hasTypeNamed dx "Poison" um then pure True else randomChance staged 100
         when hits $
           if mrDamaging rule
             then do
@@ -1113,13 +1121,20 @@ getDamage fmt dx user target mv = do
       -- whatever its sign (`ignoreOffensive` has no user)
       atkStage = if crit && atkStage0 < 0 then 0 else atkStage0
       defStage = if mrIgnoreDefensive rule || (crit && defStage0 > 0) then 0 else defStage0
-      attack0 = boostedStat (statOf atkSel (monStats attacker)) atkStage
-      defense0 = boostedStat (statOf defSel (monStats tm)) defStage
+      atkStat = statOf atkSel (monStats attacker)
+      defStat = statOf defSel (monStats tm)
       -- `attackStat = (category === 'Physical' ? 'atk' : 'spa')` is assigned again before the events (1763), so the
       -- attacker's event follows the move's category; the defender's follows `defenseStat`, which is not reassigned: Psyshock
       -- (Special, Defense) runs ModifyDef on the target
       atkEv = if mvPhysical mv then EvModifyAtk else EvModifySpA
       defEv = eventOfStat defSel
+  -- slice 8b. getDamage (battle-actions.ts 1759-1760): `attacker.calculateStat(attackStat, atkBoosts, 1, source)` and `defender.calculateStat(defenseStat,
+  -- defBoosts, 1, target)`. Each runs @ModifyBoost@ on its stat user (pokemon.ts 602: `statUser || this`, so the move's user for the attack and the target
+  -- for the defense, even for Foul Play, whose boosts are the target's) with the one stage as the table; the stage then scales the stat.
+  atkStageM <- modifyBoost dx user atkSel atkStage
+  defStageM <- modifyBoost dx target defSel defStage
+  let attack0 = boostedStat atkStat atkStageM
+      defense0 = boostedStat defStat defStageM
   -- getDamage: attack = runEvent('ModifyAtk' | 'ModifySpA', source, target, move, attack) and the defender's
   -- runEvent('ModifyDef' | 'ModifySpD', target, source, move, defense)
   attack <- fromRelay attack0 <$> runEvent dx atkEv user (Just target) (Just mv) (RInt attack0)
@@ -1131,7 +1146,8 @@ getDamage fmt dx user target mv = do
   weathered <- fromRelay (base + 2) <$> runEvent dx EvWeatherModifyDamage user (Just target) (Just mv) (RInt (base + 2))
   r <- roll 0 16
   -- modifyDamage: ... runEvent('ModifyDamage', pokemon, target, move, baseDamage), then the minimum 1 and the 16-bit truncation
-  let pre = modifyDamage fmt dx um tm mv crit r weathered
+  -- (slice 8b: the burn's halving skips a Guts holder, `!pokemon.hasAbility('guts')`, battle-actions.ts 1874)
+  let pre = modifyDamage fmt dx um tm mv crit (hasAbility dx b user "guts") r weathered
   dmg <- finalDamage fmt . fromRelay pre <$> runEventCrit dx crit EvModifyDamage user (Just target) (Just mv) (RInt pre)
   -- modifyDamage's STAB step (1835-1841): a Stellar user's boost marks the move in use and pushes its type onto
   -- @stellarBoostedTypes@ (never cleared: pokemon.ts 504 is the constructor). The marker is set where the state is written, the

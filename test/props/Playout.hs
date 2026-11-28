@@ -111,11 +111,18 @@ genTeamsWith dx pivotHeavy statHeavy = (,) <$> genTeam <*> genTeam
     pickAbility
       -- slice 8a: the stage and switch-in abilities, on most sets of the 'genStatTeams' teams
       | statHeavy && not (null statAbilities) = Gen.frequency [(1, Gen.element abilities), (3, Gen.element statAbilities)]
+      -- slice 8b: the damage abilities join the pivot-heavy mix, where Supreme Overlord meets switch-ins after faints and Flash Fire meets
+      -- the switch-outs that end its volatile
+      | pivotHeavy && not (null switchAbilities) && not (null damageAbilities) = Gen.frequency [(3, Gen.element switchAbilities), (3, Gen.element damageAbilities), (3, Gen.element abilities)]
       | pivotHeavy && not (null switchAbilities) = Gen.frequency [(3, Gen.element switchAbilities), (3, Gen.element abilities)]
       | otherwise = Gen.element abilities
     switchAbilities = [a | a <- ["regenerator", "naturalcure"], a `elem` abilities]
     -- slice 8a
     statAbilities = [a | a <- ["intimidate", "dauntlessshield", "defiant", "contrary", "clearbody", "guarddog", "innerfocus", "bigpecks", "mirrorarmor", "keeneye", "weakarmor", "justified", "gooey", "speedboost"], a `elem` abilities]
+    -- slice 8b
+    damageAbilities =
+      [ a | a <- ["multiscale", "sharpness", "tintedlens", "guts", "transistor", "sniper", "heatproof", "purifyingsalt", "waterbubble", "flashfire", "supremeoverlord", "vesselofruin", "unaware"]
+      , a `elem` abilities ]
     -- every ability and item the engine accepts ("noability" and the empty item among them)
     abilities = supportedAbilities dx
     items = supportedItems dx
@@ -630,6 +637,13 @@ checkBattle dx b = do
       if terad <= 1 && (sTeraUsed s || terad == 0)
         then Right ()
         else Left (show p ++ ": " ++ show terad ++ " terastallized members with sTeraUsed " ++ show (sTeraUsed s))
+      -- slice 8b: side.totalFainted counts the faints (battle.ts 2601), and a faint is final, so it is the number of fainted members
+      let fallen = length (filter monFainted (SV.toList (sMons s)))
+      if sTotalFainted s == fallen then Right () else Left (show p ++ ": totalFainted " ++ show (sTotalFainted s) ++ " with " ++ show fallen ++ " fainted members")
+      -- a Supreme Overlord holder's count is the faints at its switch-in: at most 5, and at most the faints so far
+      mapM_ (\m -> if abilityId dx (monAbility m) == "supremeoverlord" && esA (monAbilityState m) > min 5 (sTotalFainted s)
+                     then Left (show p ++ ": Supreme Overlord with fallen " ++ show (esA (monAbilityState m)) ++ " and totalFainted " ++ show (sTotalFainted s)) else Right ())
+        (SV.toList (sMons s))
       -- a Tera choice is legal only together with the move of the same slot
       let cs = legalChoices b p
       if and [Move n `elem` cs | MoveTera n <- cs] then Right () else Left (show p ++ ": a Tera choice without its move")
@@ -689,6 +703,8 @@ checkBattle dx b = do
             -- starts at the quarter (onStart) and the cost of making it leaves the holder with more than that, and a hit takes it down
             -- to 0, where it goes
             | i == fromEnum CSubstitute = monActive m && not (monFainted m) && monHp m > 0 && esDuration st == 0 && esA st >= 1 && esA st <= monMaxHp m `quot` 4
+            -- slice 8b: flashfire has no duration and lives only on a holder of the ability (the ability's End removes it on a switch-out and a faint)
+            | i == fromEnum CFlashFire = ability "flashfire" && esDuration st == 0
             | otherwise = False
           -- a live Pokemon flagged to switch out (a pivot's or an Eject Button's switch request) means the turn is not over
           -- (a battle that ends mid-turn, on Spiky Shield's damage for one, never reaches the Residual that removes them)

@@ -33,16 +33,17 @@ import System.Random.SplitMix (mkSMGen)
 
 import Engine
 import Engine.Chance (runSample, speedSortWith)
-import Engine.Dex (Condition (..), Dex (..), EvMask (..), MoveData (..), SpeciesData (..), abilityId, evBit, evMaskHas, prefixMask, dexCondLookup, itemId, supportedAbilities, supportedItems, supportedMoves, supportedSpecies)
+import Engine.Dex (Condition (..), Dex (..), EvMask (..), MoveData (..), SpeciesData (..), abilityId, evBit, evMaskHas, moveSpec, prefixMask, dexCondLookup, itemId, supportedAbilities, supportedItems, supportedMoves, supportedSpecies)
 import Engine.Dispatch (HitResult (..), addSideCondition, basePowerCallback, moveAfterHit, moveFieldHit, moveOwnHit, moveTry)
 import Engine.Effects (abilityBodies, fieldCondBodies, itemBodies, moveBodies)
+import Engine.Damage (moveTypeMod, typeIsNamed)
 import Engine.Event (CondId (..), EventId (..), HandlerSpec (..), Prefix (..), condName, parseHandlerName)
 import Engine.Format (trunc, truncBits)
 import Engine.Rule (DamageKind (..), MoveRule (..), executable, moveRule)
 import Engine.State
 import Engine.Modifier (baseMod, chain, chainModify, finalModify, modify, modifyBy)
 import Engine.Stats (actionSpeed, boostedStat, finalSpeed, parSpe)
-import Engine.Turn (roundDiv, runMove, stagedAccuracy)
+import Engine.Turn (getDamage, roundDiv, runMove, stagedAccuracy)
 import Playout
 
 main :: IO ()
@@ -107,6 +108,9 @@ main = do
             withTests (fromIntegral n) (weightBands dex))
         , ("a base-power callback never lowers the move's own base power below what its condition adds",
             withTests (fromIntegral n) (callbacksRaise dex))
+        -- slice 8b
+        , ("damage abilities: each one only raises or only lowers the damage of the hits it names and leaves every other hit alone, Supreme Overlord rises with the fallen count, and Unaware equals zeroed stages",
+            withTests (fromIntegral nCover) (damageAbilities dex))
         ]
     , checkSequential $ Group "arithmetic (against JavaScript semantics)"
         [ ("roundDiv is Math.round(n / d)", withTests (fromIntegral n) propRoundDiv)
@@ -446,6 +450,7 @@ conditionsSupported dex conditionsV abilitiesV movesV = withTests 1 $ property $
         CEncore -> lookupKey "condition" (lookupKey "encore" movesV)
         CTaunt -> lookupKey "condition" (lookupKey "taunt" movesV)
         CSubstitute -> lookupKey "condition" (lookupKey "substitute" movesV) -- slice 7b
+        CFlashFire -> abilityCondition "flashfire" -- slice 8b
         _ -> lookupKey (condName c) conditionsV
       abilityCondition name = lookupKey "condition" (lookupKey name abilitiesV)
       lookupKey k v = case v of
@@ -949,3 +954,111 @@ punchMoves dex = property $ do
           assert (all (\(lo, hi) -> hi - lo < 16) draws)
           monHp (monOf b' user) === monHp (monOf bA user)
           monHp (monOf b' target) === monHp (monOf bA target)
+
+-- | The damage abilities of slice 8b (Multiscale, Sharpness, Tinted Lens, Guts, Transistor, Sniper, Heatproof, Purifying Salt, Water Bubble, Flash
+-- Fire, Supreme Overlord, Vessel of Ruin, Unaware), through 'getDamage' on a state from a random playout: the two Pokemon in play lose their
+-- abilities, items, statuses and volatiles, get random stages, and a random damaging move is used with the same draws in every variant. Each
+-- ability then joins one Pokemon, and the damage is compared with the damage without it. The invariants are the sign of each ability's
+-- modifier (every modifier is a chain of factors at or above 1, or at or below 1, and the damage formula is monotone in them), and that the hits an
+-- ability does not name come out unchanged:
+--
+-- * Multiscale halves a hit on a full-HP holder and leaves one on a holder below full alone; Heatproof, Purifying Salt and Water Bubble only lower
+--   the hits of their type (Fire, Ghost, Fire) and Vessel of Ruin a Special hit; Sharpness, Tinted Lens, Transistor, Sniper, Water Bubble's Water
+--   boost, Flash Fire's boost and Supreme Overlord only raise a slicing move, a resisted hit, an Electric move, any hit, a Water move, a Fire move
+--   and any hit (Guts: a Physical hit by a statused holder, and nothing else);
+-- * Supreme Overlord's damage does not fall as the fallen count rises, and is the plain damage with no count;
+-- * two Vessel of Ruin holders, or one attacking, leave the damage as it is;
+-- * Unaware on the target gives the damage of an attacker whose Attack, Defense and Special Attack stages are 0, and on the user the damage against
+--   a target whose Defense and Special Defense stages are 0.
+damageAbilities :: Dex -> Property
+damageAbilities dex = property $ do
+  (t1, t2) <- forAll (genTeams dex)
+  seed <- forAll (Gen.word64 Range.linearBounded)
+  steps <- forAll (Gen.int (Range.linear 0 40))
+  who <- forAll Gen.enumBounded
+  mvIx <- forAll (Gen.element damaging)
+  draws <- forAll (Gen.list (Range.singleton 8) (Gen.int (Range.linear 0 1000)))
+  boostsU <- forAll genBoosts
+  boostsT <- forAll genBoosts
+  status <- forAll (Gen.element [StatusNone, StatusBrn, StatusPar, StatusPsn, StatusTox, StatusFrz])
+  b0 <- evalEither (fst (runSample (mkSMGen seed) (startBattle dex t1 t2 >>= advanceWhile dex steps (const True))))
+  let user = activeActor who b0
+      target = activeActor (other who) b0
+      mv = dxMoves dex V.! mvIx
+      ix name = fromMaybe (-1) (M.lookup name (dxAbilityIx dex))
+      clean m = m {monAbility = ix "noability", monAbilityState = noEffectState, monItem = noItem, monItemState = noEffectState, monStatus = StatusNone, monStatusState = noEffectState, monVolatiles = SV.empty}
+      base = modifyMon target (\m -> (clean m) {monBoosts = boostsT}) (modifyMon user (\m -> (clean m) {monBoosts = boostsU}) b0)
+      -- the damage of a state, with the move in use set as the move loop does
+      dmg st = fst (fst (runTape draws (evalStateT (getDamage (bFormat st) dex user target mv) st {bActiveMove = Just (MoveInUse user False)})))
+      with a name = modifyMon a (\m -> m {monAbility = ix name})
+      -- the target at full HP, and one below it (when it has an HP to lose)
+      full = modifyMon target (\m -> m {monHp = monMaxHp m})
+      below = modifyMon target (\m -> m {monHp = max 1 (monMaxHp m - 1)})
+      statused = modifyMon user (\m -> m {monStatus = status})
+      tm = moveTypeMod dex mv (monOf base target)
+      isT t = typeIsNamed dex (mvType mv) t
+      physical = mvPhysical mv
+      rule = mvRule mv
+      -- an ability on one Pokemon: the damage is at or above, or at or below, the damage without it
+      atLeast st a name = let (d0, d1) = (dmg st, dmg (with a name st)) in footnote (T.unpack name ++ ": " ++ show d0 ++ " -> " ++ show d1) >> assert (d1 >= d0)
+      atMost st a name = let (d0, d1) = (dmg st, dmg (with a name st)) in footnote (T.unpack name ++ ": " ++ show d0 ++ " -> " ++ show d1) >> assert (d1 <= d0)
+      same st a name = let (d0, d1) = (dmg st, dmg (with a name st)) in footnote (T.unpack name ++ ": " ++ show d0 ++ " -> " ++ show d1) >> d1 === d0
+      -- for each: the hits it names move the damage one way, the others leave it alone
+      only cond dir st a name = if cond then dir st a name else same st a name
+  case request b0 of
+    Finished _ -> success
+    Awaiting {} | user == target || not (all (\a -> monActive (monOf b0 a) && monHp (monOf b0 a) > 0) [user, target]) -> success
+    Awaiting {} -> do
+      -- Multiscale
+      only True atMost (full base) target "multiscale"
+      if monMaxHp (monOf base target) > 1 then same (below base) target "multiscale" else success
+      cover 5 "Multiscale lowered the damage of a hit on a full-HP holder" (dmg (with target "multiscale" (full base)) < dmg (full base))
+      -- the plain modifiers by the hit they name
+      only (mrSlicing rule) atLeast base user "sharpness"
+      only (tm < 0) atLeast base user "tintedlens"
+      only (isT "Electric") atLeast base user "transistor"
+      atLeast base user "sniper"
+      only (isT "Fire") atMost base target "heatproof"
+      only (isT "Ghost") atMost base target "purifyingsalt"
+      only (isT "Fire") atMost base target "waterbubble"
+      only (isT "Water") atLeast base user "waterbubble"
+      -- Guts: a Physical hit by a holder with a status; a Special hit, and a holder with none, are as without it
+      only (physical && status /= StatusNone) atLeast (statused base) user "guts"
+      -- Flash Fire's volatile, on a holder of the ability
+      let lit = modifyMon user (\m -> m {monVolatiles = SV.singleton (Volatile (fromEnum CFlashFire) noEffectState)})
+      only (isT "Fire") atLeast (lit base) user "flashfire"
+      -- Supreme Overlord: no count, or each count from 1 to 5; the damage never falls as the count rises
+      let overlord k = modifyMon user (\m -> m {monAbility = ix "supremeoverlord", monAbilityState = noEffectState {esA = k}}) base
+          byCount = map (dmg . overlord) [1 .. 5]
+      dmg (overlord (-1)) === dmg base
+      assert (and (zipWith (<=) byCount (drop 1 byCount)) && all (>= dmg base) byCount)
+      cover 5 "Supreme Overlord raised the damage" (last byCount > dmg base)
+      -- Vessel of Ruin: a Special hit on a holder is lowered; a Physical hit is not; a holder that attacks, or two holders, change nothing
+      only (not physical) atMost base target "vesselofruin"
+      same base user "vesselofruin"
+      -- (two holders with the same speed tie in the handler sort, which draws: the draws that follow then differ, as in Showdown)
+      if monSpeed (monOf base user) /= monSpeed (monOf base target)
+        then dmg (with user "vesselofruin" (with target "vesselofruin" base)) === dmg base else success
+      -- Unaware equals the stages it ignores: the target's, the Attack, Defense and Special Attack of the user (and the Attack of the target for
+      -- Foul Play, whose Attack is the target's); the user's, the Defense and Special Defense of the target
+      let zeroU m = m {monBoosts = (monBoosts m) {bsAtk = 0, bsDef = 0, bsSpa = 0}}
+          zeroT m = m {monBoosts = (monBoosts m) {bsDef = 0, bsSpd = 0}}
+          zeroTAtk m = m {monBoosts = (monBoosts m) {bsAtk = 0}}
+          ignoredByTarget = modifyMon user zeroU (if mrOverrideOffensivePokemon rule then modifyMon target zeroTAtk base else base)
+          ignoredByUser = modifyMon target zeroT base
+      -- (a base-power callback may read the stages themselves, as Stored Power counts the user's positive ones; Unaware leaves those alone)
+      if moveSpec mv POwn EvBasePowerCallback == Nothing
+        then dmg (with target "unaware" base) === dmg ignoredByTarget >> dmg (with user "unaware" base) === dmg ignoredByUser
+        else success
+      cover 5 "Unaware changed the damage of a hit against a boosted attacker" (dmg (with target "unaware" base) /= dmg base)
+      cover 5 "Unaware changed the damage of a hit into a boosted target" (dmg (with user "unaware" base) /= dmg base)
+  where
+    -- the moves 'getDamage' computes the damage of: a damaging move with no fixed damage and no damage callback
+    damaging =
+      [ i
+      | (i, m) <- zip [0 ..] (V.toList (dxMoves dex))
+      , mvSupported m, mrDamaging (mvRule m), mrDamage (mvRule m) == Nothing, mvPower m > 0
+      , moveSpec m POwn EvDamageCallback == Nothing
+      ]
+    genBoosts = Boosts <$> stage <*> stage <*> stage <*> stage <*> stage <*> stage <*> stage
+    stage = Gen.int (Range.linear (-6) 6)

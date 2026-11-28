@@ -186,6 +186,11 @@ data EventId
   | EvAfterEachBoost
   -- ^ @runEvent('AfterEachBoost', target, source, effect, currentBoost)@ in @battle.boost@ (battle.ts 2091), after each stat whose stage changed, with
   -- that stat alone as the relay value ('RBoosts'). Opportunist's and Defiant's kin read it.
+  -- slice 8b
+  | EvModifyBoost
+  -- ^ @runEvent('ModifyBoost', pokemon, null, null, boosts)@ where Showdown reads a stage to use it: @calculateStat@ (pokemon.ts 602, the stat user's
+  -- event in @getDamage@), @getStat@ (639, @getActionSpeed@) and @hitStepAccuracy@ (battle-actions.ts 782, 786). The relay value is the table of the
+  -- stat read ('RBoosts'); a handler returns the table that replaces it (Unaware's @onAnyModifyBoost@ zeroes stages).
   deriving (Eq, Show, Enum, Bounded)
 
 -- | How @runEvent@ orders the handlers of an event (battle.ts 797-803).
@@ -294,6 +299,8 @@ eventName e = case e of
   EvChangeBoost -> "ChangeBoost"
   EvTryBoost -> "TryBoost"
   EvAfterEachBoost -> "AfterEachBoost"
+  -- slice 8b
+  EvModifyBoost -> "ModifyBoost"
 
 -- | Which Pokemon a handler reacts to: the holder (@onX@), its allies (@onAllyX@), its foes (@onFoeX@), the
 -- source of the event (@onSourceX@) or anyone (@onAnyX@).
@@ -343,6 +350,8 @@ data CondId = CBrn | CPar | CPsn | CTox | CFrz | CFlinch | CProtosynthesis | CQu
   | CEncore | CTaunt
   -- slice 7b
   | CSubstitute
+  -- slice 8b
+  | CFlashFire
   deriving (Eq, Show, Enum, Bounded)
 
 -- | The key of the condition in @conditions.json@ (data/conditions.ts).
@@ -373,6 +382,8 @@ condName c = case c of
   CTaunt -> "taunt"
   -- slice 7b
   CSubstitute -> "substitute"
+  -- slice 8b
+  CFlashFire -> "flashfire"
 
 -- | The condition with a key of @conditions.json@ (or a move's own volatile).
 condByName :: T.Text -> Maybe CondId
@@ -806,6 +817,33 @@ data NativeId
   -- ^ gooey @onDamagingHit@: a contact move gives the attacker Speed -1.
   | NSpeedBoostResidual
   -- ^ speedboost @onResidual@: Speed +1 once the Pokemon has been on the field a turn.
+  -- slice 8b
+  | NMultiscale
+  -- ^ multiscale @onSourceModifyDamage@: the holder at full HP halves the damage.
+  | NSharpness
+  -- ^ sharpness @onBasePower@: a slicing move, chainModify(1.5).
+  | NTintedLens
+  -- ^ tintedlens @onModifyDamage@: a resisted hit, chainModify(2).
+  | NGuts
+  -- ^ guts @onModifyAtk@: any status, chainModify(1.5).
+  | NSniper
+  -- ^ sniper @onModifyDamage@: a critical hit, chainModify(1.5).
+  | NHeatproofDamage
+  -- ^ heatproof @onDamage@: burn damage is halved.
+  | NPurifyingSaltSetStatus
+  | NPurifyingSaltTryAddVolatile
+  | NWaterBubbleSetStatus
+  | NWaterBubbleUpdate
+  | NFlashFireTryHit
+  -- ^ flashfire @onTryHit@: a Fire move on the holder is absorbed, and the holder takes the @flashfire@ volatile.
+  | NFlashFireEnd
+  -- ^ flashfire @onEnd@: the holder loses the volatile.
+  | NFlashFireBoost
+  -- ^ flashfire @condition.onModifyAtk@ and @onModifySpA@.
+  | NSupremeOverlordStart
+  | NSupremeOverlordPower
+  | NVesselOfRuinSpA
+  | NUnawareModifyBoost
   deriving (Eq, Show)
 
 -- | The body of each handler the engine implements (written by hand: Showdown's handlers are code). A condition
@@ -874,6 +912,11 @@ nativeBody c POwn e = BNative <$> case (c, e) of
   (CSubstitute, EvStart) -> Just NSubstituteStart
   (CSubstitute, EvTryPrimaryHit) -> Just NSubstituteTryPrimaryHit
   (CSubstitute, EvEnd) -> Just NLogOnly
+  -- slice 8b. flashfire (data/abilities.ts 1342-1385), the @condition@ block: onStart and onEnd only log
+  (CFlashFire, EvStart) -> Just NLogOnly
+  (CFlashFire, EvEnd) -> Just NLogOnly
+  (CFlashFire, EvModifyAtk) -> Just NFlashFireBoost
+  (CFlashFire, EvModifySpA) -> Just NFlashFireBoost
   (_, EvModifyAtk) | paradox c -> Just NParadoxAtk
   (_, EvModifyDef) | paradox c -> Just NParadoxDef
   (_, EvModifySpA) | paradox c -> Just NParadoxSpA

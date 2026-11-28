@@ -253,9 +253,10 @@ baseDamage f level power atk def =
 -- | @modifyDamage@ (battle-actions.ts ~1790-1890) from after the @WeatherModifyDamage@ event, up to the @ModifyDamage@
 -- event: crit, random factor, STAB, type effectiveness and the burn. 'finalDamage' is the rest. The caller adds 2 to
 -- the base damage (`baseDamage += 2`), runs @WeatherModifyDamage@ on it (1804) and passes the result as @base1@.
--- @roll16@ is the already drawn value of @random(16)@.
-modifyDamage :: Format -> Dex -> Mon -> Mon -> MoveData -> Bool -> Int -> Int -> Int
-modifyDamage f dx attacker defender mv crit roll16 base1 =
+-- @roll16@ is the already drawn value of @random(16)@. @guts@ is @pokemon.hasAbility('guts')@ of the attacker (slice 8b), which the caller
+-- reads through 'hasAbility': a burned Guts holder's damage is not halved.
+modifyDamage :: Format -> Dex -> Mon -> Mon -> MoveData -> Bool -> Bool -> Int -> Int -> Int
+modifyDamage f dx attacker defender mv crit guts roll16 base1 =
   let base2 = if crit then trunc f (base1 * 3 `quot` 2) else base1
       base3 = trunc f (trunc f (base2 * (100 - roll16)) `quot` 100)
       -- "???" never gets STAB (modifyDamage: `if (type !== '???')`); `baseDamage = this.battle.modify(baseDamage, stab)`
@@ -284,7 +285,7 @@ modifyDamage f dx attacker defender mv crit roll16 base1 =
       -- !pokemon.hasAbility('guts'))` and (gen >= 6) the move is not Facade:
       -- `modify(baseDamage, 0.5)` (a modify() of its own, not a chainModify), after the type
       -- step and before the final ModifyDamage event
-      base6 = if monStatus attacker == StatusBrn && mvPhysical mv && mvId mv /= "facade" then modify f base5 2048 else base5
+      base6 = if monStatus attacker == StatusBrn && mvPhysical mv && not guts && mvId mv /= "facade" then modify f base5 2048 else base5
    in base6
 
 -- | The base-power floor of a Terastallized user (battle-actions.ts 1717-1726): a move of the user's Tera type (`hasType` reads
