@@ -1841,7 +1841,83 @@ move in this pool that always crits, so Sniper's crits come from the raised crit
 
 ### 8c findings
 
-(To be written by phase 8c.)
+Eleven abilities: Good as Gold, Water Absorb, Levitate, Sturdy, Magic Guard, Poison Heal, Sap Sipper, Soundproof, Bulletproof,
+Sweet Veil and Shell Armor. Each body is in `Engine.Effects` (`abilityBodies`) and `Engine.Dispatch` (`runNative`), with its
+Showdown line in the comment.
+
+**What each one is.**
+- The `onTryHit` abilities (Good as Gold, Water Absorb, Sap Sipper, Soundproof, Bulletproof) run in the existing `TryHit`
+  step of `useMoveWith`. They stop the move before the type check and the accuracy roll, so they draw nothing. A hazard is a
+  `foeSide` move: it goes through `TryHitSide`, not `TryHit`, and Good as Gold does not stop it. A move on the user never
+  runs `TryHit`, so `target !== source` is never false there.
+- Water Absorb heals `max 1 (maxhp / 4)` and Sap Sipper calls `boostMon` with the ability as the cause, the foe as the source
+  and the move in use as `active`. Both return null whether or not the heal or boost worked.
+- Levitate has no handler. `isGrounded` and `isImmune` already read it through `hasAbility` and `suppressingAbility` (the base).
+  I read `pokemon.ts` `isGrounded` (2170) and `runImmunity` (2258) against them. They agree for everything the engine models:
+  the Flying clause, then Levitate (`null`, not grounded), and the Ground branch of `runImmunity`. The clauses before Levitate
+  (Gravity, Ingrain, Smack Down, Iron Ball) and after it (Magnet Rise, Telekinesis, Air Balloon) have no state yet and keep
+  their LATENT note in `Engine.Damage`.
+- Sturdy's `onDamage` (priority -30) runs after Endure's (-10). `onTryHit` for OHKO moves is a no-op: no OHKO move is accepted.
+- Magic Guard's `onDamage` returns false for every `damageMon` cause that is not a Move. Every site passes its cause (statuses,
+  Black Sludge, Life Orb, Rocky Helmet, Spiky Shield, Stealth Rock, Spikes, sandstorm, `EffRecoil`). Struggle's recoil and
+  Substitute's cost are `directDamage` and are not blocked; the traces show both.
+- Poison Heal's `onDamage` (priority 1) heals `max 1 (maxhp / 8)` and returns false when the effect is psn or tox. A burn still
+  damages it. It runs before Magic Guard's would.
+- Shell Armor is `onCriticalHit: false`, a constant, not a function. The export does not list it under `handlers`, so
+  `effectFor` adds the name `onCriticalHit` for an ability that has the key. The body is `BConst (RBool False)`.
+- Sweet Veil's two handlers are `PAlly` `SetStatus` (slp) and `TryAddVolatile` (yawn). Neither can happen: LATENT(sleep).
+  Sap Sipper's and Soundproof's `onAllyTryHitSide` are registered because the export lists them; in singles the holder's only
+  ally is itself, so they never act.
+
+**New.**
+- `EvCriticalHit`: `runEvent('CriticalHit', target, null, move)` in `getDamage` (battle-actions.ts 1704), after the roll's
+  draw. Only a successful roll runs it.
+- `mrSound` and `mrBullet` in `MoveRule`, from the flags. They were inert flags.
+- 13 `NativeId`s, all under `-- slice 8c`.
+
+**The failed Damage event (resolved).** The base left it LATENT. In `spreadDamage` (battle.ts 2138-2143) a falsy `Damage` event
+leaves the damage entry `false`; `spreadMoveHit` then drops the target from the rest of the hit (no drain, `onHit`, self
+drops, secondaries, `DamagingHit`), and the hit loop breaks before its `Update` (battle-actions.ts 1019). At the first hit,
+`if (hit === 1) return damage.fill(false)` (1037) fails the whole move: no faint resolution, no recoil, and `useMoveInner`
+skips the self boost and `AfterMoveSecondarySelf`. `hitTarget` now returns `Nothing` for it and `hitLoop` returns whether the
+move worked. No supported handler returns false for a Move (Magic Guard and Poison Heal are keyed to non-Move effects, Sturdy
+and Endure return a damage), so no trace reaches it. I wrote it exactly anyway, since the base asked for it.
+
+**Surprises.**
+- A first version of the property for Shell Armor compared draws in all cases. A multi-hit move that the critical hit would
+  have fainted the target with makes fewer draws, so the comparison holds only when neither target faints.
+
+**Properties.** Hedgehog, both tiers (400 cases for the three with `cover`, in the fast tier).
+- `damageGuards`: for a random damage cause (a Move, burn, poison, toxic, recoil, Life Orb, Rocky Helmet, Black Sludge, Stealth
+  Rock, Spikes, sandstorm, Spiky Shield), amount and HP, a holder of Magic Guard, Sturdy or Poison Heal takes what a holder with
+  no ability takes, except where Showdown's handler acts: Magic Guard takes no non-Move damage, Sturdy leaves 1 HP from a full-HP
+  Move hit, Poison Heal never loses HP to psn or tox and gains some below full.
+- `immunityAbilities`: a move each of the six blocking abilities stops (a status move, Water, Grass, sound, bullet, Ground) changes
+  nothing in the target but its HP (Water Absorb: not lower) and Attack (Sap Sipper: up by at most 1), costs the user no HP and
+  makes no accuracy, crit or damage draw.
+- `shellArmor`: a damaging move deals no more to a Shell Armor holder than to one with no ability, whatever the crit roll, and
+  draws the same unless a target faints.
+- `guardPlayouts`: playouts over `genGuardTeams` (the abilities, the orbs, Black Sludge, Life Orb, Rocky Helmet, Leftovers and the
+  moves they meet on a share of the sets) with the usual state and step checks, and a cover on a Magic Guard holder going through
+  a statused step and on a Water Absorb holder gaining HP. `genTeamsWith` gained a flag; its other uses draw as before.
+- `effectsSupported` and `eventMasksExact` cover the new bodies and the new event.
+
+**Traces.** `tools/oracle/gen-slice8c.js`, 1000 battles (seeds 1-1000), about 30% random and the rest scripted openings
+(gold, absorb, levground, levhazard, levterr, sturdy, mgstatus, mghazard, mgweather, mgitem, mgdirect, pheal, sap, sound, bullet,
+shell), 59 scripts dropped by Showdown (a faint ended the script). The 8c abilities are sprinkled on random sets. The tally
+(from Showdown's own events) has no zero counter: for 1000 battles it counts, for example, 898 Good as Gold blocks (377 hazards
+and 150 Haze or Defog let through), 301 Water Absorb blocks at full HP and 173 heals, Levitate against Ground moves (579), Spikes
+(974), Toxic Spikes (650), Sticky Web (945) and terrains (577), 78 Sturdy saves (5 inside a multi-hit move, 29 hits on a Substitute
+holder), every Magic Guard source (brn, psn, tox, Life Orb, Rocky Helmet, Black Sludge, recoil, Stealth Rock, Spikes,
+sandstorm) and 125 Struggle recoils and 62 Substitute costs that it does not block, 913 toxic and 684 poison heals and 574 burn
+damages for Poison Heal, 392 Sap Sipper boosts and 93 capped blocks, 511 Soundproof (190 behind a Substitute) and 236
+Bulletproof blocks, 107 cancelled critical hits. The fast tier does not always catch a wrong Magic Guard recoil (13 of the 1000
+traces do); the long tier does.
+
+**LATENT.**
+- LATENT(8d): Magic Guard against Rough Skin and Iron Barbs, whose effect is the ability (it logs `-activate` and blocks).
+- LATENT(8f): Mold Breaker against the nine breakable ones; Magic Bounce's reflected moves against Good as Gold.
+- LATENT(sleep): Sweet Veil. LATENT(ohko): Sturdy's `onTryHit`. LATENT(doubles): the ally handlers.
 
 ### 8d findings
 

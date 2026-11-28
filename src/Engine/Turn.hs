@@ -689,18 +689,19 @@ useMoveWith fmt dx user target mv = case mrTarget rule of
         when hits $
           if mrDamaging rule
             then do
-              hitLoop fmt dx user target mv
+              moveResult <- hitLoop fmt dx user target mv
               -- useMoveInner (battle-actions.ts 588): `if (move.selfBoost && moveResult) this.moveHit(pokemon, pokemon, move,
               -- move.selfBoost, false, true)`, once, after the whole hit loop (trySpreadMoveHit returned): the boosts go
               -- through battle.boost with isSelf (no draw, no Update). The move succeeded: the first hit always lands
               -- once accuracy passed. A user with no HP gets nothing.
               -- LATENT: a first hit that fails (a move TryHit that returns false, as Low Kick's against a Dynamaxed target) would
               -- make `moveResult` false and skip the boost; no supported selfBoost move has one.
-              unless (null (mrSelfBoost rule)) (void (boostMon dx (Just user) (Just mv) moveCause user (mrSelfBoost rule)))
+              -- (slice 8c: `moveResult` is false when the first hit's damage event failed, 'hitLoop': the boost and the events below are skipped)
+              when (moveResult && not (null (mrSelfBoost rule))) (void (boostMon dx (Just user) (Just mv) moveCause user (mrSelfBoost rule)))
               -- useMoveInner: the move succeeded (`moveResult`), the user is queued to faint if it has no HP, then
               -- runEvent('AfterMoveSecondarySelf', pokemon, target, move): Life Orb's recoil. A status move
               -- raises it too, but no supported handler acts on one.
-              void (runEvent dx EvAfterMoveSecondarySelf user (Just target) (Just mv) RNone)
+              when moveResult (void (runEvent dx EvAfterMoveSecondarySelf user (Just target) (Just mv) RNone))
             else statusMove dx user target mv
   where
     rule = mvRule mv
@@ -869,7 +870,7 @@ playerOfActor (Actor p _) = p
 -- | @hitStepMoveHitLoop@ (battle-actions.ts): the hit count, then one @spreadMoveHit@ per hit with an
 -- @Update@ event after each, then the faint resolution, recoil and the closing @Update@.
 {-# INLINABLE hitLoop #-}
-hitLoop :: MonadChance m => Format -> Dex -> Actor -> Actor -> MoveData -> Eng m ()
+hitLoop :: MonadChance m => Format -> Dex -> Actor -> Actor -> MoveData -> Eng m Bool
 hitLoop fmt dx user target mv = do
   let rule = mvRule mv
   -- targetHits: multihit n is fixed; [2, 5] is battle.sample([2 x7, 3 x7, 4 x3, 5 x3]), one random(20) draw
@@ -877,7 +878,49 @@ hitLoop fmt dx user target mv = do
     OneHit -> pure 1
     FixedHits n -> pure n
     TwoToFive -> (\i -> if i < 7 then 2 else if i < 14 then 3 else if i < 17 then 4 else 5) <$> roll 0 20
-  (total, lastSub) <- hits targetHits (1 :: Int) 0 False mv
+  (total, lastSub, firstFailed) <- hits targetHits (1 :: Int) 0 False mv
+  -- slice 8c. `if (hit === 1) return damage.fill(false)` (battle-actions.ts 1037): a first hit whose damage event failed ends the move
+  -- here, with no faint resolution, recoil or Update, and the move has failed (`moveResult` false)
+  if firstFailed then pure False else afterHits dx user target mv total lastSub >> pure True
+  where
+    -- the loop `for (hit = 1; hit <= targetHits; hit++)`; returns move.totalDamage
+    -- the copy of the move threads through the hits: a Stellar boost spent on one hit stays on it ('mvStellarBoosted')
+    -- (slice 7b: it also returns whether the last hit went to a Substitute: that hit's targetsCopy entry is null)
+    -- (slice 8c: and whether the loop ended at its first hit because that hit's damage event failed)
+    hits n hit acc sub m
+      | hit > n = pure (acc, sub, False)
+      | otherwise = do
+          b <- get
+          -- `if (targets.every(target => !target?.hp)) break;`
+          if monHp (monOf b target) <= 0
+            then pure (acc, sub, False)
+            else do
+              (mdealt, m', onSub) <- hitMove fmt dx user target m
+              case mdealt of
+                -- slice 8c. spreadMoveHit's spreadDamage gave `false` (`damage event failed`): the target is dropped from the later steps (no
+                -- onHit, self drops, secondaries or DamagingHit) and `if (!moveDamage.some(val => val !== false)) break;` (battle-actions.ts
+                -- 1019) ends the loop before this hit's Update. At the first hit the whole move failed ('hitLoop').
+                -- From the second hit on, `[moveDamageThisHit, targetsCopy] = this.spreadMoveHit(targetsCopy, ...)` (1010) has put `false` in
+                -- targetsCopy (1143), so the later steps that read it see no target, as after a hit on a Substitute: `gotAttacked` (1055) and
+                -- the target's AfterMoveSecondary (1069) do not run for it. The earlier hit's flag does not carry over: it is 'True' here.
+                -- LATENT: Showdown drops the target only for `false` (battle.ts 2138-2143 returns the handler's value); a `null` or `undefined`
+                -- result is no `false`, so the loop goes on and that hit's Update runs (battle-actions.ts 1019-1029; 1150 then drops the target from targetsCopy). The engine's Damage
+                -- event cannot tell the two apart ('stop' is `false`), and no supported handler returns `null` for a Move cause (Magic Guard and
+                -- Poison Heal return `false`, Sturdy and Endure a damage), so only `false` is modelled. `gotAttacked` is not in the state.
+                Nothing -> pure (acc, True, hit == 1)
+                Just dealt -> do
+                  hitEffects dx user target m' onSub
+                  eachEvent dx EvUpdate -- eachEvent('Update') after each hit
+                  -- `if (!pokemon.hp && targets.length === 1) break;`
+                  userDown <- gets (\bb -> monHp (monOf bb user) <= 0)
+                  if userDown then pure (acc + dealt, onSub, False) else hits n (hit + 1) (acc + dealt) onSub m'
+
+-- | The part of 'hitLoop' after the hits (battle-actions.ts @hitStepMoveHitLoop@ 1018-1060): faint resolution, recoil, the closing @Update@
+-- and @AfterMoveSecondary@. @total@ is @move.totalDamage@ and @lastSub@ whether the last hit went to a Substitute.
+{-# INLINABLE afterHits #-}
+afterHits :: MonadChance m => Dex -> Actor -> Actor -> MoveData -> Int -> Bool -> Eng m ()
+afterHits dx user target mv total lastSub = do
+  let rule = mvRule mv
   b <- get
   let userDown = monHp (monOf b user) <= 0
   -- gen >= 5: resolveFaints({ checkWin: !pokemon.hp })
@@ -901,24 +944,6 @@ hitLoop fmt dx user target mv = do
   -- slice 7b: `afterMoveSecondaryEvent(targetsCopy.filter(val => !!val), ...)`, and targetsCopy is the last hit's: a last hit that went
   -- to a Substitute left a null there, so the array is empty and no handler (Eject Button, Red Card, frz) runs.
   unless lastSub (void (runEvent dx EvAfterMoveSecondary target (Just user) (Just mv) RNone))
-  where
-    -- the loop `for (hit = 1; hit <= targetHits; hit++)`; returns move.totalDamage
-    -- the copy of the move threads through the hits: a Stellar boost spent on one hit stays on it ('mvStellarBoosted')
-    -- (slice 7b: it also returns whether the last hit went to a Substitute: that hit's targetsCopy entry is null)
-    hits n hit acc sub m
-      | hit > n = pure (acc, sub)
-      | otherwise = do
-          b <- get
-          -- `if (targets.every(target => !target?.hp)) break;`
-          if monHp (monOf b target) <= 0
-            then pure (acc, sub)
-            else do
-              (dealt, m', onSub) <- hitMove fmt dx user target m
-              hitEffects dx user target m' onSub
-              eachEvent dx EvUpdate -- eachEvent('Update') after each hit
-              -- `if (!pokemon.hp && targets.length === 1) break;`
-              userDown <- gets (\bb -> monHp (monOf bb user) <= 0)
-              if userDown then pure (acc + dealt, onSub) else hits n (hit + 1) (acc + dealt) onSub m'
 
 -- | The steps of @spreadMoveHit@ after the damage, run once per hit: @selfDrops@ (4), @secondaries@ (5), then
 -- the @DamagingHit@ event. They run even when the hit fainted the target (its faint is only queued), so the
@@ -986,7 +1011,7 @@ applyEffect dx user mv a e = case e of
 -- | One @spreadMoveHit@ of a damaging move: crit roll, random factor, damage, drain. Returns the damage
 -- actually dealt (@move.totalDamage@ accumulates it).
 {-# INLINABLE hitMove #-}
-hitMove :: MonadChance m => Format -> Dex -> Actor -> Actor -> MoveData -> Eng m (Int, MoveData, Bool)
+hitMove :: MonadChance m => Format -> Dex -> Actor -> Actor -> MoveData -> Eng m (Maybe Int, MoveData, Bool)
 hitMove fmt dx user target mv = do
   -- spreadMoveHit (battle-actions.ts 1101-1105): singleEvent('TryHit', moveData, {}, target, pokemon, move) opens every hit
   -- (lowkick, grassknot and heavyslam fail against a Dynamaxed target: never here). The hit steps' runEvent('TryHit') already ran.
@@ -1030,7 +1055,7 @@ hitDamage fmt dx user target mv = do
 -- the secondaries still run ('hitEffects'); the force switch, @DamagingHit@, @AfterHit@ and @EmergencyExit@ do not.
 -- Protect-like moves block before this (their volatile's `TryHit`, priority 3, runs in the hit steps before the first spreadMoveHit).
 {-# INLINABLE hitSubstitute #-}
-hitSubstitute :: MonadChance m => Format -> Dex -> Actor -> Actor -> MoveData -> Eng m (Int, MoveData, Bool)
+hitSubstitute :: MonadChance m => Format -> Dex -> Actor -> Actor -> MoveData -> Eng m (Maybe Int, MoveData, Bool)
 hitSubstitute fmt dx user target mv = do
   b <- get
   let rule = mvRule mv
@@ -1053,21 +1078,31 @@ hitSubstitute fmt dx user target mv = do
   moveAfterSubDamage dx user target mv' dealt
   -- runMoveEffects' selfSwitch steps (1349-1353, 1369-1372): see above
   when (mvSelfSwitch mv') (setSelfSwitchFlag user)
-  pure (0, mv', True)
+  pure (Just 0, mv', True)
 
 -- | The rest of 'hitMove' for a hit on the Pokemon itself.
 {-# INLINABLE hitTarget #-}
-hitTarget :: MonadChance m => Format -> Dex -> Actor -> Actor -> MoveData -> Eng m (Int, MoveData, Bool)
+hitTarget :: MonadChance m => Format -> Dex -> Actor -> Actor -> MoveData -> Eng m (Maybe Int, MoveData, Bool)
 hitTarget fmt dx user target mv = do
   (dmg, mv') <- hitDamage fmt dx user target mv
   -- spreadDamage (battle.ts 2107-2154) through 'damageMon': the clamp to at least 1 (unless 0), `runEvent('Damage', target, source,
   -- effect, targetDamage, true)` with the move as the effect (Endure's onDamage leaves the target 1 HP), the second clamp and
-  -- Pokemon.damage; `dealt` is the damage returned. A falsy result of the event (`damage event failed`) deals nothing.
-  -- LATENT(8c): the move's damage array then holds `false`, which fails the hit; none of the supported handlers returns one for a
-  -- Move (Magic Guard acts on every effect but a Move), and Sturdy returns a damage.
+  -- Pokemon.damage; `dealt` is the damage returned.
+  -- Slice 8c. A falsy result of the event (`damage event failed`) makes the damage array's entry `false` (spreadDamage, battle.ts 2138-2143): `Nothing`,
+  -- which drops the target from every later step of the hit (no drain, onHit, selfSwitch, self drops, secondaries or DamagingHit) and which
+  -- 'hitLoop' reads as `false` too. No handler returns one for a Move cause: Magic Guard acts on every effect but a Move, Poison Heal on
+  -- psn and tox, and Sturdy and Endure return a damage.
   -- A hit on a Substitute ('hitSubstitute') is no spreadDamage (its target is null there: the damage is
   -- `target.volatiles['substitute'].hp -= damage`), so no Damage event runs for it.
-  dealt <- fromMaybe 0 <$> damageMon dx target (Just user) (Just mv') moveCause dmg
+  mdealt <- damageMon dx target (Just user) (Just mv') moveCause dmg
+  case mdealt of
+    Nothing -> pure (Nothing, mv', False)
+    Just dealt -> hitTargetRest dx user target mv mv' dealt
+
+-- | The rest of 'hitTarget' once the damage was dealt (@dealt@: at most the target's HP; 0 counts).
+{-# INLINABLE hitTargetRest #-}
+hitTargetRest :: MonadChance m => Dex -> Actor -> Actor -> MoveData -> MoveData -> Int -> Eng m (Maybe Int, MoveData, Bool)
+hitTargetRest dx user target mv mv' dealt = do
   -- spreadDamage, effect.drain (battle.ts ~2187): heal the user round(dealt * n / d); battle.heal turns a
   -- positive amount below 1 into 1 and does nothing for 0, at full HP or when the user is down
   case mrDrain (mvRule mv) of
@@ -1080,7 +1115,7 @@ hitTarget fmt dx user target mv = do
   moved <- if mrOnHit (mvRule mv) == [EOwnHit] then snd <$> moveOwnHit dx user target mv else pure mv
   -- runMoveEffects' selfSwitch steps (1349-1353, 1369-1372): the hit landed, so the move did something (damage is a number)
   when (mvSelfSwitch moved) (setSelfSwitchFlag user)
-  pure (dealt, mv', False)
+  pure (Just dealt, mv', False)
 
 -- | @getDamage@ (battle-actions.ts 1650-1779) of a move with no @damageCallback@ and no fixed @damage@: base power (its callback,
 -- the crit roll, @BasePower@), the stats (with the overrides of Body Press, Psyshock, Foul Play and the ignored defensive stage of
@@ -1095,9 +1130,12 @@ getDamage fmt dx user target mv = do
   -- roll), then `basePower = this.battle.clampIntRange(basePower, 1)`
   bp0 <- basePowerCallback dx user target mv
   -- getDamage: crit roll, then modifyDamage's random(16)
-  crit <- case critDenominator (mvCritRatio mv) of
+  crit0 <- case critDenominator (mvCritRatio mv) of
     Nothing -> pure False
     Just d -> randomChance 1 d
+  -- slice 8c. getDamage (battle-actions.ts 1704-1706): `if (moveHit.crit) moveHit.crit = this.battle.runEvent('CriticalHit', target, null, move)`,
+  -- after the roll and so after its draw: a falsy result (Shell Armor's `onCriticalHit: false`) cancels the critical hit
+  crit <- if crit0 then relayTruthy <$> runEvent dx EvCriticalHit target Nothing (Just mv) RNone else pure False
   -- getDamage: after the crit roll, runEvent('BasePower', source, target, move, basePower, true) and the same clamp
   -- again. `onEffect` puts the move's own onBasePower first in the list, which is then sorted with the others
   -- ('runEventOnEffect'); Fickle Beam's randomChance is drawn when its handler runs, after the crit roll. A handler only ever

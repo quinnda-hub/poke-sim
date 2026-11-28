@@ -5,6 +5,7 @@ module Playout
   ( genTeams
   , genPivotTeams
   , genStatTeams
+  , genGuardTeams -- slice 8c
   , playChecked
   , Seen (..)
   , advanceWhile
@@ -59,9 +60,30 @@ genPivotTeams dx = genTeamsWith dx True False
 genStatTeams :: Dex -> Gen (Team, Team)
 genStatTeams dx = genTeamsWith dx True True
 
+-- | slice 8c: 'genPivotTeams' with the immunity and guard abilities (Good as Gold, Water Absorb, Levitate, Sturdy, Magic Guard, Poison Heal,
+-- Sap Sipper, Soundproof, Bulletproof, Sweet Veil, Shell Armor) on a share of the sets, the items that hurt or heal their holder (the orbs,
+-- Black Sludge, Life Orb, Rocky Helmet, Leftovers), and the moves those abilities meet (a Water, Grass, Ground, sound and bullet move, the status
+-- moves that target a foe, hazards, a sandstorm and a move that crits often), so that the playouts reach the damage events and the blocked hits
+-- that a uniform draw over every ability and item seldom does. The other generators draw as they did before.
+genGuardTeams :: Dex -> Gen (Team, Team)
+genGuardTeams dx = genTeamsK dx True False True
+
 genTeamsWith :: Dex -> Bool -> Bool -> Gen (Team, Team)
-genTeamsWith dx pivotHeavy statHeavy = (,) <$> genTeam <*> genTeam
+genTeamsWith dx pivotHeavy statHeavy = genTeamsK dx pivotHeavy statHeavy False
+
+-- | 'genTeamsWith', with the slice 8c share of guard abilities, items and moves when the last argument is set.
+genTeamsK :: Dex -> Bool -> Bool -> Bool -> Gen (Team, Team)
+genTeamsK dx pivotHeavy statHeavy guardHeavy = (,) <$> genTeam <*> genTeam
   where
+    -- slice 8c (used only when guardHeavy)
+    guardAbilities = [a | a <- ["goodasgold", "waterabsorb", "levitate", "sturdy", "magicguard", "poisonheal", "sapsipper", "soundproof", "bulletproof", "sweetveil", "shellarmor"], a `elem` abilities]
+    orbItems = [i | i <- ["toxicorb", "flameorb", "blacksludge", "lifeorb", "rockyhelmet", "leftovers"], i `elem` items]
+    guardKit = [m | m <- [ "surf", "scald", "energyball", "gigadrain", "earthquake", "highhorsepower", "hypervoice", "boomburst", "shadowball", "sludgebomb", "seedbomb"
+                         , "thunderwave", "toxic", "willowisp", "taunt", "encore", "trick", "partingshot", "stealthrock", "spikes", "sandstorm", "stoneedge", "crosschop"
+                         , "closecombat", "bulletseed", "iciclespear", "rockblast", "terrainpulse", "grassyterrain", "electricterrain"], m `elem` moves]
+    ability8c = if null guardAbilities then pickAbility else Gen.frequency [(8, Gen.element guardAbilities), (3, pickAbility)]
+    item8c = if null orbItems then pickItem else Gen.frequency [(4, Gen.element orbItems), (3, pickItem)]
+    move8c = if null guardKit then pickMove else Gen.frequency [(5, Gen.element guardKit), (3, pickMove)]
     species = supportedSpecies dx
     moves = supportedMoves dx
     pivots = [m | m <- ["uturn", "flipturn", "voltswitch", "teleport", "partingshot", "chillyreception"], m `elem` moves]
@@ -137,12 +159,12 @@ genTeamsWith dx pivotHeavy statHeavy = (,) <$> genTeam <*> genTeam
     toJSONArray = Array . V.fromList
     genSet = do
       sp <- pickSpecies
-      ms <- nub <$> Gen.list (Range.linear 1 4) pickMove
+      ms <- nub <$> Gen.list (Range.linear 1 4) (if guardHeavy then move8c else pickMove)
       nat <- Gen.element natures
       lvl <- Gen.int (Range.linear 1 100)
       evs <- Gen.list (Range.singleton 6) (Gen.int (Range.linear 0 252))
-      ab <- pickAbility
-      it <- pickItem
+      ab <- if guardHeavy then ability8c else pickAbility
+      it <- if guardHeavy then item8c else pickItem
       tera <- Gen.frequency [(3, Gen.element teraTypes), (1, pure "Stellar")]
       pure (object
         [ "species" .= sp, "teraType" .= tera, "moves" .= ms, "nature" .= nat, "level" .= lvl, "ability" .= ab, "item" .= it
@@ -240,6 +262,11 @@ data Seen = Seen
   -- ^ an Intimidate holder that switched in (was benched before the step, is in play with HP after it)
   , seenDropAbility :: !Int
   -- ^ a Pokemon in play before and after the step, holding Clear Body, Guard Dog, Inner Focus, Big Pecks, Mirror Armor, Defiant or Contrary, that ended with a stage other than zero
+  -- slice 8c
+  , seenGuarded :: !Int
+  -- ^ a Magic Guard holder with burn, poison or toxic that went through a step in play
+  , seenAbsorbed :: !Int
+  -- ^ a Water Absorb holder that is in play before and after the step with more HP
   }
   deriving (Eq, Show)
 
@@ -272,6 +299,9 @@ instance Semigroup Seen where
       , seenShieldBoost = f seenShieldBoost
       , seenIntimidateIn = f seenIntimidateIn
       , seenDropAbility = f seenDropAbility
+      -- slice 8c
+      , seenGuarded = f seenGuarded
+      , seenAbsorbed = f seenAbsorbed
       }
     where
       f g = g x + g y
@@ -304,6 +334,9 @@ instance Monoid Seen where
       , seenShieldBoost = 0
       , seenIntimidateIn = 0
       , seenDropAbility = 0
+      -- slice 8c
+      , seenGuarded = 0
+      , seenAbsorbed = 0
       }
 
 -- | Play with random legal choices, checking every state on the way, until the battle ends (or the cap).
@@ -374,6 +407,7 @@ checkStep dx b b' (c1, c2) = (mappend stallSeen <$>) $ mapM_ one [(p, i) | (p, s
       (Just m0, Just m1) -> do
         let who = show p ++ " " ++ show (monSpecies m0) ++ ": "
             wasOn = monActive m0 && monHp m0 > 0
+            inPlay2 = wasOn && monActive m1 && monHp m1 > 0 -- slice 8c
             benched = not (monActive m1) && monHp m1 > 0
             foe = otherP p
             fainted0 = monFainted m0
@@ -421,6 +455,9 @@ checkStep dx b b' (c1, c2) = (mappend stallSeen <$>) $ mapM_ one [(p, i) | (p, s
           , seenShieldBoost = fromEnum (not (monShieldBoost m0) && monShieldBoost m1)
           , seenIntimidateIn = fromEnum (not (monActive m0) && monActive m1 && monHp m1 > 0 && abilityIs "intimidate" m1)
           , seenDropAbility = fromEnum (monActive m0 && monActive m1 && monHp m1 > 0 && any (`abilityIs` m1) ["clearbody", "guarddog", "innerfocus", "bigpecks", "mirrorarmor", "defiant", "contrary"] && monBoosts m1 /= noBoosts)
+          -- slice 8c (the ability can change within the step: it is read at both ends)
+          , seenGuarded = fromEnum (inPlay2 && abilityIs "magicguard" m0 && abilityIs "magicguard" m1 && monStatus m0 `elem` [StatusBrn, StatusPsn, StatusTox])
+          , seenAbsorbed = fromEnum (inPlay2 && abilityIs "waterabsorb" m0 && abilityIs "waterabsorb" m1 && monHp m1 > monHp m0)
           }
       _ -> Right mempty
     isSwitch c = case c of Just (Switch _) -> True; _ -> False

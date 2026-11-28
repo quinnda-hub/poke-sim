@@ -34,12 +34,12 @@ import System.Random.SplitMix (mkSMGen)
 import Engine
 import Engine.Chance (runSample, speedSortWith)
 import Engine.Dex (Condition (..), Dex (..), EvMask (..), MoveData (..), SpeciesData (..), abilityId, evBit, evMaskHas, moveSpec, prefixMask, dexCondLookup, itemId, supportedAbilities, supportedItems, supportedMoves, supportedSpecies)
-import Engine.Dispatch (HitResult (..), addSideCondition, basePowerCallback, moveAfterHit, moveFieldHit, moveOwnHit, moveTry)
+import Engine.Dispatch (HitResult (..), addSideCondition, basePowerCallback, damageMon, moveAfterHit, moveFieldHit, moveOwnHit, moveTry)
 import Engine.Effects (abilityBodies, fieldCondBodies, itemBodies, moveBodies)
 import Engine.Damage (moveTypeMod, typeIsNamed)
-import Engine.Event (CondId (..), EventId (..), HandlerSpec (..), Prefix (..), condName, parseHandlerName)
+import Engine.Event (CondId (..), EffectKey (..), EffectKind (..), EventId (..), HandlerSpec (..), Prefix (..), condName, parseHandlerName)
 import Engine.Format (trunc, truncBits)
-import Engine.Rule (DamageKind (..), MoveRule (..), executable, moveRule)
+import Engine.Rule (BoostStat (..), DamageKind (..), MoveRule (..), RuleTarget (..), executable, moveRule)
 import Engine.State
 import Engine.Modifier (baseMod, chain, chainModify, finalModify, modify, modifyBy)
 import Engine.Stats (actionSpeed, boostedStat, finalSpeed, parSpe)
@@ -111,6 +111,15 @@ main = do
         -- slice 8b
         , ("damage abilities: each one only raises or only lowers the damage of the hits it names and leaves every other hit alone, Supreme Overlord rises with the fallen count, and Unaware equals zeroed stages",
             withTests (fromIntegral nCover) (damageAbilities dex))
+        -- slice 8c
+        , ("random playouts over teams heavy in the immunity and guard abilities, their items and their moves keep the invariants, and reach what they guard against",
+            withTests (fromIntegral nCover) (guardPlayouts dex))
+        , ("Magic Guard, Sturdy and Poison Heal change a damage only where their handler acts: every other damage is the one a holder with no ability takes",
+            withTests (fromIntegral nCover) (damageGuards dex))
+        , ("Good as Gold, Water Absorb, Sap Sipper, Soundproof, Bulletproof and Levitate block a move before any other effect: the move changes nothing but the holder's HP (Water Absorb) or Attack (Sap Sipper)",
+            withTests (fromIntegral nCover) (immunityAbilities dex))
+        , ("Shell Armor: a move deals no more to its holder than to a Pokemon with no ability, whatever the crit roll, and draws the same",
+            withTests (fromIntegral nCover) (shellArmor dex))
         ]
     , checkSequential $ Group "arithmetic (against JavaScript semantics)"
         [ ("roundDiv is Math.round(n / d)", withTests (fromIntegral n) propRoundDiv)
@@ -1062,3 +1071,187 @@ damageAbilities dex = property $ do
       ]
     genBoosts = Boosts <$> stage <*> stage <*> stage <*> stage <*> stage <*> stage <*> stage
     stage = Gen.int (Range.linear (-6) 6)
+-- ---------------------------------------------------------------------------
+-- slice 8c
+
+-- | 'playouts' over 'genGuardTeams': every state and step is checked as in 'pivotPlayouts', and the teams reach the guard abilities at work
+-- (the coverage statement fails the property if they stop doing so).
+guardPlayouts :: Dex -> Property
+guardPlayouts dex = property $ do
+  (t1, t2) <- forAll (genGuardTeams dex)
+  seed <- forAll (Gen.word64 Range.linearBounded)
+  case fst (runSample (mkSMGen seed) (playChecked dex t1 t2)) of
+    Left e -> footnote e >> failure
+    Right (b, seen) -> do
+      cover 1 "a Magic Guard holder went through a step with burn, poison or toxic" (seenGuarded seen > 0)
+      cover 0.3 "a Water Absorb holder gained HP in a step" (seenAbsorbed seen > 0)
+      case request b of
+        Finished _ -> success
+        Awaiting {} -> footnote "playout ended without a result" >> failure
+
+-- | The state a slice 8c property starts from: a battle a few steps in, with a side's active Pokemon (the target) and its foe (the user) both
+-- in play with HP.
+reachedBattle :: Dex -> PropertyT IO (Maybe (Battle, Player))
+reachedBattle dex = do
+  (t1, t2) <- forAll (genPivotTeams dex)
+  seed <- forAll (Gen.word64 Range.linearBounded)
+  steps <- forAll (Gen.int (Range.linear 0 40))
+  who <- forAll Gen.enumBounded
+  b0 <- evalEither (fst (runSample (mkSMGen seed) (startBattle dex t1 t2 >>= advanceWhile dex steps (const True))))
+  let inPlay p = sHasActive (sideOf p b0) && monActive (monOf b0 (activeActor p b0)) && monHp (monOf b0 (activeActor p b0)) > 0
+  pure (case request b0 of
+    Awaiting {} | inPlay who && inPlay (other who) -> Just (b0, who)
+    _ -> Nothing)
+
+-- | The ability with this id, as 'monAbility' holds it.
+abilityIx :: Dex -> T.Text -> Int
+abilityIx dex name = fromMaybe (-1) (M.lookup name (dxAbilityIx dex))
+
+-- | A Pokemon given an ability (as 'hasAbility' reads it), with no volatile or item that has a Damage or TryHit handler.
+withAbility :: Dex -> T.Text -> Mon -> Mon
+withAbility dex name m = m {monAbility = abilityIx dex name, monBaseAbility = abilityIx dex name, monVolatiles = SV.empty, monItem = noItem}
+
+-- | @spreadDamage@ (battle.ts 2107-2154), through 'damageMon': what a damage deals to a Pokemon with Magic Guard, Sturdy or Poison Heal
+-- differs from what a Pokemon with no ability takes only where the ability's handler (data/abilities.ts) acts:
+--
+-- * Magic Guard: a damage whose effect is not a Move deals nothing (the event fails); a Move's damage is unchanged.
+-- * Sturdy: a Move's damage of at least the HP, at full HP, leaves 1 HP; every other damage is unchanged.
+-- * Poison Heal: a damage whose effect is psn or tox deals nothing and heals the holder (never lowers its HP, raises it when it was
+--   below the maximum); every other damage is unchanged.
+--
+-- The effects are every kind of source the engine deals damage from.
+damageGuards :: Dex -> Property
+damageGuards dex = property $ do
+  r <- reachedBattle dex
+  case r of
+    Nothing -> success
+    Just (b0, who) -> do
+      guardName <- forAll (Gen.frequency [(2, pure "magicguard"), (3, pure "sturdy"), (2, pure ("poisonheal" :: T.Text))])
+      -- (a move's damage, and psn and tox, weigh more: they are the effects the three abilities act on)
+      cause <- forAll (Gen.frequency [(4, pure (EffectKey EffMove 0)), (3, Gen.element (filter (`elem` [EffectKey EffStatus (fromEnum CPsn), EffectKey EffStatus (fromEnum CTox)]) (map fst causes))), (6, Gen.element (map fst causes))])
+      full <- forAll Gen.bool
+      hpFrac <- forAll (Gen.int (Range.linear 1 100))
+      let target = activeActor who b0
+          m0 = monOf b0 target
+          hp0 = if full then monMaxHp m0 else max 1 (monMaxHp m0 * hpFrac `quot` 100)
+      -- (the amount is drawn around the HP, so that it is sometimes less, sometimes exactly, sometimes more)
+      amount <- forAll (Gen.frequency [(1, pure 0), (3, Gen.int (Range.linear 1 (max 1 hp0))), (2, pure hp0), (3, Gen.int (Range.linear hp0 (2 * hp0)))])
+      let start name = modifyMon target (\m -> (withAbility dex name m) {monHp = hp0}) b0
+          run name = let ((res, b'), _) = runCounter (runStateT (damageMon dex target Nothing Nothing (Just cause) amount) (start name))
+                      in (res, monHp (monOf b' target))
+          (resG, hpG) = run guardName
+          (resN, hpN) = run "noability"
+          isMove = cause == EffectKey EffMove 0
+          isPoison = cause `elem` [EffectKey EffStatus (fromEnum CPsn), EffectKey EffStatus (fromEnum CTox)]
+          clamped = if amount == 0 then 0 else max 1 amount
+          savesFromFull = isMove && hp0 == monMaxHp m0 && clamped >= hp0
+      footnote ("cause " ++ show cause ++ ", amount " ++ show amount ++ ", hp " ++ show hp0 ++ "/" ++ show (monMaxHp m0) ++ ": " ++ show (resG, hpG) ++ " against " ++ show (resN, hpN))
+      case guardName of
+        "magicguard"
+          | isMove -> (resG, hpG) === (resN, hpN)
+          | otherwise -> hpG === hp0
+        "sturdy"
+          | savesFromFull -> hpG === 1
+          | otherwise -> (resG, hpG) === (resN, hpN)
+        _
+          | isPoison -> do
+              assert (hpG >= hp0)
+              if hp0 < monMaxHp m0 then assert (hpG > hp0) else hpG === hp0
+          | otherwise -> (resG, hpG) === (resN, hpN)
+      cover 5 "Magic Guard met a damage that is not a move's" (guardName == "magicguard" && not isMove)
+      cover 1 "Sturdy saved a full-HP holder" (guardName == "sturdy" && savesFromFull)
+      cover 1 "Sturdy met a move's damage it does not change" (guardName == "sturdy" && isMove && not savesFromFull)
+      cover 1 "Poison Heal met psn or tox damage below full HP" (guardName == "poisonheal" && isPoison && hp0 < monMaxHp m0)
+      cover 5 "Poison Heal met another damage" (guardName == "poisonheal" && not isPoison)
+  where
+    item n = EffectKey EffItem (fromMaybe 0 (M.lookup n (dxItemIx dex)))
+    field n = EffectKey EffSideCond (fromMaybe 0 (M.lookup n (dxFieldIx dex)))
+    weather n = EffectKey EffWeather (fromMaybe 0 (M.lookup n (dxFieldIx dex)))
+    causes =
+      [ (EffectKey EffMove 0, "a move")
+      , (EffectKey EffStatus (fromEnum CBrn), "burn")
+      , (EffectKey EffStatus (fromEnum CPsn), "poison")
+      , (EffectKey EffStatus (fromEnum CTox), "toxic")
+      , (EffectKey EffRecoil 0, "recoil")
+      , (item "lifeorb", "Life Orb")
+      , (item "rockyhelmet", "Rocky Helmet")
+      , (item "blacksludge", "Black Sludge")
+      , (field "stealthrock", "Stealth Rock")
+      , (field "spikes", "Spikes")
+      , (weather "sandstorm", "sandstorm")
+      , (EffectKey EffVolatile (fromEnum CSpikyShield), "Spiky Shield")
+      ] :: [(EffectKey, T.Text)]
+
+-- | The moves an immunity ability blocks (data/abilities.ts), on a single foe: Good as Gold a Status move, Water Absorb a Water move,
+-- Sap Sipper a Grass move, Soundproof a sound move, Bulletproof a bullet move, Levitate a damaging Ground move that does not ignore immunity.
+blockedBy :: Dex -> T.Text -> MoveData -> Bool
+blockedBy dex ability mv = mvSupported mv && mrTarget (mvRule mv) == TargetFoe && case ability of
+  "goodasgold" -> mvStatus mv
+  "waterabsorb" -> typeIsNamed dex (mvType mv) "Water"
+  "sapsipper" -> typeIsNamed dex (mvType mv) "Grass"
+  "soundproof" -> mrSound (mvRule mv)
+  "bulletproof" -> mrBullet (mvRule mv)
+  "levitate" -> typeIsNamed dex (mvType mv) "Ground" && mrDamaging (mvRule mv) && not (mrIgnoreImmunity (mvRule mv))
+  _ -> False
+
+-- | An immunity ability stops a move at @TryHit@ (or, Levitate, at the type-immunity step), before the accuracy roll and every effect
+-- of the move: the target is unchanged except for the HP Water Absorb heals and the Attack Sap Sipper raises, the user loses no HP
+-- (no recoil, no Life Orb), and no draw at all is made, not even a speed-tie shuffle (the two sides each have one Pokemon in play).
+immunityAbilities :: Dex -> Property
+immunityAbilities dex = property $ do
+  r <- reachedBattle dex
+  case r of
+    Nothing -> success
+    Just (b0, who) -> do
+      ability <- forAll (Gen.element ["goodasgold", "waterabsorb", "sapsipper", "soundproof", "bulletproof", "levitate" :: T.Text])
+      let user = activeActor (other who) b0
+          target = activeActor who b0
+          eligible = [(i, mv) | (i, mv) <- zip [0 ..] (V.toList (dxMoves dex)), blockedBy dex ability mv]
+      (ix, mv) <- forAll (Gen.element eligible)
+      let clean m = (withAbility dex "noability" m) {monStatus = StatusNone}
+          b1 = modifyMon target (withAbility dex ability) (modifyMon user (\m -> (clean m) {monMoves = SV.singleton (MoveSlot ix 5 5 False)}) b0) {bQueue = SV.empty}
+          (((), b'), draws) = runTape [] (runStateT (runMove (bFormat b1) dex user 0) b1)
+          t0 = monOf b1 target
+          t1 = monOf b' target
+          atk m = boostOf BAtk (monBoosts m)
+          sameButHp x y = x {monHp = 0} == y {monHp = 0}
+          sameButHpAtk x y = x {monHp = 0, monBoosts = setBoostOf BAtk 0 (monBoosts x)} == y {monHp = 0, monBoosts = setBoostOf BAtk 0 (monBoosts y)}
+      footnote (T.unpack (mvId mv) ++ " into " ++ T.unpack ability ++ ", draws " ++ show draws)
+      draws === []
+      monHp (monOf b' user) === monHp (monOf b1 user)
+      case ability of
+        "waterabsorb" -> assert (sameButHp t0 t1 && monHp t1 >= monHp t0)
+        "sapsipper" -> assert (sameButHpAtk t0 t1 && monHp t1 == monHp t0 && atk t1 >= atk t0 && atk t1 <= atk t0 + 1)
+        _ -> assert (t0 == t1)
+      cover 5 "Good as Gold blocked a status move" (ability == "goodasgold")
+      cover 5 "Water Absorb blocked a Water move" (ability == "waterabsorb")
+      cover 5 "Sap Sipper blocked a Grass move" (ability == "sapsipper")
+      cover 5 "Soundproof blocked a sound move" (ability == "soundproof")
+      cover 5 "Bulletproof blocked a bullet move" (ability == "bulletproof")
+      cover 5 "Levitate blocked a Ground move" (ability == "levitate")
+
+-- | Shell Armor cancels a critical hit after the roll (battle-actions.ts 1704-1706), so the draws are the same and the damage never greater.
+-- With every draw 0 the crit roll succeeds for a move that has one, so the Pokemon with no ability takes the critical hit.
+shellArmor :: Dex -> Property
+shellArmor dex = property $ do
+  r <- reachedBattle dex
+  case r of
+    Nothing -> success
+    Just (b0, who) -> do
+      let user = activeActor (other who) b0
+          target = activeActor who b0
+          eligible = [ (i, mv) | (i, mv) <- zip [0 ..] (V.toList (dxMoves dex)), mvSupported mv, mrDamaging (mvRule mv), mrTarget (mvRule mv) == TargetFoe
+                     , mrDamage (mvRule mv) == Nothing, mvCritRatio mv >= 1 ]
+      (ix, mv) <- forAll (Gen.element eligible)
+      let clean m = (withAbility dex "noability" m) {monStatus = StatusNone}
+          prepared name = modifyMon target (\m -> (withAbility dex name m) {monHp = monMaxHp m}) (modifyMon user (\m -> (clean m) {monMoves = SV.singleton (MoveSlot ix 5 5 False)}) b0) {bQueue = SV.empty}
+          run name = let b1 = prepared name
+                         (((), b'), draws) = runTape [] (runStateT (runMove (bFormat b1) dex user 0) b1)
+                      in (monMaxHp (monOf b1 target) - monHp (monOf b' target), draws, monHp (monOf b' target) > 0)
+          (lossShell, drawsShell, aliveShell) = run "shellarmor"
+          (lossPlain, drawsPlain, alivePlain) = run "noability"
+      footnote (T.unpack (mvId mv) ++ ": " ++ show lossShell ++ " against " ++ show lossPlain)
+      -- (a hit that the critical hit would have fainted the target with leaves a multi-hit move no later hit to draw for)
+      if aliveShell && alivePlain then drawsShell === drawsPlain else success
+      assert (lossShell <= lossPlain)
+      cover 15 "the critical hit would have changed the damage" (lossShell < lossPlain)

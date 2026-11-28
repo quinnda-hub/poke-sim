@@ -180,6 +180,11 @@ data MoveRule = MoveRule
   -- slice 8b
   , mrSlicing :: !Bool
   -- ^ @flags.slicing@: Sharpness's @onBasePower@ (data/abilities.ts 4178).
+  -- slice 8c
+  , mrSound :: !Bool
+  -- ^ @flags.sound@: Soundproof's @onTryHit@ blocks it.
+  , mrBullet :: !Bool
+  -- ^ @flags.bullet@: Bulletproof's @onTryHit@ blocks it.
   }
   deriving (Eq, Show)
 
@@ -219,6 +224,9 @@ plainRule = MoveRule
   , mrBypassSub = False
   -- slice 8b
   , mrSlicing = False
+  -- slice 8c
+  , mrSound = False
+  , mrBullet = False
   }
 
 -- | The part of the vocabulary the engine can run in the current phase (phases 1 to 3: HP effects, stat stages
@@ -510,6 +518,9 @@ moveRule condOf ownRejected (Object o) = do
     , mrBypassSub = "bypasssub" `elem` flags
     -- slice 8b
     , mrSlicing = "slicing" `elem` flags
+    -- slice 8c
+    , mrSound = "sound" `elem` flags
+    , mrBullet = "bullet" `elem` flags
     }
   where
     -- a flag that is true or absent
@@ -561,6 +572,9 @@ checkFlag f
   | f == "failencore" = Right () -- translated: 'mrFailEncore' (slice 7c)
   | f == "bypasssub" = Right () -- translated: 'mrBypassSub' (slice 7b)
   | f == "slicing" = Right () -- translated: 'mrSlicing' (slice 8b)
+  -- slice 8c: translated, and so ahead of the 'inertFlags' entries of the same names
+  | f == "sound" = Right () -- 'mrSound'
+  | f == "bullet" = Right () -- 'mrBullet'
   | Just _ <- lookup f inertFlags = Right ()
   | otherwise = Left ("not modelled: flag " <> f)
 
