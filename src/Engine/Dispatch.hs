@@ -83,7 +83,7 @@ import qualified Data.Vector.Strict as SV
 import qualified Data.Vector.Unboxed as U
 
 import Engine.Chance
-import Engine.Damage (hasAbility, hasItemNamed, hasTypeNamed, ignoringAbility, isGrounded, isSemiInvulnerable, suppressingAbility, moveTypeMod, statusKey, typeIdNamed, typeImmuneTo, typeIsNamed, typeMod)
+import Engine.Damage (hasAbility, hasItemNamed, hasTypeNamed, ignoringAbility, isGrounded, isSemiInvulnerable, monTypes, suppressingAbility, moveTypeMod, statusKey, typeIdNamed, typeImmuneTo, typeIsNamed, typeMod)
 import Engine.Dex
 import Engine.Event
 import Engine.Modifier (baseMod, chainModify, modify)
@@ -1347,12 +1347,12 @@ runNative dx n c relay = do
       modify' (modifyMon holder (\x -> x {monVolatiles = SV.map (\v@(Volatile j st) -> if j == fromEnum CSubstitute then Volatile j st {esA = monMaxHp x `quot` 4} else v) (monVolatiles x)}))
       keep
     -- ESCAPE HATCH: substitute. condition.onTryPrimaryHit(target, source, move) (data/moves.ts 18348-18381), the test:
-    -- `if (target === source || move.flags['bypasssub'] || move.infiltrates) return;` (infiltrates: LATENT, no supported effect sets it).
+    -- `if (target === source || move.flags['bypasssub'] || move.infiltrates) return;` (slice 8e: Infiltrator sets `infiltrates`).
     -- Otherwise the damage is worked out where getDamage lives ('Engine.Turn.hitSubstitute'): a damaging move's hit goes to the
     -- Substitute (HIT_SUBSTITUTE, 0: RInt 0), a move with no base power finds `getDamage` undefined and fails (`-fail`, null: RBool False).
     NSubstituteTryPrimaryHit -> case (cMove c, cSource c) of
       (Just mv, Just src)
-        | src /= holder, not (mrBypassSub (mvRule mv)) -> returning (Replace (if mvStatus mv then RBool False else RInt 0))
+        | src /= holder, not (mrBypassSub (mvRule mv)), not (mvInfiltrates mv) -> returning (Replace (if mvStatus mv then RBool False else RInt 0))
       _ -> keep
     -- slice 8c. The holder is the event's target (`onTryHit(target, source, move)`, `onDamage(damage, target, source, effect)`), the
     -- source is the attacker. Each TryHit body returns null (a stop) to block the hit; the log lines are not modelled.
@@ -1666,7 +1666,7 @@ runNative dx n c relay = do
     -- && this.getCategory(move) === 'Physical'`, then `!target.getMoveHitData(move).crit && !move.infiltrates` ->
     -- chainModify(0.5) (activePerHalf is 1 in singles). The event is run with the attacker as its target and the defender
     -- as its source, so the handler's `source` is the attacker (the holder here) and its `target` the defender (the
-    -- event's source). A move with `infiltrates` is not supported (the translation rejects the key).
+    -- event's source). Slice 8e: a move with `infiltrates` (Infiltrator) is not weakened.
     NReflectDamage -> screenDamage True
     -- lightscreen.onAnyModifyDamage: the same for a Special move
     NLightScreenDamage -> screenDamage False
@@ -1680,7 +1680,7 @@ runNative dx n c relay = do
             b <- get
             let has name = any (\(CondEntry i _) -> i `elem` fieldIds dx [name]) (SV.toList (sConds (sideOf sp b)))
                 covered = (has "reflect" && mvPhysical mv) || (has "lightscreen" && not (mvPhysical mv) && not (mvStatus mv))
-            if covered || cCrit c then pure (Res Keep (cMod c)) else chained (1, 2)
+            if covered || cCrit c || mvInfiltrates mv then pure (Res Keep (cMod c)) else chained (1, 2)
       _ -> pure (Res Keep (cMod c))
     -- trickroom.onFieldRestart: this.field.removePseudoWeather('trickroom'); it returns undefined, so the move succeeds
     NTrickRoomRestart -> removePseudoWeather dx (cKey c) >> keep
@@ -2310,7 +2310,49 @@ runNative dx n c relay = do
     NShieldDustModifySecondaries -> case relay of
       RSecondaries ss -> returning (Replace (RSecondaries (filter (not . null . secSelf) ss)))
       _ -> keep
+    -- slice 8e. pressure.onDeductPP(target, source) (data/abilities.ts 3441): `if (target.isAlly(source)) return; return 1`; the holder is
+    -- the Pressure target and the source the user (an ally is the same side)
+    NPressureDeductPP -> case cSource c of
+      Just src | playerOf src == playerOf holder -> keep
+      _ -> returning (Replace (RInt 1))
+    -- prankster.onModifyPriority(priority, pokemon, target, move) (3427): `move?.category === 'Status'` -> `move.pranksterBoosted = true;
+    -- return priority + 1`. The flag is on the ActiveMove in Showdown; here 'Engine.Turn.runMove' derives it for the move in use (a
+    -- Status move of a Prankster holder), because a priority event has no move to write to.
+    -- LATENT(8f): Magic Bounce: a bounced move is not prankster-boosted (battle-actions.ts 476, `!move.hasBounced`).
+    NPranksterModifyPriority -> case (cMove c, relay) of
+      (Just mv, RInt p) | mvStatus mv -> returning (Replace (RInt (p + 1)))
+      _ -> keep
+    -- libero, protean .onPrepareHit(source, target, move) (2319, 3498): `if (this.effectState.libero) return; if (move.hasBounced ||
+    -- move.flags['futuremove'] || move.sourceEffect === 'snatch' || move.callsMove) return; const type = move.type; if (type && type !==
+    -- '???' && source.getTypes().join() !== type) { if (!source.setType(type)) return; this.effectState.libero = true }`. The ability
+    -- state's 'esA' is the flag (a fresh state at every switch-in). setType (pokemon.ts 2131-2151) refuses Stellar, a Terastallized
+    -- Pokemon and Arceus and Silvally; it overwrites both types. getTypes().join() equals the type only for a single-typed Pokemon of it.
+    -- LATENT: `futuremove`, `snatch` and `callsMove` need moves the engine does not accept. LATENT(8f): Libero against a bounced move
+    -- (the base's 'mvHasBounced' is always False until Magic Bounce).
+    NLiberoPrepareHit -> case cMove c of
+      Just mv
+        | esA (monAbilityState m) /= 1
+        , not (mvHasBounced mv)
+        , mvType mv /= noType
+        , let (t1, t2) = monTypes dx m
+        , not (t2 == noType && t1 == mvType mv)
+        , not (typeIsNamed dx (mvType mv) "Stellar")
+        , not (monTerastallized m)
+        , let sp = spId (speciesData dx (monSpecies m))
+        , not ("arceus" `T.isPrefixOf` sp || "silvally" `T.isPrefixOf` sp) -> do
+            modify' (modifyMon holder (\x -> x {monType1 = mvType mv, monType2 = noType, monAbilityState = (monAbilityState x) {esA = 1}}))
+            keep
+      _ -> keep
+    -- liquidvoice.onModifyType(move, pokemon) (2419): `move.flags['sound'] && !pokemon.volatiles['dynamax']` -> `move.type = 'Water'`
+    -- (an edit of the move in use: 'MoveEdit')
+    NLiquidVoiceModifyType -> case (cMove c, typeIdNamed dx "Water") of
+      (Just mv, Just w) | mrSound (mvRule mv) -> returning (Replace (RMoveEdits (edits ++ [MESetType w])))
+      _ -> keep
+    -- infiltrator.onModifyMove(move) (2133): `move.infiltrates = true` 
+    NInfiltratorModifyMove -> returning (Replace (RMoveEdits (edits ++ [MEInfiltrates])))
   where
+    -- the edits the earlier handlers of this event made to the move ('RMoveEdits')
+    edits = case relay of RMoveEdits es -> es; _ -> []
     -- slice 8a: `source && target === source` of the TryBoost handlers: a boost the holder causes itself (Guard Dog's, Weak Armor's)
     selfCaused ctx = cSource ctx == Just (cHolder ctx)
     -- `effect.name === ...` for an ability as the boost's effect
@@ -2380,7 +2422,8 @@ runNative dx n c relay = do
         , dp == sp
         , not (mvStatus mv)
         , mvPhysical mv == physical
-        , not (cCrit c) -> chained (1, 2)
+        , not (cCrit c)
+        , not (mvInfiltrates mv) -> chained (1, 2) -- slice 8e: `!move.infiltrates` (data/moves.ts 14867, 10342)
       _ -> pure (Res Keep (cMod c))
     getLayers = gets (\b -> maybe 0 esA (ownerState b (cOwner c) (cKey c)))
     setLayers v = modify' (\b -> maybe b (\st -> setOwnerState (cOwner c) (cKey c) st {esA = v} b) (ownerState b (cOwner c) (cKey c)))
@@ -2615,11 +2658,11 @@ moveOwnHitResult dx user target mv = case moveSpec mv POwn EvHit >>= hsBody of
       -- Substitute), then the target's side loses its screens, Safeguard, Mist and hazards (only a hazard counts as a success),
       -- then the user's side its hazards, then `this.field.clearTerrain()`; the result is `success`, so the move fails only when
       -- nothing happened (Clear Terrain never counts)
-      -- LATENT: Safeguard, Mist and G-Max Steelsurge (and `move.infiltrates`) are not modelled: the removals act only on the
+      -- LATENT: Safeguard, Mist and G-Max Steelsurge are not modelled: the removals act only on the
       -- conditions the state can hold.
       NDefogHit -> do
-        -- `if (!target.volatiles['substitute'] || move.infiltrates) success = !!this.boost({ evasion: -1 })` (slice 7b; infiltrates: LATENT)
-        behindSub <- gets (\bb -> isJust (monSubstituteHp (monOf bb target)))
+        -- `if (!target.volatiles['substitute'] || move.infiltrates) success = !!this.boost({ evasion: -1 })` (slice 7b; infiltrates: slice 8e)
+        behindSub <- gets (\bb -> isJust (monSubstituteHp (monOf bb target)) && not (mvInfiltrates mv))
         boosted <- if behindSub then pure False else boostMon dx (Just user) (Just mv) moveCause target [(BEvasion, -1)]
         let tp = playerOf target
             up = playerOf user
@@ -2905,6 +2948,7 @@ courtChangeConditions =
 -- @move.priority@ can tell: Psychic Terrain's @onTryHit@ (a priority above 0.1 is blocked), and Grassy Glide's raised
 -- priority needs Grassy Terrain, so Psychic Terrain is not up. Whoever adds a second ModifyPriority move or another reader
 -- of @move.priority@ must carry the action's priority into the move in use.
+-- (Slice 8e did: 'Engine.Turn.runMovePrio' gives the move in use the priority of its queued action, which Prankster raises.)
 movePriorityEvent :: MonadChance m => Dex -> Actor -> Maybe Actor -> MoveData -> Eng m Int
 movePriorityEvent dx user target mv = do
   b <- get
@@ -3124,7 +3168,8 @@ resolveFaints dx checkWinIfNoFaints checkWin' = do
             -- singleEvent('End', ability) and singleEvent('End', item) (battle.ts 2605-2606), before the volatiles go
             endAbilityAndItem dx a
             -- pokemon.clearVolatile(false) resets the stat stages, the volatiles and the cached speed (setSpecies)
-            modify' (modifyMon a (regressForme dx . \mm -> mm
+            -- slice 8e: `setSpecies(baseSpecies)` (pokemon.ts 1581) also gives back the species' types (Libero and Protean's setType)
+            modify' (modifyMon a (resetTypes dx . regressForme dx . \mm -> mm
               { monSpeed = stSpe (monStats mm)
               , monBoosts = noBoosts
               , monVolatiles = SV.empty
@@ -3145,6 +3190,12 @@ resolveFaints dx checkWinIfNoFaints checkWin' = do
 
 lastMaybe :: [a] -> Maybe a
 lastMaybe xs = case reverse xs of (x : _) -> Just x; [] -> Nothing
+
+-- | The types of the Pokemon's species: @clearVolatile@'s @setSpecies(baseSpecies)@ (pokemon.ts 1581) undoes @setType@.
+resetTypes :: Dex -> Mon -> Mon
+resetTypes dx m = m {monType1 = spType1 sp, monType2 = spType2 sp}
+  where
+    sp = speciesData dx (monSpecies m)
 
 -- | The formeRegression branch of the faint path (battle.ts 2607-2611, 2618-2623) and @clearVolatile@'s @ability = baseAbility@
 -- and @setSpecies(baseSpecies)@ (pokemon.ts 1544, 1581), for a Pokemon that fainted. A Pokemon in a Tera forme (a battle-only

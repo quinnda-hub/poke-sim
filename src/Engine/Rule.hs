@@ -176,15 +176,19 @@ data MoveRule = MoveRule
   -- slice 7b
   , mrBypassSub :: !Bool
   -- ^ @flags.bypasssub@ (every sound move, Defog, Roar, Taunt, ...): the Substitute's @onTryPrimaryHit@ lets the move through
-  -- (data/moves.ts 18349). @move.infiltrates@ does the same; no supported effect sets it.
+  -- (data/moves.ts 18349). @move.infiltrates@ does the same (Infiltrator, slice 8e).
   -- slice 8b
   , mrSlicing :: !Bool
   -- ^ @flags.slicing@: Sharpness's @onBasePower@ (data/abilities.ts 4178).
   -- slice 8c
   , mrSound :: !Bool
-  -- ^ @flags.sound@: Soundproof's @onTryHit@ blocks it.
+  -- ^ @flags.sound@: Soundproof's @onTryHit@ blocks it (8c); Liquid Voice's @onModifyType@ turns it into Water (data/abilities.ts 2419, 8e).
   , mrBullet :: !Bool
   -- ^ @flags.bullet@: Bulletproof's @onTryHit@ blocks it.
+  -- slice 8e
+  , mrMustPressure :: !Bool
+  -- ^ @flags.mustpressure@ (Spikes, Stealth Rock, Toxic Spikes, ...): @getMoveTargets@ makes the foes its Pressure targets
+  -- (pokemon.ts 868-870), whatever the move's target.
   }
   deriving (Eq, Show)
 
@@ -227,6 +231,8 @@ plainRule = MoveRule
   -- slice 8c
   , mrSound = False
   , mrBullet = False
+  -- slice 8e
+  , mrMustPressure = False
   }
 
 -- | The part of the vocabulary the engine can run in the current phase (phases 1 to 3: HP effects, stat stages
@@ -329,7 +335,6 @@ inertFlags =
   , ("bullet", "read by Bulletproof only")
   , ("pulse", "read by Mega Launcher only")
   , ("wind", "read by Wind Rider and Wind Power only")
-  , ("sound", "read by Soundproof only (a sound move ignores Substitute by its bypasssub flag)")
   , ("distance", "only matters for the target choice in triples")
   , ("allyanim", "animation hint")
   , ("noassist", "read by Assist, which is rejected")
@@ -347,7 +352,6 @@ inertFlags =
   , ("reflectable", "read by Magic Bounce and Magic Coat only")
   , ("minimize", "only matters against a Pokemon that used Minimize, which is rejected")
   , ("gravity", "only matters under Gravity, which is rejected")
-  , ("mustpressure", "read by getMoveTargets for Pressure only (DeductPP), and no Pressure exists")
   ]
 
 -- | The field of a move (@sideCondition@, @terrain@ or @pseudoWeather@) whose value is the move's own id: then the
@@ -521,6 +525,8 @@ moveRule condOf ownRejected (Object o) = do
     -- slice 8c
     , mrSound = "sound" `elem` flags
     , mrBullet = "bullet" `elem` flags
+    -- slice 8e
+    , mrMustPressure = "mustpressure" `elem` flags
     }
   where
     -- a flag that is true or absent
@@ -575,6 +581,7 @@ checkFlag f
   -- slice 8c: translated, and so ahead of the 'inertFlags' entries of the same names
   | f == "sound" = Right () -- 'mrSound'
   | f == "bullet" = Right () -- 'mrBullet'
+  | f == "mustpressure" = Right () -- translated: 'mrMustPressure' (slice 8e)
   | Just _ <- lookup f inertFlags = Right ()
   | otherwise = Left ("not modelled: flag " <> f)
 
