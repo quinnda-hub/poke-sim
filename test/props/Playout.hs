@@ -597,7 +597,11 @@ checkBattle dx b = do
           stages = [bsAtk bs, bsDef bs, bsSpa bs, bsSpd bs, bsSpe bs, bsAccuracy bs, bsEvasion bs]
       if any (\x -> x < -6 || x > 6) stages then bad ("stage outside -6..6: " ++ show stages) else Right ()
       if monFainted m && monHp m /= 0 then bad "fainted with hp > 0" else Right ()
-      if monHp m == 0 && not (monFainted m) then bad "hp 0 but not fainted" else Right ()
+      -- Only while the battle goes on. Once it has ended, `resolveFaints` returns at once (`if (this.ended) return;`,
+      -- battle.ts 2563), but the action's phazing loop still drags a Pokemon in (2866-2873), with no check of `ended`. A Pokemon
+      -- dragged onto Stealth Rock after the last foe fainted (a Rocky Helmet against Dragon Tail) stays at 0 HP, not fainted,
+      -- and Showdown's final state shows it so.
+      if monHp m == 0 && not (monFainted m) && bResult b == Ongoing then bad "hp 0 but not fainted" else Right ()
       if monStatus m == StatusFainted && monHp m /= 0 then bad "status fnt with hp > 0" else Right ()
       -- statuses: toxic's stage is in 0..15 exactly while badly poisoned (its onStart sets 0, residual stops at
       -- 15); the other statuses and a cured Pokemon have a fresh statusState (no stage); only a Pokemon that
