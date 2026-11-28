@@ -189,6 +189,9 @@ data MoveRule = MoveRule
   , mrMustPressure :: !Bool
   -- ^ @flags.mustpressure@ (Spikes, Stealth Rock, Toxic Spikes, ...): @getMoveTargets@ makes the foes its Pressure targets
   -- (pokemon.ts 868-870), whatever the move's target.
+  -- slice 8f
+  , mrReflectable :: !Bool
+  -- ^ @flags.reflectable@ (Taunt, Encore, the hazards, Roar, ...): Magic Bounce's @onTryHit@ and @onAllyTryHitSide@ send such a move back (data/abilities.ts 2441).
   }
   deriving (Eq, Show)
 
@@ -233,6 +236,8 @@ plainRule = MoveRule
   , mrBullet = False
   -- slice 8e
   , mrMustPressure = False
+  -- slice 8f
+  , mrReflectable = False
   }
 
 -- | The part of the vocabulary the engine can run in the current phase (phases 1 to 3: HP effects, stat stages
@@ -349,7 +354,6 @@ inertFlags =
   , ("dance", "read by Dancer only")
   , ("nonsky", "only blocks hitting a Pokemon held by Sky Drop, which is rejected")
   , ("heal", "only blocked by Heal Block, which is rejected")
-  , ("reflectable", "read by Magic Bounce and Magic Coat only")
   , ("minimize", "only matters against a Pokemon that used Minimize, which is rejected")
   , ("gravity", "only matters under Gravity, which is rejected")
   ]
@@ -527,6 +531,8 @@ moveRule condOf ownRejected (Object o) = do
     , mrBullet = "bullet" `elem` flags
     -- slice 8e
     , mrMustPressure = "mustpressure" `elem` flags
+    -- slice 8f
+    , mrReflectable = "reflectable" `elem` flags
     }
   where
     -- a flag that is true or absent
@@ -582,6 +588,7 @@ checkFlag f
   | f == "sound" = Right () -- 'mrSound'
   | f == "bullet" = Right () -- 'mrBullet'
   | f == "mustpressure" = Right () -- translated: 'mrMustPressure' (slice 8e)
+  | f == "reflectable" = Right () -- translated: 'mrReflectable' (slice 8f)
   | Just _ <- lookup f inertFlags = Right ()
   | otherwise = Left ("not modelled: flag " <> f)
 

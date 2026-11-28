@@ -174,6 +174,10 @@ data Condition = Condition
   -- ^ 'cnEvents' per prefix: the mask of prefix @p@ ('prefixMask') has bit @fromEnum e@ for every entry @(p, e, _)@ of 'cnHandlers'
   -- ('prefixBits'). It is stored flat, two words per prefix, so that a test reads two unboxed words: a boxed vector of 'EvMask' cost 3%
   -- of a replay's throughput. 'condSpec' and the collectors test it before scanning the list.
+  -- slice 8f
+  , cnCantSuppress :: !Bool
+  -- ^ An ability's @flags.cantsuppress@ (Comatose, Disguise, Zen Mode, ...): @pokemon.ignoringAbility@ returns false for it, so Neutralizing
+  -- Gas and Gastro Acid never suppress it (pokemon.ts 883).
   }
   deriving (Show)
 
@@ -618,7 +622,10 @@ effectFor ident typeOrder ownPfx startAsSwitchIn v mbodies = do
         Object o | Just (Object fl) <- KM.lookup "flags" o -> maybe False truthy (KM.lookup "breakable" fl)
         _ -> False
   let handlers = specs ++ startSwitchIn ++ residual
-  pure (Condition duration handlers (reject == Nothing) reject breakable ident boosts (eventBits handlers) (prefixBits handlers))
+      cantSuppress = case v of
+        Object o | Just (Object fl) <- KM.lookup "flags" o -> maybe False truthy (KM.lookup "cantsuppress" fl)
+        _ -> False
+  pure (Condition duration handlers (reject == Nothing) reject breakable ident boosts (eventBits handlers) (prefixBits handlers) cantSuppress)
 
 speciesOf :: M.Map T.Text Int -> Value -> Either String SpeciesData
 speciesOf tix v = do

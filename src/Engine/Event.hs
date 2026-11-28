@@ -506,6 +506,10 @@ data Body
 -- event run without one: it is not passed to the handlers and it is relayTruthy.
 data Relay = RNone | RBool !Bool | RInt !Int | RText !T.Text | RBoosts ![(BoostStat, Int)] | RMoveEdits ![MoveEdit] | RSecondaries ![Secondary]
   -- ^ slice 8d: 'RSecondaries' is @move.secondaries@ as 'EvModifySecondaries' passes it (an array, so truthy even when empty).
+  | RBounce
+  -- ^ slice 8f, ESCAPE HATCH: magicbounce. A @TryHit@ or @TryHitSide@ result that is falsy (Showdown's @null@) because Magic Bounce asked for
+  -- the move to be used again on its user: the caller ('Engine.Turn') runs that nested @useMove@, which the dispatcher cannot (it sits below
+  -- the move pipeline).
   -- ^ 'RText' is a type or status key (@Immunity@: @'frz'@, @'sandstorm'@). 'RBoosts' is the capped stage changes @AfterBoost@ passes
   -- (@getCappedBoost@: a stat with no change is absent, as in Showdown's sparse table). 'RMoveEdits' is the relay of the
   -- holders' @ModifyType@ and @ModifyMove@ events (see 'MoveEdit').
@@ -532,6 +536,7 @@ data MoveEdit
 relayTruthy :: Relay -> Bool
 relayTruthy r = case r of
   RBool False -> False
+  RBounce -> False
   RInt 0 -> False
   RText t | T.null t -> False
   _ -> True
@@ -936,6 +941,18 @@ data NativeId
   -- ^ liquidvoice @onModifyType(move, pokemon)@ (2417): a sound move becomes Water. 
   | NInfiltratorModifyMove
   -- ^ infiltrator @onModifyMove(move)@ (2132): @move.infiltrates = true@. An edit: 'MEInfiltrates'.
+  -- slice 8f
+  | NMoldBreakerModifyMove
+  -- ^ moldbreaker @onModifyMove@ (data/abilities.ts 2694): @move.ignoreAbility = true@. It returns the edit
+  -- 'MEIgnoreAbility' through the relay ('RMoveEdits').
+  | NNeutralizingGasSwitchIn
+  -- ^ neutralizinggas @onSwitchIn@ (data/abilities.ts 2909-2933), priority 2: logs, @abilityState.ending = false@, and ends what the gas
+  -- ends on entry (Illusion, Slow Start and the strong weathers: none is supported).
+  | NNeutralizingGasEnd
+  -- ^ neutralizinggas @onEnd@ (2934-2965): when the last gas leaves, speed-sort the Pokemon in play and restart their abilities.
+  | NMagicBounce
+  -- ^ ESCAPE HATCH: magicbounce. @onTryHit@ and @onAllyTryHitSide@ (2440-2460), the test only: a reflectable move that has not bounced is
+  -- stopped with 'RBounce', and 'Engine.Turn' uses it again on the user.
   deriving (Eq, Show)
 
 -- | The body of each handler the engine implements (written by hand: Showdown's handlers are code). A condition

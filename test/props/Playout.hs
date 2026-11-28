@@ -8,6 +8,9 @@ module Playout
   , genGuardTeams -- slice 8c
   -- slice 8d
   , genAbilityTeams
+  -- slice 8f
+  , genBounceTeams
+  , bounceMoves
   , playChecked
   , Seen (..)
   , advanceWhile
@@ -23,6 +26,7 @@ import Control.Monad.Trans.State.Strict (State, modify', runState)
 import Data.Aeson (Value (..), object, (.=))
 import qualified Data.Aeson.Key as K
 import qualified Data.Map.Strict as M
+import qualified Data.Text as T
 import Data.List (nub, sort)
 import qualified Data.Vector as V
 import qualified Data.Vector.Strict as SV
@@ -34,7 +38,8 @@ import qualified Hedgehog.Range as Range
 import Engine
 import Engine.Chance (Sample)
 import Engine.Dex (Condition (..), Dex (..), MoveData (..), SpeciesData (..), abilityId, itemId, noType, speciesData, supportedAbilities, supportedItems, supportedMoves, supportedSpecies)
-import Engine.Damage (monTypes)
+import Engine.Rule (Effect (..), MoveRule (..))
+import Engine.Damage (hasAbility, hasItemNamed, ignoringAbility, monTypes)
 import Engine.Event (CondId (..))
 import Engine.State
 
@@ -122,6 +127,8 @@ genTeamsK dx pivotHeavy statHeavy guardHeavy abilityHeavy = (,) <$> genTeam <*> 
       -- slice 8e: the moves that meet Pressure (a move on each kind of target), Prankster (status moves into Dark types), Liquid Voice (sound
       -- moves) and Infiltrator (Substitute and the screens)
       ++ [(4, Gen.element pipelineKit) | not (null pipelineKit)]
+      -- slice 8f: the reflectable status moves, which Magic Bounce sends back
+      ++ [(2, Gen.element reflectKit) | not (null reflectKit)]
     -- slice 8a
     statKit = [m | m <- ["closecombat", "superpower", "dracometeor", "swordsdance", "dragondance", "bulkup", "calmmind", "nastyplot", "snarl", "icywind", "growl", "tailwhip"
                         , "stickyweb", "partingshot", "knockoff", "suckerpunch", "crunch", "bite", "darkpulse", "tackle", "doubleironbash", "bulletseed", "uturn", "roar", "dragontail"
@@ -130,6 +137,8 @@ genTeamsK dx pivotHeavy statHeavy guardHeavy abilityHeavy = (,) <$> genTeam <*> 
     pipelineKit = [m | m <- ["thunderwave", "willowisp", "toxic", "taunt", "hypervoice", "boomburst", "defog", "reflect", "lightscreen", "auroraveil", "substitute"
                             , "tailwind", "haze", "stealthrock", "spikes", "toxicspikes", "swordsdance", "psychicterrain", "trickroom", "earthquake", "surf"], m `elem` moves]
     pipelineAbilities = [a | a <- ["pressure", "prankster", "libero", "protean", "liquidvoice", "infiltrator"], a `elem` abilities]
+    -- slice 8f: Taunt, Encore, the hazards, Roar and Whirlwind, the statuses and the stat drops that Magic Bounce reflects
+    reflectKit = [m | m <- ["taunt", "encore", "stealthrock", "spikes", "toxicspikes", "stickyweb", "toxic", "willowisp", "thunderwave", "roar", "whirlwind", "partingshot", "defog", "growl", "charm", "screech"], m `elem` moves]
     pickMove
       | abilityHeavy && not (null kit8d) = Gen.frequency [(5, Gen.element kit8d), (3, Gen.element moves)]
       | pivotHeavy && not (null step4Kits) && not (null pivots) && not (null dragKit) =
@@ -160,13 +169,14 @@ genTeamsK dx pivotHeavy statHeavy guardHeavy abilityHeavy = (,) <$> genTeam <*> 
       -- slice 8b: the damage abilities join the pivot-heavy mix, where Supreme Overlord meets switch-ins after faints and Flash Fire meets
       -- the switch-outs that end its volatile
       -- slice 8e: the move-pipeline abilities (Pressure, Prankster, Libero, Protean, Liquid Voice, Infiltrator) join the same mix, with weight 4
-      -- STACK NOTE: 8b and 8e each added a guard for this mix with its own kit; stacked, the first would hide the second, so this one takes both
-      | pivotHeavy && not (null switchAbilities) && not (null damageAbilities) && not (null pipelineAbilities) =
-          Gen.frequency [(3, Gen.element switchAbilities), (3, Gen.element damageAbilities), (4, Gen.element pipelineAbilities), (3, Gen.element abilities)]
-      | pivotHeavy && not (null switchAbilities) && not (null damageAbilities) = Gen.frequency [(3, Gen.element switchAbilities), (3, Gen.element damageAbilities), (3, Gen.element abilities)]
-      | pivotHeavy && not (null switchAbilities) && not (null pipelineAbilities) =
-          Gen.frequency [(3, Gen.element switchAbilities), (4, Gen.element pipelineAbilities), (3, Gen.element abilities)]
-      | pivotHeavy && not (null switchAbilities) = Gen.frequency [(3, Gen.element switchAbilities), (3, Gen.element abilities)]
+      -- slice 8f: Mold Breaker, Neutralizing Gas and Magic Bounce join the same mix, with weight 2
+      -- STACK NOTE: 8b, 8e and 8f each put a guard for this mix with its own kit ahead of the plain pivot-heavy one; stacked, the first that
+      -- matched would hide the others, so one guard takes every kit that is supported, each with the weight its phase gave it
+      | pivotHeavy && not (null switchAbilities) =
+          Gen.frequency
+            ([(3, Gen.element switchAbilities)] ++ [(3, Gen.element damageAbilities) | not (null damageAbilities)]
+              ++ [(4, Gen.element pipelineAbilities) | not (null pipelineAbilities)] ++ [(2, Gen.element suppressAbilities) | not (null suppressAbilities)]
+              ++ [(3, Gen.element abilities)])
       | otherwise = Gen.element abilities
     -- slice 8d
     abilities8d = [a | a <- ["flamebody", "static", "roughskin", "toxicchain", "synchronize", "magician", "pickpocket", "berserk", "moxie", "shielddust", "baddreams"], a `elem` abilities]
@@ -177,6 +187,8 @@ genTeamsK dx pivotHeavy statHeavy guardHeavy abilityHeavy = (,) <$> genTeam <*> 
     damageAbilities =
       [ a | a <- ["multiscale", "sharpness", "tintedlens", "guts", "transistor", "sniper", "heatproof", "purifyingsalt", "waterbubble", "flashfire", "supremeoverlord", "vesselofruin", "unaware"]
       , a `elem` abilities ]
+    -- slice 8f
+    suppressAbilities = [a | a <- ["moldbreaker", "neutralizinggas", "magicbounce"], a `elem` abilities]
     -- every ability and item the engine accepts ("noability" and the empty item among them)
     abilities = supportedAbilities dx
     items = supportedItems dx
@@ -203,6 +215,44 @@ genTeamsK dx pivotHeavy statHeavy guardHeavy abilityHeavy = (,) <$> genTeam <*> 
         [ "species" .= sp, "teraType" .= tera, "moves" .= ms, "nature" .= nat, "level" .= lvl, "ability" .= ab, "item" .= it
         , "evs" .= object [K.fromText k .= v | (k, v) <- zip ["hp", "atk", "def", "spa", "spd", "spe"] evs]
         ])
+
+-- | slice 8f: the reflectable status moves whose only effect is on their target (a status, a stat drop, Taunt, Encore, a hazard, Roar or
+-- Whirlwind: no self effect, no self-switch, no move handler of their own). Magic Bounce sends them back and leaves its holder
+-- untouched. (Defog, Strength Sap and Parting Shot are reflectable too, but their bounced use changes the bouncer or its side.)
+bounceMoves :: Dex -> [T.Text]
+bounceMoves dx = [mvId mv | mv <- V.toList (dxMoves dx), mvSupported mv, let r = mvRule mv, mrReflectable r, mvStatus mv, null (mrSelf r), not (mrSelfSwitch r), all plain (mrOnHit r)]
+  where
+    plain e = case e of EStatus _ -> True; EBoost _ -> True; EOwnVolatile -> True; _ -> False
+
+-- | slice 8f: a pair of one-Pokemon teams for the Magic Bounce property. The first has a 'bounceMoves' move in its first slot and an ability
+-- that does not suppress Magic Bounce or react to the bounced move; the second holds Magic Bounce.
+genBounceTeams :: Dex -> Gen (Team, Team)
+genBounceTeams dx = do
+  used <- Gen.element (bounceMoves dx)
+  holderKnows <- Gen.bool
+  (,) <$> one (Just used) [] <*> one Nothing [used | holderKnows]
+  where
+    abilities = supportedAbilities dx
+    items = supportedItems dx
+    -- the user's ability is any but these: Mold Breaker and Neutralizing Gas suppress Magic Bounce, Mirror Armor reflects the bounced drop
+    -- back onto the bouncer (mirrorarmor.onTryBoost, source = the bouncer) and Synchronize gives it the status the bounced move inflicted
+    -- (synchronize.onAfterSetStatus): the bouncer is changed, correctly, and those interactions are 8g's.
+    -- Pressure is in the sample, and half the holders know the bounced move: the bounced use must not take PP from the bouncer's slot.
+    banned = ["moldbreaker", "neutralizinggas", "mirrorarmor", "synchronize"]
+    one :: Maybe T.Text -> [T.Text] -> Gen Team
+    one user known = do
+      sp <- Gen.element (supportedSpecies dx)
+      rest <- Gen.list (Range.linear 1 3) (Gen.element (supportedMoves dx))
+      ab <- case user of
+        Just _ -> Gen.frequency ([(1, pure "pressure") | "pressure" `elem` abilities] ++ [(4, Gen.element [a | a <- abilities, a `notElem` banned])])
+        Nothing -> pure "magicbounce"
+      it <- Gen.element items
+      nat <- Gen.element (M.keys (dxNatureIx dx))
+      lvl <- Gen.int (Range.linear 1 100)
+      tera <- Gen.element [t | t <- V.toList (dxTypeNames dx), t `notElem` ["Stellar", "???"]]
+      let ms = nub (maybe id (:) user (known ++ rest))
+          set = object ["species" .= sp, "teraType" .= tera, "moves" .= ms, "nature" .= nat, "level" .= lvl, "ability" .= ab, "item" .= it]
+      either (\e -> error ("genBounceTeams: parseTeam rejected a generated team: " ++ e)) pure (parseTeam dx (Array (V.singleton set)))
 
 -- | slice 7e: a Pokemon with a choicelock volatile and a Choice item (Showdown: the lock is live; a lock with no Choice item is stale and is
 -- dropped by the next BeforeMove or DisableMove event).
@@ -312,6 +362,15 @@ data Seen = Seen
   -- ^ a move slot that lost 2 PP in one step (its move's use, and a foe's Pressure)
   , seenTypeChange :: !Int
   -- ^ an active Libero or Protean holder that has used the ability after a step
+  -- slice 8f
+  , seenGasOn :: !Int
+  -- ^ a step that ended with an unfainted Neutralizing Gas holder in play beside an unfainted Pokemon of the other side
+  , seenGasLeft :: !Int
+  -- ^ a Neutralizing Gas holder in play and unfainted before the step that is out of play after it
+  , seenBounceTried :: !Int
+  -- ^ a side chose a reflectable status move into an unsuppressed Magic Bounce holder that did not switch
+  , seenBreaker :: !Int
+  -- ^ a Mold Breaker user chose a move against a Pokemon with a breakable ability that is not ignored
   }
   deriving (Eq, Show)
 
@@ -354,6 +413,11 @@ instance Semigroup Seen where
       -- slice 8e
       , seenPressure = f seenPressure
       , seenTypeChange = f seenTypeChange
+      -- slice 8f
+      , seenGasOn = f seenGasOn
+      , seenGasLeft = f seenGasLeft
+      , seenBounceTried = f seenBounceTried
+      , seenBreaker = f seenBreaker
       }
     where
       f g = g x + g y
@@ -396,6 +460,11 @@ instance Monoid Seen where
       -- slice 8e
       , seenPressure = 0
       , seenTypeChange = 0
+      -- slice 8f
+      , seenGasOn = 0
+      , seenGasLeft = 0
+      , seenBounceTried = 0
+      , seenBreaker = 0
       }
 
 -- | Play with random legal choices, checking every state on the way, until the battle ends (or the cap).
@@ -441,8 +510,32 @@ playChecked dx t1 t2 = startBattle dx t1 t2 >>= go 0 mempty
 -- could bring it back.
 -- Returns what the step went through.
 checkStep :: Dex -> Battle -> Battle -> (Maybe Choice, Maybe Choice) -> Either String Seen
-checkStep dx b b' (c1, c2) = (mappend (stallSeen <> seen8d <> pressureSeen) <$>) $ pressureOk >> mapM_ one [(p, i) | (p, side) <- [(P1, bP1), (P2, bP2)], i <- [0 .. SV.length (sMons (side b)) - 1]] >> turnOk >> itemsNeverCreated >> (((,) <$> drag (P1, c1) <*> drag (P2, c2)) >>= \ds -> pivotsOk ds >> switchOuts >>= \so -> pure (so <> mempty {seenDrags = length (filter id [fst ds, snd ds]), seenEncore = volatileAtRequest CEncore, seenTaunt = volatileAtRequest CTaunt, seenLocked = length lockedNow, seenLockStruggle = length (filter (mustStruggle b) lockedNow), seenMultiDisable = multiDisabled dx b'}))
+checkStep dx b b' (c1, c2) = (mappend (stallSeen <> seen8d <> pressureSeen) <$>) $ pressureOk >> mapM_ one [(p, i) | (p, side) <- [(P1, bP1), (P2, bP2)], i <- [0 .. SV.length (sMons (side b)) - 1]] >> turnOk >> itemsNeverCreated >> (((,) <$> drag (P1, c1) <*> drag (P2, c2)) >>= \ds -> pivotsOk ds >> switchOuts >>= \so -> pure (so <> mempty {seenDrags = length (filter id [fst ds, snd ds]), seenEncore = volatileAtRequest CEncore, seenTaunt = volatileAtRequest CTaunt, seenLocked = length lockedNow, seenLockStruggle = length (filter (mustStruggle b) lockedNow), seenMultiDisable = multiDisabled dx b'} <> suppressionSeen))
   where
+    -- slice 8f: what the step went through in suppression and reflection
+    suppressionSeen =
+      let gasHolders bb = [Actor p (activeOrig (sideOf p bb)) | p <- [P1, P2], sHasActive (sideOf p bb), let m = activeMon p bb, not (monFainted m), abilityId dx (monAbility m) == "neutralizinggas"]
+          unfaintedPair bb = and [sHasActive (sideOf p bb) && not (monFainted (activeMon p bb)) | p <- [P1, P2]]
+          bounceTried p = case (chose p, chose (otherP p)) of
+            (Just (Move j), foeChoice) | not (isSwitch foeChoice), unfaintedPair b ->
+              let um = activeMon p b
+                  reflect = case monMoves um SV.!? (j - 1) of
+                    Just ms -> let mv = dxMoves dx V.! msMove ms in mvStatus mv && mrReflectable (mvRule mv)
+                    Nothing -> False
+               in reflect && abilityId dx (monAbility um) /= "moldbreaker" && hasAbility dx b (activeActor (otherP p) b) "magicbounce"
+            _ -> False
+          breaker p = case chose p of
+            Just (Move _) | unfaintedPair b ->
+              let foeA = activeActor (otherP p) b
+                  breakable = maybe False cnBreakable (dxAbilities dx V.!? monAbility (monOf b foeA))
+               in abilityId dx (monAbility (activeMon p b)) == "moldbreaker" && hasAbility dx b (activeActor p b) "moldbreaker" && breakable && hasAbility dx b foeA (abilityId dx (monAbility (monOf b foeA)))
+            _ -> False
+       in mempty
+            { seenGasOn = fromEnum (not (null (gasHolders b')) && unfaintedPair b')
+            , seenGasLeft = length [() | a <- gasHolders b, not (monActive (monOf b' a))]
+            , seenBounceTried = length (filter bounceTried [P1, P2])
+            , seenBreaker = length (filter breaker [P1, P2])
+            }
     -- slice 7c: the step ended at a move request with an active Pokemon that has the volatile
     volatileAtRequest c = case request b' of
       Awaiting MoveRequest _ _ | or [fromEnum c `elem` [i | Volatile i _ <- SV.toList (monVolatiles (monOf b' (activeActor p b')))] | p <- [P1, P2], sHasActive (sideOf p b')] -> 1
@@ -496,13 +589,13 @@ checkStep dx b b' (c1, c2) = (mappend (stallSeen <> seen8d <> pressureSeen) <$>)
             foeAfter = if sHasActive (sideOf foe b') then monActive (monOf b' (Actor foe foeBefore)) else False
             healed = min (monMaxHp m0) (monHp m0 + monMaxHp m0 `quot` 3)
         if fainted0 && monHp m1 /= 0 then Left (who ++ "a fainted Pokemon regained HP") else Right ()
-        let regen = wasOn && benched && abilityIs "regenerator" m0 && isSwitch (chose p)
+        let regen = wasOn && benched && abilityIs "regenerator" m0 && isSwitch (chose p) && noGas p
         if regen && monHp m1 /= healed
           then Left (who ++ "Regenerator holder switched out from " ++ show (monHp m0) ++ " HP and has " ++ show (monHp m1) ++ ", not " ++ show healed)
           else Right ()
         -- (the ability can change within the step: a Terastallizing Ogerpon takes Embody Aspect before it pivots out, so the
         -- holder must still have Natural Cure after the step)
-        let cure = wasOn && benched && abilityIs "naturalcure" m0 && abilityIs "naturalcure" m1
+        let cure = wasOn && benched && abilityIs "naturalcure" m0 && abilityIs "naturalcure" m1 && noGas p
         if cure && monStatus m1 /= StatusNone then Left (who ++ "Natural Cure holder switched out with the status " ++ show (monStatus m1)) else Right ()
         let ejected = not stealing && wasOn && itemIs "ejectbutton" m0 && monItem m1 == noItem
             -- (slice 8a: a Guard Dog attacker is not forced out: its DragOut returns null, while the Red Card is still used up)
@@ -550,6 +643,14 @@ checkStep dx b b' (c1, c2) = (mappend (stallSeen <> seen8d <> pressureSeen) <$>)
         | monItem m1 /= noItem && monItem m1 /= monItem m0 && monItem m1 `notElem` [monItem x | x <- SV.toList (sMons (side0 (otherP p)))] ->
             Left (show p ++ " member " ++ show i ++ " holds " ++ show (itemId dx (monItem m1)) ++ " after a step in which neither it nor the other side had it")
       _ -> Right ()
+    -- slice 8f: Neutralizing Gas suppresses Regenerator and Natural Cure (their SwitchOut handlers are skipped for an ignored ability), so
+    -- those two checks hold only when no unfainted Neutralizing Gas holder is in play on the other side at the start or at the end of the
+    -- step: the holder that is there at the switch-out (the foe's own switch can come first in the step) is in play at one of the two
+    -- A holder can also be in play at the switch-out and gone from both ends: every switch runs before any runSwitch (battle-queue.ts
+    -- 182-183, switch 103 and runSwitch 101), so a foe's gas holder that switches in first suppresses the switch-out, then faints
+    -- to a hazard in its own runSwitch (fieldEvent('SwitchIn'), battle-actions.ts 237). It had HP before the step and is fainted after.
+    noGas p = null ([() | bb <- [b, b'], sHasActive (sideOf (otherP p) bb), let m = activeMon (otherP p) bb, not (monFainted m), abilityId dx (monAbility m) == "neutralizinggas"]
+      ++ [() | (m0, m1) <- zip (SV.toList (sMons (sideOf (otherP p) b))) (SV.toList (sMons (sideOf (otherP p) b'))), abilityId dx (monAbility m0) == "neutralizinggas", monHp m0 > 0, monFainted m1])
     -- slice 8d: the three events the ability phase's covers count (see 'Seen')
     seen8d = mempty
       { seenMoxie = length [() | p <- [P1, P2], (m0, m1) <- pairs p, abilityIs "moxie" m0, monActive m0, monActive m1, monHp m1 > 0, bsAtk (monBoosts m1) > bsAtk (monBoosts m0), foeDown p]
@@ -650,7 +751,24 @@ checkBattle dx b = do
   conditions
   choiceLocks
   disableRules
+  suppression
   where
+    -- slice 8f. Ability suppression (pokemon.ts 879-895) at a decision point. Nothing else can suppress an ability (Gastro Acid and
+    -- Transform are not supported): a Pokemon not in play always is ignored, and one in play is ignored exactly when an unfainted
+    -- Pokemon in play other than itself has Neutralizing Gas, unless its own ability is `cantsuppress`, it holds an Ability Shield, or it
+    -- is the gas. The gas is never `ending` while its holder is in play.
+    suppression = mapM_ one [Actor p i | p <- [P1, P2], i <- [0 .. SV.length (sMons (sideOf p b)) - 1]]
+      where
+        gasName = "neutralizinggas"
+        gasHolders = [a | p <- [P1, P2], sHasActive (sideOf p b), let a = activeActor p b, not (monFainted (monOf b a)), abilityId dx (monAbility (monOf b a)) == gasName]
+        one a@(Actor p i) = do
+          let m = monOf b a
+              who = show p ++ " member " ++ show i ++ " (" ++ T.unpack (abilityId dx (monAbility m)) ++ "): "
+              ignored = ignoringAbility dx b a
+              immune = maybe False cnCantSuppress (dxAbilities dx V.!? monAbility m) || hasItemNamed dx "abilityshield" m || abilityId dx (monAbility m) == gasName
+              expected = not (monActive m) || (any (/= a) gasHolders && not immune)
+          if ignored == expected then Right () else Left (who ++ "ignoringAbility is " ++ show ignored ++ ", not " ++ show expected)
+          if a `elem` gasHolders && esA (monAbilityState m) == 1 then Left (who ++ "an active Neutralizing Gas is ending at a decision point") else Right ()
     -- slice 7f. At a move request the moves offered are exactly the slots that every disabling effect allows at once, or Struggle (move 1)
     -- when there are none. The effects are the four whose onDisableMove disables slots (the rule of each, from its Showdown handler):
     -- an encore (every slot but the encored move, when the Pokemon knows it: data/conditions.ts encore.onDisableMove), a taunt (Status

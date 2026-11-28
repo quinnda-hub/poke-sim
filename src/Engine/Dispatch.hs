@@ -881,10 +881,10 @@ data Ctx = Ctx
 -- Arguments: the event, the target, the source Pokemon and the source effect (the move, for @BeforeMove@,
 -- @ModifyMove@, @DamagingHit@, @AfterMoveSecondary@) and the relay value.
 -- Call-time gates skip a handler (battle.ts 870-914): its status is no longer the holder's; a @breakable@
--- ability while the holder's ability is suppressed (Mold Breaker; nothing can suppress yet); an item of a
+-- ability while the holder's ability is suppressed (Mold Breaker's move in use, 'suppressingAbility'); an item of a
 -- holder that is not active, except for @Start@ and @SwitchIn@ (@ignoringItem@: Klutz, Embargo and Magic Room
--- cannot happen yet); an ability of a holder that is not active (@ignoringAbility@: Gastro Acid and
--- Neutralizing Gas cannot happen yet). The Air Lock gate joins with weather.
+-- cannot happen yet); an ability of a holder that is ignored, except for @End@ (@ignoringAbility@: not in play, Neutralizing
+-- Gas; Gastro Acid is not supported). The Air Lock gate joins with weather.
 -- The move's own callback (@onEffect@, 785-795) is 'runEventOnEffect'.
 -- LATENT: array targets (@AfterMoveSecondary@ and @DamagingHit@ pass the target as a one-element array; in singles that
 -- is the same as the single target) are not modelled.
@@ -964,9 +964,14 @@ runEventFull dx crit onEffect eff ev target source mv relay0 = do
 skipped :: Dex -> EventId -> Battle -> Handler -> Bool
 skipped dx ev b h = case (hKey h, hOwner h) of
   (EffectKey EffStatus _, OwnMon a) -> not (isJust (effectState (monOf b a) (hKey h))) -- it's changed
+  -- battle.ts 843-847 (a breakable ability while Mold Breaker's move is in use) and 884-886
+  -- (`eventid !== 'End' && effect.effectType === 'Ability' && effectHolder.ignoringAbility()`: Neutralizing Gas, an inactive holder)
+  -- LATENT(8g): every breakable ability that 8a, 8b, 8c and 8d add (Levitate, Sturdy, Multiscale, Clear Body, the absorb abilities, ...) is
+  -- gated here by its @breakable@ flag alone, as Showdown gates it; an ability that Showdown checks with a direct
+  -- @this.suppressingAbility(...)@ call instead (the Ruin abilities and the Aura abilities: data/abilities.ts 386, 838, 1269, 4823, 4876, 5289) must make that call itself.
   (EffectKey EffAbility _, OwnMon a) ->
     (maybe False cnBreakable (effectOf dx (hKey h)) && suppressingAbility dx b a)
-      || ignoringAbility b a
+      || (ev /= EvEnd && ignoringAbility dx b a)
   -- battle.ts 881: `eventid !== 'Start' && eventid !== 'SwitchIn' && eventid !== 'TakeItem'`
   (EffectKey EffItem _, OwnMon a) -> ev /= EvStart && ev /= EvSwitchIn && ev /= EvTakeItem && not (monActive (monOf b a)) -- ignoringItem, gen >= 5
   -- battle.ts 897-900: `(effect.effectType === 'Weather' || eventid === 'Weather') && eventid !== 'Residual' && eventid !== 'End'
@@ -1011,8 +1016,11 @@ singleBodyFx dx ev body key owner holder source mv eff relay = do
         (EffectKey EffStatus _, OwnMon _) -> not (isJust (effectState m key)) -- it's changed; call it off
         -- battle.ts 614: `eventid !== 'Start' && eventid !== 'TakeItem' && eventid !== 'SetAbility'`
         (EffectKey EffItem _, OwnMon _) -> ev /= EvStart && ev /= EvTakeItem && not (monActive m)
-        -- battle.ts 621: `eventid !== 'End' && effect.effectType === 'Ability' && target.ignoringAbility()`
-        (EffectKey EffAbility _, OwnMon _) -> ev /= EvEnd && ignoringAbility b0 holder
+        -- battle.ts 609-612: `eventid === 'SwitchIn' && effect.effectType === 'Ability' && effect.flags['breakable'] &&
+        -- this.suppressingAbility(target)`; 621: `eventid !== 'End' && effect.effectType === 'Ability' && target.ignoringAbility()`
+        (EffectKey EffAbility _, OwnMon _) ->
+          (ev == EvSwitchIn && maybe False cnBreakable (effectOf dx key) && suppressingAbility dx b0 holder)
+            || (ev /= EvEnd && ignoringAbility dx b0 holder)
         -- battle.ts 624-627: a weather's callbacks other than FieldStart, FieldResidual and FieldEnd while the weather is
         -- suppressed (Air Lock, Cloud Nine; 'suppressingWeather' is always false here)
         (EffectKey EffWeather _, _) -> ev /= EvStart && ev /= EvResidual && ev /= EvEnd && suppressingWeather b0
@@ -1574,14 +1582,18 @@ runNative dx n c relay = do
     -- the same items' .onModifyMove(move, pokemon): `pokemon.addVolatile('choicelock')`. The volatile's onStart reads
     -- `this.activeMove.id` (the move being used, which is the event's move here), so the move is recorded once the volatile has
     -- been added; with the volatile already present addVolatile fails and choicelock has no onRestart, so the lock never moves.
-    -- (`hasBounced` and `sourceEffect === 'snatch'`, which make onStart return false, need Magic Bounce and Snatch: LATENT.)
+    -- (slice 8f: `this.activeMove.hasBounced` makes onStart return false (conditions.ts 329), so a move Magic Bounce sent back locks its user
+    -- into nothing: the volatile is added and removed again at once, or, with a lock already in place, not added at all. The move in
+    -- use is the event's move. `sourceEffect === 'snatch'`, which does the same, needs Snatch: LATENT.)
     -- Struggle records no Dex index (-1): the lock is gone at the next endTurn (`hasMove('struggle')` is false).
-    NChoiceItemModifyMove -> do
-      added <- addVolatile dx holder CChoiceLock
-      when added $ forM_ (cMove c) $ \mv ->
-        modify' (modifyMon holder (\x -> maybe x (\st -> setEffectState lockKey st {esA = M.findWithDefault (-1) (mvId mv) (dxMoveIx dx)} x)
-          (effectState x lockKey)))
-      keep
+    NChoiceItemModifyMove
+      | maybe False mvHasBounced (cMove c) -> keep
+      | otherwise -> do
+          added <- addVolatile dx holder CChoiceLock
+          when added $ forM_ (cMove c) $ \mv ->
+            modify' (modifyMon holder (\x -> maybe x (\st -> setEffectState lockKey st {esA = M.findWithDefault (-1) (mvId mv) (dxMoveIx dx)} x)
+              (effectState x lockKey)))
+          keep
     NChoiceLockStart -> keep
     -- choicelock.onBeforeMove(pokemon, target, move): a holder whose item is not a Choice item drops the lock and the move goes on;
     -- otherwise a move other than the locked one and Struggle fails (`-fail`, no PP lost, returns false). The `ignoringItem` and
@@ -1826,7 +1838,9 @@ runNative dx n c relay = do
     NParadoxSpD -> paradoxBoost 3 (5325, 4096)
     NParadoxSpe -> paradoxBoost 4 (3, 2)
     -- unburden condition.onModifySpe(spe, pokemon): `!pokemon.item && !pokemon.ignoringAbility()` -> chainModify(2)
-    NUnburdenSpe -> if monItem m == noItem then chained (2, 1) else keep
+    NUnburdenSpe -> do
+      b <- get
+      if monItem m == noItem && not (ignoringAbility dx b holder) then chained (2, 1) else keep
     -- protosynthesis.onStart(pokemon): this.singleEvent('WeatherChange', this.effect, this.effectState, pokemon); the
     -- handler runs as the SwitchIn at priority -2
     NProtosynthesisStart -> singleEvent dx EvWeatherChange (cKey c) (cOwner c) Nothing Nothing RNone >> keep
@@ -2350,6 +2364,53 @@ runNative dx n c relay = do
       _ -> keep
     -- infiltrator.onModifyMove(move) (2133): `move.infiltrates = true` 
     NInfiltratorModifyMove -> returning (Replace (RMoveEdits (edits ++ [MEInfiltrates])))
+    -- slice 8f. moldbreaker.onModifyMove(move) (data/abilities.ts 2694): `move.ignoreAbility = true`, an edit of the move in use
+    -- ('MoveEdit') appended to the relay's edits so far
+    NMoldBreakerModifyMove -> returning (Replace (RMoveEdits (edits ++ [MEIgnoreAbility])))
+    -- neutralizinggas.onSwitchIn(pokemon) (data/abilities.ts 2909-2933), priority 2: `this.add('-ability', ...)` and
+    -- `pokemon.abilityState.ending = false` ('esA' 0; absent is -1: both are "not ending"). Then, for each Pokemon in play: an Ability Shield
+    -- holder is skipped (`-block`); a commanding Tatsugiri is skipped; an Illusion is ended (`singleEvent('End', Illusion)`); Slow Start
+    -- is removed; a strong weather's ability ends (`singleEvent('End', ...)`).
+    -- LATENT: Illusion, Slow Start, Commander and Desolate Land, Primordial Sea and Delta Stream are not supported, so none of those
+    -- steps has anything to act on; an Ability Shield holder (not supported either) would only log.
+    NNeutralizingGasSwitchIn -> do
+      modify' (modifyMon holder (\x -> x {monAbilityState = (monAbilityState x) {esA = 0}}))
+      keep
+    -- neutralizinggas.onEnd(source) (data/abilities.ts 2934-2965), run by the `End` of a switch-out (battle-actions.ts 142) and of a
+    -- faint (battle.ts 2605): the gas leaves while the Pokemon is still in play, so `abilityState.ending` is what ends its effect.
+    -- `source.transformed` returns (LATENT: no Transform). Another Pokemon in play whose ability is Neutralizing Gas (`hasAbility`) keeps
+    -- the suppression: return. Else `-end`; `source.abilityState.ending` set returns (a second End); `ending = true`;
+    -- `speedSort(getAllActive())`: the Pokemon in play, the source included, by cached speed (a tie draws, as in 'eachEvent');
+    -- every one but the source restarts its ability (`singleEvent('Start', ...)`) unless it is `cantsuppress` or holds an Ability Shield
+    -- (it was never suppressed), and a Gluttony holder's `gluttony` state is reset (LATENT: Gluttony is not supported).
+    -- The restart runs every supported ability's @onStart@: Intimidate, Dauntless Shield and the other switch-in abilities of 8a (their stat
+    -- boosts go through 'boostMon') and the log-only ones. LATENT: Download and the other @onStart@ abilities that are not supported yet.
+    NNeutralizingGasEnd -> do
+      b <- get
+      let active = getAllActive False b
+          others = [a | a <- active, a /= holder]
+      if any (\a -> hasAbility dx b a "neutralizinggas") others || esA (monAbilityState m) == 1
+        then keep
+        else do
+          modify' (modifyMon holder (\x -> x {monAbilityState = (monAbilityState x) {esA = 1}}))
+          let speedOf a = monSpeed (monOf b a)
+          sorted <- speedSortWith (\x y -> compare (speedOf y) (speedOf x)) active
+          forM_ sorted $ \a -> when (a /= holder) $ do
+            bb <- get
+            let am = monOf bb a
+                cantSuppress = maybe False cnCantSuppress (effectOf dx (EffectKey EffAbility (monAbility am)))
+            unless (cantSuppress || hasItemNamed dx "abilityshield" am) $
+              void (singleEvent dx EvStart (EffectKey EffAbility (monAbility am)) (OwnMon a) Nothing Nothing RNone)
+          keep
+    -- ESCAPE HATCH: magicbounce. onTryHit(target, source, move) and onAllyTryHitSide(target, source, move) (data/abilities.ts 2440-2460), the
+    -- test only: `target === source || move.hasBounced || !move.flags['reflectable'] || target.isSemiInvulnerable()` returns. Otherwise the
+    -- move is used again on its user (`this.actions.useMove(newMove, target, { target: source })`) and the event returns null: the
+    -- relay 'RBounce' stops the event and 'Engine.Turn' runs the nested use ('bounceMove'). In singles the Pokemon the move was aimed at
+    -- (the event's target, `isAlly(source)` false) is the holder, so both handlers are one body.
+    NMagicBounce -> case (cMove c, cSource c) of
+      (Just mv, Just src)
+        | src /= holder, not (mvHasBounced mv), mrReflectable (mvRule mv), not (isSemiInvulnerable m) -> returning (Replace RBounce)
+      _ -> keep
   where
     -- the edits the earlier handlers of this event made to the move ('RMoveEdits')
     edits = case relay of RMoveEdits es -> es; _ -> []
@@ -2378,7 +2439,8 @@ runNative dx n c relay = do
     paradoxBoost ix nd = do
       b <- get
       case ownerState b (cOwner c) (cKey c) of
-        Just st | esA st == ix -> chained nd -- (pokemon.ignoringAbility() is never true: see 'ignoringAbility')
+        -- `this.effectState.bestStat !== stat || pokemon.ignoringAbility()` returns (Neutralizing Gas, an inactive holder)
+        Just st | esA st == ix -> if ignoringAbility dx b (cHolder c) then pure (Res Keep (cMod c)) else chained nd
         _ -> pure (Res Keep (cMod c))
     fromBoosterOf b a cid = maybe False ((== 1) . esB) (effectState (monOf b a) (EffectKey EffVolatile (fromEnum cid)))
     -- boosterenergy.onUpdate(pokemon): once started, a Protosynthesis holder with no sun uses the item and adds the

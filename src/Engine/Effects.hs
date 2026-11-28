@@ -255,6 +255,12 @@ abilityBodies ty wx name = case name of
   "protean" -> Just [(POwn, EvPrepareHit, BNative NLiberoPrepareHit)]
   "liquidvoice" -> Just [(POwn, EvModifyType, BNative NLiquidVoiceModifyType)]
   "infiltrator" -> Just [(POwn, EvModifyMove, BNative NInfiltratorModifyMove)]
+  -- slice 8f. moldbreaker (abilities.ts 2690): onStart logs (as the SwitchIn), onModifyMove sets move.ignoreAbility
+  "moldbreaker" -> Just [(POwn, EvStart, BNative NLogOnly), (POwn, EvModifyMove, BNative NMoldBreakerModifyMove)]
+  -- neutralizinggas (2906): onSwitchIn (priority 2) and onEnd; the suppression itself is Pokemon#ignoringAbility
+  "neutralizinggas" -> Just [(POwn, EvSwitchIn, BNative NNeutralizingGasSwitchIn), (POwn, EvEnd, BNative NNeutralizingGasEnd)]
+  -- magicbounce (2438): onTryHit (priority 1) and onAllyTryHitSide reflect a reflectable move (ESCAPE HATCH)
+  "magicbounce" -> Just [(POwn, EvTryHit, BNative NMagicBounce), (PAlly, EvTryHitSide, BNative NMagicBounce)]
   _ -> Nothing
   where
     speed ws = do
